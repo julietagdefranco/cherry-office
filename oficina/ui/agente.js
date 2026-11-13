@@ -7,6 +7,33 @@
   var chats = {};         // id -> [{r, t, e}]  (cache en memoria)
   var enCurso = {};       // id -> true mientras espera respuesta
 
+  /* Consultas a colegas (Fase 4): /api/consultas?session= trae lo que el agente consultó en esa conversación; cada una trae
+     `pos` = índice, en el historial, de la respuesta del agente que la hizo. Se cuelgan de esa respuesta como `m.consultas`. */
+  function cargarConsultas(id) {
+    var sid = sesiones[id];
+    if (!sid) return Promise.resolve();
+    return api.get('/api/consultas', { session: sid }).then(function (r) {
+      var msgs = chats[id] || [];
+      msgs.forEach(function (m) { delete m.consultas; });
+      (r.consultas || []).forEach(function (c) {
+        var m = msgs[c.pos];
+        if (m && m.r === 'a') (m.consultas = m.consultas || []).push(c);
+      });
+    }).catch(function () { /* sin consultas: el chat se ve igual */ });
+  }
+
+  /* «Consultó a Patricia» plegable, con la pregunta y la respuesta de cada consulta */
+  function bloqueConsultas(cs) {
+    var nombres = [];
+    cs.forEach(function (c) { if (nombres.indexOf(c.aNombre) < 0) nombres.push(c.aNombre); });
+    var quien = nombres.length > 1 ? nombres.slice(0, -1).join(', ') + ' y ' + nombres[nombres.length - 1] : nombres[0];
+    return h('details.consultas', h('summary', 'Consultó a ' + quien),
+      cs.map(function (c) {
+        return h('div.consulta', h('div.consulta-p', h('b', c.aNombre), ' · ' + c.pregunta),
+          c.error ? h('div.consulta-r.e', c.error) : App.htmlSeguro(h('div.consulta-r'), App.markdown(c.respuesta || '')));
+      }));
+  }
+
   function abrir(id, pest) {
     var a = App.agente(id); if (!a) return;
     var mismo = actual === id;
@@ -56,7 +83,10 @@
       }
       msgs.forEach(function (m) {
         if (m.r === 'u') lista.appendChild(h('div.msg.u', m.t));
-        else lista.appendChild(App.htmlSeguro(h('div.msg.a' + (m.e ? '.e' : '')), App.markdown(m.t)));
+        else {
+          lista.appendChild(App.htmlSeguro(h('div.msg.a' + (m.e ? '.e' : '')), App.markdown(m.t)));
+          if (m.consultas && m.consultas.length) lista.appendChild(bloqueConsultas(m.consultas));
+        }
       });
       if (enCurso[a.id]) lista.appendChild(h('div.escribiendo', h('span.puntos', h('i'), h('i'), h('i')), a.nombre + ' está escribiendo…'));
       cuerpo.scrollTop = cuerpo.scrollHeight;
@@ -78,7 +108,7 @@
         (chats[id] = chats[id] || []).push({ r: 'a', t: r.reply || '(sin respuesta)' });
       }).catch(function (e) {
         (chats[id] = chats[id] || []).push({ r: 'a', t: 'No pude responder: ' + e.message, e: true });
-      }).then(function () {
+      }).then(function () { return cargarConsultas(id); }).then(function () {
         ocupado(id, false);
         if (actual === id && pestana === 'chat') pintar();
         else App.aviso(App.agente(id) ? App.agente(id).nombre + ' te respondió.' : 'Llegó una respuesta.');
@@ -91,7 +121,7 @@
       api.get('/api/historial', { agent: a.id }).then(function (r) {
         if (r.session) sesiones[a.id] = r.session;
         chats[a.id] = (r.msgs || []).map(function (m) { return { r: m.r, t: m.t, e: !!m.e }; });
-        if (actual === a.id && pestana === 'chat') render();
+        return cargarConsultas(a.id).then(function () { if (actual === a.id && pestana === 'chat') render(); });
       }).catch(function () { chats[a.id] = []; render(); });
     }
     setTimeout(function () { txt.focus(); }, 60);

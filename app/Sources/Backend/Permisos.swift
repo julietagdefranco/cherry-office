@@ -72,10 +72,25 @@ public enum Permisos {
         return out
     }
 
-    /// Herramientas de un agente de oficina: base + Edit,Write (siempre hay una ruta propia).
+    /// Herramientas MCP del servidor propio (`hq`, Fase 4): consultar a un colega y ver quiénes son.
+    public static let herramientasMCP = ["mcp__hq__consultar", "mcp__hq__colegas"]
+    /// Variable de entorno que lleva el token del servidor MCP (así no aparece en los argumentos del proceso).
+    public static let variableTokenMCP = "HQ_MCP_TOKEN"
+
+    /// `--mcp-config` (JSON inline) del servidor `hq`: `Authorization: Bearer ${HQ_MCP_TOKEN}`, que claude expande
+    /// con el entorno del proceso (confirmado en docs/aprendizajes.md).
+    public static func configMCP(url: String) -> String {
+        let o: [String: Any] = ["mcpServers": ["hq": ["type": "http", "url": url,
+                                                      "headers": ["Authorization": "Bearer ${\(variableTokenMCP)}"]]]]
+        let d = (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data("{}".utf8)
+        return String(decoding: d, as: UTF8.self)
+    }
+
+    /// Herramientas de un agente de oficina: base + Edit,Write (siempre hay una ruta propia) + las MCP si hay servidor.
     public static func herramientas(_ cfg: Config, oficina: ContextoOficina, agente: String) -> String {
         var h = cfg.herramientasAgente[agente].flatMap { $0.isEmpty ? nil : $0 } ?? cfg.herramientas
         if !oficina.escritura.isEmpty { h += ",Edit,Write" }
+        if oficina.mcpUrl != nil { h += "," + herramientasMCP.joined(separator: ",") }
         return h
     }
 
@@ -84,10 +99,12 @@ public enum Permisos {
                                   sid: String, flag: String) -> [String] {
         var a = ["-p", "--agent", agente, flag, sid] + ClaudeRunner.formatoSalida + ["--tools",
                  herramientas(cfg, oficina: oficina, agente: agente)]
+        if let url = oficina.mcpUrl { a += ["--mcp-config", configMCP(url: url)] }
         for d in oficina.dirsExtra { a += ["--add-dir", d] }
-        if !oficina.escritura.isEmpty {
+        if !oficina.escritura.isEmpty || oficina.mcpUrl != nil {
             a.append("--allowedTools")
             for p in oficina.escritura { for h in ["Edit", "Write"] { a.append(regla(h, ruta: p)) } }
+            if oficina.mcpUrl != nil { a += herramientasMCP }
         }
         return a + ["--", mensaje]
     }
@@ -98,7 +115,9 @@ public struct ContextoOficina: Sendable, Equatable {
     public var carpeta: String
     public var escritura: [String]
     public var dirsExtra: [String]
-    public init(carpeta: String, escritura: [String], dirsExtra: [String] = []) {
-        self.carpeta = carpeta; self.escritura = escritura; self.dirsExtra = dirsExtra
+    /// URL del servidor MCP de la oficina (Fase 4); nil = el chat corre sin consultas a colegas.
+    public var mcpUrl: String?
+    public init(carpeta: String, escritura: [String], dirsExtra: [String] = [], mcpUrl: String? = nil) {
+        self.carpeta = carpeta; self.escritura = escritura; self.dirsExtra = dirsExtra; self.mcpUrl = mcpUrl
     }
 }

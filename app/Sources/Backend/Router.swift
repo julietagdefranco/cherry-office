@@ -43,11 +43,14 @@ public final class Router: APIHandler {
     private let oficinas: Oficinas
     private let listo: @Sendable () async -> Void
     private let auth: AuthCache
+    /// Servidor MCP propio (consultas entre agentes, Fase 4). nil = los chats corren sin consultas.
+    private let mcp: MCPServidor?
     let subrouters = SubRouterBox()
 
-    init(config: Config, store: Store, runner: ClaudeRunner, log: HQLog, oficinas: Oficinas,
+    init(config: Config, store: Store, runner: ClaudeRunner, log: HQLog, oficinas: Oficinas, mcp: MCPServidor? = nil,
          listo: @escaping @Sendable () async -> Void) {
         self.config = config; self.store = store; self.runner = runner; self.log = log; self.oficinas = oficinas
+        self.mcp = mcp
         self.listo = listo
         auth = AuthCache(runner: runner)
     }
@@ -103,6 +106,8 @@ public final class Router: APIHandler {
                 return method == "GET" ? try await historial(query) : no
             case ("chat", 2):
                 return method == "POST" ? try await chat(body) : no
+            case ("consultas", 2):
+                return method == "GET" ? try await consultas(query) : no
             case ("actividad", 2):
                 guard method == "GET" else { return no }
                 guard let act = await oficinas.activa() else { return (200, ["agentes": [String: Any](), "version": 0]) }
@@ -320,6 +325,22 @@ public final class Router: APIHandler {
 
     // MARK: historial y chat
 
+    /// `GET /api/consultas?session=<sid>`: lo que ese agente le consultó a sus colegas en esa conversación (oficina activa).
+    private func consultas(_ q: [String: String]) async throws -> Resp {
+        let act = try await oficinas.requerirActiva()
+        guard let sidRaw = q["session"], Router.uuidValido(sidRaw) else { return (400, ["error": "pedido inválido"]) }
+        let filas = await store.consultasDe(oficina: act.carpeta, sid: sidRaw.lowercased())
+        func nombre(_ id: String) -> String { act.oficina.agente(id)?.nombre ?? id }
+        return (200, ["consultas": filas.map { f -> [String: Any] in
+            var d: [String: Any] = ["id": f.id, "de": f.de, "deNombre": nombre(f.de), "a": f.a, "aNombre": nombre(f.a),
+                                    "pregunta": f.pregunta, "ts": f.ts, "pos": f.pos]
+            if let r = f.respuesta { d["respuesta"] = r }
+            if let e = f.error { d["error"] = e }
+            if let c = f.costo { d["costo"] = c }
+            return d
+        }])
+    }
+
     private func historial(_ q: [String: String]) async throws -> Resp {
         let invalido: Resp = (400, ["error": "pedido inválido"])
         let act = try await oficinas.requerirActiva()
@@ -360,18 +381,30 @@ public final class Router: APIHandler {
         if let of = await store.oficinaDe(sid), of != act.carpeta { return invalido }
         let t0 = Date()
         let store = self.store, runner = self.runner
-        let ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
+        var ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
         let carpeta = act.carpeta
         let caja = CajaCosto()
         defer { let c = caja.valor; Task { await store.registrarCosto(oficina: carpeta, agente: agente, origen: "chat", ref: sid, costo: c) } }
+        // Consultas a colegas: el token vive lo que dura este chat (se revoca al terminar). Si el servidor MCP no
+        // arrancó, el chat sale igual, sin la herramienta.
+        let mcpUrl = await mcp?.url()
+        ctx.mcpUrl = mcpUrl
+        let ctxFinal = ctx
+        let mcp = self.mcp
         let resultado: (Int, [String: String]) = await runner.conCarril(oficina: carpeta, agente: agente) {
+            var envExtra: [String: String] = [:]
+            if mcpUrl != nil, let mcp {
+                envExtra[Permisos.variableTokenMCP] = mcp.tokens.emitir(oficina: carpeta, agente: agente, sid: sid)
+            }
+            defer { if let t = envExtra[Permisos.variableTokenMCP] { mcp?.tokens.revocar(t) } }
             do {
                 try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
                 try await store.agregar(sid: sid, rol: "u", texto: msg)
                 let activa = await store.estaActiva(sid)
                 let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "chat", tarea: msg,
                                                               extra: caja.observador()) { obs, _ in
-                    try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctx, obs: obs)
+                    try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctxFinal, obs: obs,
+                                                  envExtra: envExtra)
                 }
                 try await store.marcarActiva(sid)
                 try await store.agregar(sid: sid, rol: "a", texto: texto.isEmpty ? "(sin respuesta)" : texto)

@@ -297,3 +297,15 @@ select.campo { padding-right: 26px; }
 }
 .vista:has(.derecho.abierto) .aviso-reunion { left: calc((100% - var(--derecho)) / 2); }
 .vista:has(.derecho.abierto) .herramientas { right: calc(var(--derecho) + 14px); }
+
+/* consultas a colegas (Fase 4): bloque plegable bajo la respuesta y globito «?» sobre el agente que consulta en la maqueta */
+.consultas { align-self: flex-start; max-width: 88%; margin-top: -4px; font-size: 12px; color: var(--suave); }
+.consultas summary { cursor: pointer; padding: 3px 4px; user-select: none; }
+.consultas[open] summary { color: var(--texto); }
+.consulta { border-left: 2px solid var(--linea); margin: 4px 0 6px 6px; padding: 2px 0 2px 9px; }
+.consulta-p { color: var(--texto); margin-bottom: 3px; overflow-wrap: anywhere; }
+.consulta-r { overflow-wrap: anywhere; line-height: 1.45; }
+.consulta-r p + p { margin-top: 5px; }
+.consulta-r.e { color: var(--peligro); }
+.etq-consulta .etq-in { left: 0; bottom: 0; transform: translateX(-50%); justify-content: center; width: 24px; height: 24px; padding: 0; border-radius: 50%;
+  background: #fff; color: #111; font-size: 15px; font-weight: 700; box-shadow: 0 1px 4px rgba(0, 0, 0, .3); animation: latir 1.2s ease-in-out infinite; }

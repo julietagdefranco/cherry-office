@@ -25,6 +25,9 @@ import Testing
 ///   ficha     (sin --agent, "Sos el bibliotecario")         -> JSON de ficha (util_para ["direccion"], sin contradicciones)
 ///   imagen    (sin --agent, "Describí la imagen")           -> texto descriptivo
 ///   turno     (--agent, "Estás en una reunión")             -> "Opinión de <agente> sobre el tema."
+///   consulta  (--agent, "consulta de un colega")             -> "Mi mirada de <agente> sobre la consulta." (costo 0.03)
+///   CONSULTAR:<colega> [x4] (en un chat) -> llama por HTTP a `consultar` del servidor MCP (URL de --mcp-config, token de
+///                         $HQ_MCP_TOKEN); guarda las respuestas en `mcp.<agente>.out`, el token en `token.log` y la URL en `url.log`
 ///   lectura   (--agent, "Se sumó un documento a la biblioteca") -> agrega una línea a conocimiento/agentes/<agente>.md y responde "listo"
 /// `Sandbox.responder(clave, texto)` pisa la respuesta (clave: borrador|acta|ficha|imagen|turno|lectura, o `turno.<agente>`).
 /// `Sandbox.modo(clave, modo)` cambia el comportamiento de una clave (`<tipo>` o un id de agente):
@@ -93,6 +96,7 @@ final class Sandbox: @unchecked Sendable {
     else
       if [[ "$msg" == *"en una reuni"* ]]; then kind=turno
       elif [[ "$msg" == *"documento a la biblioteca"* ]]; then kind=lectura
+      elif [[ "$msg" == *"consulta de un colega"* ]]; then kind=consulta
       fi
     fi
     modo=""
@@ -138,6 +142,7 @@ final class Sandbox: @unchecked Sendable {
         imagen) echo '{"type":"result","result":"Una imagen de prueba con el texto HOLA MUNDO.","is_error":false}';;
         turno) echo "{\"type\":\"result\",\"result\":\"Opinión de $agent sobre el tema.\",\"is_error\":false,\"total_cost_usd\":0.02}";;
         lectura) mkdir -p conocimiento/agentes; echo "- leyó el documento (prueba)" >> "conocimiento/agentes/$agent.md"; echo '{"type":"result","result":"listo","is_error":false}';;
+        consulta) echo "{\"type\":\"result\",\"result\":\"Mi mirada de $agent sobre la consulta.\",\"is_error\":false,\"total_cost_usd\":0.03}";;
       esac
       fin; exit 0
     fi
@@ -152,6 +157,23 @@ final class Sandbox: @unchecked Sendable {
         turno) echo "{\"type\":\"result\",\"result\":\"Opinión de $agent sobre el tema.\",\"is_error\":false,\"total_cost_usd\":0.02}";;
         lectura) mkdir -p conocimiento/agentes; echo "- leyó el documento (prueba)" >> "conocimiento/agentes/$agent.md"; echo '{"type":"result","result":"listo","is_error":false}';;
       esac
+      fin; exit 0
+    fi
+    if [[ "$msg" == *CONSULTAR:* ]]; then
+      # llama a `consultar` del servidor MCP con el token del entorno, como haría claude (xN: N veces)
+      colega="${msg#*CONSULTAR:}"; colega="${colega%% *}"
+      veces=1; [[ "$msg" == *x4* ]] && veces=4
+      cfg=""; prev=""
+      for a in "$@"; do if [[ "$prev" == "--mcp-config" ]]; then cfg="$a"; fi; prev="$a"; done
+      url="$(echo "$cfg" | grep -o 'http://127[^"]*')"
+      echo "$HQ_MCP_TOKEN" >> "$D/token.log"
+      echo "$url" >> "$D/url.log"
+      for i in $(seq 1 $veces); do
+        body="{\"jsonrpc\":\"2.0\",\"id\":$i,\"method\":\"tools/call\",\"params\":{\"name\":\"consultar\",\"arguments\":{\"colega\":\"$colega\",\"pregunta\":\"Como vamos con lo tuyo?\"}}}"
+        curl -s -m 20 -H "Authorization: Bearer $HQ_MCP_TOKEN" -H 'Content-Type: application/json' -d "$body" "$url" >> "$D/mcp.$agent.out"
+        echo >> "$D/mcp.$agent.out"
+      done
+      echo "{\"type\":\"result\",\"result\":\"consulte\",\"is_error\":false,\"total_cost_usd\":0.01}"
       fin; exit 0
     fi
     if [[ "$msg" == *STREAM* ]]; then

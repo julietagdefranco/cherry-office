@@ -109,7 +109,27 @@ public enum Plantillas {
         - Conocimiento y archivos: `conocimiento/archivos.md` es el catálogo de documentos de la oficina (una línea por documento); leelo al empezar. Cada documento tiene su ficha en `conocimiento/fuentes/<slug>.md` y su texto en `archivos/.texto/<slug>.md`; el material original está en `archivos/` (`compartido/` es de todos, el resto por departamento). Para citar un documento, usá la ficha.
         - Lo que produzcas para el usuario (informes, borradores, archivos) guardalo con Write en `archivos/entregables/\(id)/`; esa es la única carpeta de archivos donde podés escribir.
         - No podés escribir ningún otro archivo (el sistema lo impide igual). Si algo debería quedar como decisión, proponelo en una reunión o decile al usuario que lo registre.
+        - \(lineaConsultas)
         """
+    }
+
+    /// Documenta las herramientas del servidor MCP de la oficina (Fase 4). Su presencia marca una sección al día.
+    static let lineaConsultas = "Podés consultar a un colega con la herramienta consultar(colega, pregunta) cuando necesites su mirada; usá colegas() para ver quiénes son. Máximo 3 consultas por mensaje."
+
+    /// Al abrir una oficina: reescribe la sección de memoria de los `.md` de agente que la tienen desactualizada (sin la
+    /// línea de consultas). Solo toca desde `## Memoria de la oficina` hasta el final (la sección fija, que va al final del
+    /// cuerpo); el frontmatter y el prompt quedan como están. Idempotente. Devuelve cuántos reescribió.
+    @discardableResult
+    static func actualizarMemoria(carpeta: String, ids: [String]) -> Int {
+        var n = 0
+        for id in ids {
+            let p = (carpeta as NSString).appendingPathComponent(".claude/agents/\(id).md")
+            guard let t = try? String(contentsOfFile: p, encoding: .utf8), let r = t.range(of: marcaMemoria),
+                  !t.contains(lineaConsultas) else { continue }
+            let nuevo = String(t[..<r.lowerBound]) + seccionMemoria(id: id) + "\n"
+            if (try? Data(nuevo.utf8).write(to: URL(fileURLWithPath: p), options: .atomic)) != nil { n += 1 }
+        }
+        return n
     }
 
     // MARK: .md del agente

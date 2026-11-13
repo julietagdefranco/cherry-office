@@ -208,6 +208,11 @@ def notas_agente_md(nombre, rol):
             % (nombre, rol, nombre))
 
 
+# Documenta las herramientas del servidor MCP de la oficina (Fase 4). Su presencia marca una sección al día.
+LINEA_CONSULTAS = ("Podés consultar a un colega con la herramienta consultar(colega, pregunta) cuando necesites su mirada; "
+                   "usá colegas() para ver quiénes son. Máximo 3 consultas por mensaje.")
+
+
 def seccion_memoria(id_):
     return (MARCA_MEMORIA + "\n"
             "Tu carpeta de trabajo es la raíz de la oficina; todas las rutas son relativas a ella.\n"
@@ -224,7 +229,31 @@ def seccion_memoria(id_):
             "- Lo que produzcas para el usuario (informes, borradores, archivos) guardalo con Write en "
             "`archivos/entregables/%s/`; esa es la única carpeta de archivos donde podés escribir.\n"
             "- No podés escribir ningún otro archivo (el sistema lo impide igual). Si algo debería quedar como "
-            "decisión, proponelo en una reunión o decile al usuario que lo registre.\n" % (id_, id_))
+            "decisión, proponelo en una reunión o decile al usuario que lo registre.\n"
+            "- " + LINEA_CONSULTAS + "\n") % (id_, id_)
+
+
+def actualizar_memoria(carpeta, ids):
+    """Al abrir una oficina: reescribe la sección de memoria de los `.md` de agente que la tienen desactualizada (sin la
+    línea de consultas). Solo toca desde `## Memoria de la oficina` hasta el final; el frontmatter y el prompt quedan
+    como están. Idempotente. Devuelve cuántos reescribió."""
+    n = 0
+    for id_ in ids:
+        p = os.path.join(carpeta, ".claude", "agents", "%s.md" % id_)
+        try:
+            with open(p, encoding="utf-8") as f:
+                t = f.read()
+        except OSError:
+            continue
+        i = t.find(MARCA_MEMORIA)
+        if i < 0 or LINEA_CONSULTAS in t:
+            continue
+        try:
+            escribir_atomico(p, t[:i] + seccion_memoria(id_) + "\n")
+            n += 1
+        except OSError:
+            pass
+    return n
 
 
 _YAML_RESERVADAS = {"null", "~", "true", "false", "yes", "no", "on", "off", "y", "n"}
@@ -492,6 +521,7 @@ def abrir_oficina(home, carpeta):
         completar_estructura(dirr)
     except OSError:
         pass
+    actualizar_memoria(dirr, [a["id"] for a in o["agentes"]])
     return dirr, o
 
 

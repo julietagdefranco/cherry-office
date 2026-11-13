@@ -38,6 +38,7 @@ import hq_reuniones  # noqa: E402  (/api/reuniones*, misma lógica que app/Sourc
 import hq_explorador  # noqa: E402  (/api/fs/carpetas, /api/oficina/archivo*; app/Sources/Backend/Explorador.swift)
 import hq_biblioteca  # noqa: E402  (/api/archivos*, /api/vinculos*, /api/biblioteca*; app/Sources/Backend/Biblioteca.swift)
 import hq_vivo  # noqa: E402  (stream-json, /api/actividad, /api/costos; app/Sources/Backend/{Stream,Actividad}.swift)
+import hq_mcp  # noqa: E402  (POST /mcp, /api/consultas; app/Sources/Backend/{MCPProtocolo,MCPServidor,Consultas}.swift)
 from hq_core import ErrorAPI  # noqa: E402
 
 VERSION = "1.0.0"
@@ -199,17 +200,24 @@ def contexto_oficina(carpeta, definicion):
     return out
 
 
-def construir_comando_oficina(cfg, carpeta, definicion, msg, sid, flag, oficina=None):
+def construir_comando_oficina(cfg, carpeta, definicion, msg, sid, flag, oficina=None, mcp_url=None):
     """Como construir_comando pero para un agente de oficina: escritura solo en sus rutas; --add-dir de la config y de
-    las carpetas vinculadas a las que el agente tiene acceso (`oficina` = oficina.json)."""
+    las carpetas vinculadas a las que el agente tiene acceso (`oficina` = oficina.json). `mcp_url`: URL del servidor MCP
+    propio (consultas a colegas, Fase 4); el token va por la variable HQ_MCP_TOKEN del entorno, no en los argumentos."""
     agente = definicion["id"]
     herr = cfg["herramientas_agente"].get(agente) or cfg["herramientas"]
     escribibles = contexto_oficina(carpeta, definicion)
     herr += ",Edit,Write"
+    if mcp_url:
+        herr += "," + ",".join(hq_mcp.HERRAMIENTAS_MCP)
     cmd = [cfg["claude_bin"], "-p", "--agent", agente, flag, sid] + hq_vivo.FORMATO_SALIDA + ["--tools", herr]
+    if mcp_url:
+        cmd += ["--mcp-config", hq_mcp.config_mcp(mcp_url)]
     for d in list(cfg["oficina_dirs_extra"]) + hq_core.dirs_vinculos(oficina, definicion):
         cmd += ["--add-dir", d]
     cmd += ["--allowedTools"] + [regla_permiso(h, p) for p in escribibles for h in ("Edit", "Write")]
+    if mcp_url:
+        cmd += hq_mcp.HERRAMIENTAS_MCP
     return cmd + ["--", msg]
 
 
@@ -547,6 +555,7 @@ class App:
         self.reuniones = None  # hook para /api/reuniones*: callable(metodo, path, query, body) -> (code, obj) | None
         self.biblioteca = None  # hook para /api/archivos*, /api/vinculos*, /api/biblioteca*: igual que reuniones
         self.explorador = None  # hook para /api/fs/carpetas y /api/oficina/archivo*: igual que reuniones
+        self.mcp = None  # servidor MCP propio (hq_mcp.MCP): consultas entre agentes. None = los chats corren sin consultas
         self._cargar_estado()
 
     # ---- estado de la app: oficina activa y recientes (<datos_dir>/config.json)
@@ -675,19 +684,25 @@ class App:
             self.db.agregar(sid, agente, "u", msg)
 
             caja = hq_vivo.CajaCosto()
+            # consultas a colegas: el token vive lo que dura este chat (se revoca al terminar)
+            token = self.mcp.tokens.emitir(carpeta, agente, sid) if self.mcp else None
             try:
                 with self.actividad.seguir(carpeta, agente, "chat", msg, extra=caja.observador()) as (obs, _token):
-                    return self._chat_correr(carpeta, definicion, msg, sid, ofi, obs, t0)
+                    return self._chat_correr(carpeta, definicion, msg, sid, ofi, obs, t0, token)
             finally:
+                if token:
+                    self.mcp.tokens.revocar(token)
                 self.costos.registrar(carpeta, "chat", caja.valor, agente, sid)
 
-    def _chat_correr(self, carpeta, definicion, msg, sid, ofi, obs, t0):
+    def _chat_correr(self, carpeta, definicion, msg, sid, ofi, obs, t0, token=None):
         """Corre claude para un mensaje (con el carril ya tomado) y guarda la respuesta. -> (http_status, dict)."""
         cfg, agente = self.cfg, definicion["id"]
 
         def correr(flag):
-            rc, so, se = ejecutar(construir_comando_oficina(cfg, carpeta, definicion, msg, sid, flag, oficina=ofi),
-                                  carpeta, cfg["timeout"], al_linea=hq_vivo.lector(obs))
+            rc, so, se = ejecutar(construir_comando_oficina(cfg, carpeta, definicion, msg, sid, flag, oficina=ofi,
+                                                            mcp_url=self.mcp.url() if token else None),
+                                  carpeta, cfg["timeout"], al_linea=hq_vivo.lector(obs),
+                                  env_extra={hq_mcp.VARIABLE_TOKEN: token} if token else None)
             return rc, so, se, hq_vivo.ultimo_json(so)
 
         try:
@@ -839,6 +854,15 @@ class App:
                 return 400, {"error": "pedido inválido"}
             # el chat corre FUERA de self.mut (ver api): si no, un chat largo traba /api/estado y todo el resto
             return _DIFERIDO, lambda: self.chat(carpeta, definicion, msg, sid.lower())
+        if p1 == "consultas" and n == 2:
+            if m != "GET":
+                return no
+            carpeta, o = self.requerir_activa()
+            sid = (query.get("session") or [""])[0]
+            if not uuid_valido(sid) or not self.mcp:
+                return 400, {"error": "pedido inválido"}
+            nombres = {a["id"]: a["nombre"] for a in o["agentes"]}
+            return 200, {"consultas": self.mcp.lista(carpeta, sid.lower(), nombres)}
         if p1 == "oficinas":
             return self._oficinas(m, partes, body, no)
         if p1 == "oficina" and n == 2:
@@ -1038,6 +1062,12 @@ def crear_handler(app):
             if not self._host_ok():
                 return
             u = urlparse(self.path)
+            if u.path == "/mcp":  # el sondeo SSE de claude: solo se atiende POST
+                self.send_response(405)
+                self.send_header("Allow", "POST")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if u.path.startswith("/api/") or u.path == "/api":
                 return self._api("GET", u, None)
             f = ruta_estatica(self.path)
@@ -1075,7 +1105,36 @@ def crear_handler(app):
                 return self._json(415, {"error": "se espera JSON"})
             return self._api(metodo, u, self.rfile.read(n) if n else None)
 
+        def _mcp(self):
+            """POST /mcp (servidor MCP propio): lo llama el proceso `claude`, no un navegador. Host de loopback (ya
+            validado) y token Bearer; sin chequeo de Origin."""
+            if not self._host_ok():
+                return
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self._json(400, {"error": "pedido inválido"})
+            if n < 0 or n > hq_mcp.MAX_CUERPO:
+                return self._json(413, {"error": "pedido demasiado grande"})
+            if not app.mcp:
+                return self._json(404, {"error": "no"})
+            code, cuerpo, extra = app.mcp.http(self.headers.get("Authorization"), self.rfile.read(n) if n else b"")
+            self.send_response(code)
+            if cuerpo:
+                self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(cuerpo)))
+            self.send_header("Cache-Control", "no-store")
+            for k, v in extra.items():
+                self.send_header(k, v)
+            self.end_headers()
+            try:
+                self.wfile.write(cuerpo)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
         def do_POST(self):
+            if urlparse(self.path).path == "/mcp":
+                return self._mcp()
             self._escritura("POST")
 
         def do_PATCH(self):
@@ -1119,6 +1178,7 @@ def crear_servidor(cfg, sesiones_json=None):
     hq_reuniones.instalar(app, sys.modules[__name__])
     hq_biblioteca.instalar(app, sys.modules[__name__])
     hq_explorador.instalar(app, sys.modules[__name__])
+    hq_mcp.instalar(app, sys.modules[__name__])
     srv = ThreadingHTTPServer(("127.0.0.1", cfg["puerto"]), crear_handler(app))
     srv.daemon_threads = True
     srv.app = app
