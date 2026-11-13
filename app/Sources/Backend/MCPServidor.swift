@@ -15,7 +15,7 @@ enum HTTPMinimo {
     static let maxCuerpo = 1_000_000
 
     /// Intenta armar un pedido con los bytes recibidos hasta ahora.
-    static func leer(_ d: Data) -> Lectura {
+    static func leer(_ d: Data, maxCuerpo: Int = HTTPMinimo.maxCuerpo) -> Lectura {
         let fin = Data("\r\n\r\n".utf8)
         guard let r = d.range(of: fin) else { return d.count > maxCabeceras ? .invalido(431) : .incompleto }
         if r.lowerBound > maxCabeceras { return .invalido(431) }
@@ -38,8 +38,9 @@ enum HTTPMinimo {
 
     static func respuesta(_ status: Int, tipo: String? = nil, cabeceras: [String: String] = [:], cuerpo: Data = Data()) -> Data {
         let textos = [200: "OK", 202: "Accepted", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-                      405: "Method Not Allowed", 413: "Payload Too Large", 431: "Request Header Fields Too Large",
-                      501: "Not Implemented"]
+                      405: "Method Not Allowed", 409: "Conflict", 413: "Payload Too Large", 415: "Unsupported Media Type",
+                      431: "Request Header Fields Too Large", 500: "Internal Server Error", 501: "Not Implemented",
+                      502: "Bad Gateway", 504: "Gateway Timeout"]
         var s = "HTTP/1.1 \(status) \(textos[status] ?? "Error")\r\nContent-Length: \(cuerpo.count)\r\nConnection: close\r\n"
         if let tipo { s += "Content-Type: \(tipo)\r\n" }
         for (k, v) in cabeceras { s += "\(k): \(v)\r\n" }

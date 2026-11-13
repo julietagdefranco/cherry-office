@@ -9,6 +9,8 @@ let package = Package(
         .target(name: "Backend", path: "Sources/Backend"),
         // App: ventana + WKWebView + esquema hq://. Dueño: instancia A.
         .executableTarget(name: "Oficina", dependencies: ["Backend"], path: "Sources/App"),
+        // Servidor de desarrollo: la misma API y la interfaz en el navegador (http://localhost:8765), sin compilar la app.
+        .executableTarget(name: "oficina-dev", dependencies: ["Backend"], path: "Sources/Dev"),
         // Tests del backend. Dueño: instancia E.
         .testTarget(name: "BackendTests", dependencies: ["Backend"], path: "Tests/BackendTests"),
     ]

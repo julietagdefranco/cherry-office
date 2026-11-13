@@ -64,5 +64,5 @@ if [ "$RESPALDOS" -gt 0 ]; then
   echo "Se guardaron $RESPALDOS respaldos (archivos .bak-$FECHA) junto a los originales en ~/.claude."
 fi
 echo "Memoria compartida del equipo: ~/Próspera/_equipo/ (no se pisa nada de lo que ya tenías)."
-echo "Para abrir la oficina: doble clic en oficina/Abrir Próspera HQ.command"
+echo "Para abrir la oficina: abrí la app Oficina (ver app/README.md)."
 echo "(Abrí una sesión nueva de Claude Code para que reconozca a los agentes.)"
