@@ -14,16 +14,16 @@ enum MainMenu {
             return m
         }
 
-        let app = submenu("Próspera HQ")
-        let acerca = NSMenuItem(title: "Acerca de Próspera HQ", action: #selector(AppDelegate.mostrarAcerca(_:)), keyEquivalent: "")
+        let app = submenu("Oficina")
+        let acerca = NSMenuItem(title: "Acerca de Oficina", action: #selector(AppDelegate.mostrarAcerca(_:)), keyEquivalent: "")
         acerca.target = delegate
         app.addItem(acerca)
         app.addItem(.separator())
-        add(app, "Ocultar Próspera HQ", #selector(NSApplication.hide(_:)), "h")
+        add(app, "Ocultar Oficina", #selector(NSApplication.hide(_:)), "h")
         add(app, "Ocultar otros", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option])
         add(app, "Mostrar todo", #selector(NSApplication.unhideAllApplications(_:)))
         app.addItem(.separator())
-        add(app, "Salir de Próspera HQ", #selector(NSApplication.terminate(_:)), "q")
+        add(app, "Salir de Oficina", #selector(NSApplication.terminate(_:)), "q")
 
         let oficina = submenu("Oficina")
         let abrir = NSMenuItem(title: "Abrir carpeta de la oficina", action: #selector(AppDelegate.abrirCarpetaOficina(_:)), keyEquivalent: "o")

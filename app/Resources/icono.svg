@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ícono de la app: ladrillo 2x2, el mismo dibujo que App.logo() en oficina/ui/base.js. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="2 3 28 25" width="280" height="250">
+  <rect x="2" y="9" width="28" height="19" rx="3" fill="#c4372f"/>
+  <rect x="2" y="9" width="28" height="5" rx="2" fill="#d6463d"/>
+  <ellipse cx="10" cy="9" rx="4.5" ry="2" fill="#e05a50"/>
+  <rect x="5.5" y="5" width="9" height="4" fill="#d6463d"/>
+  <ellipse cx="10" cy="5" rx="4.5" ry="2" fill="#ea6c62"/>
+  <ellipse cx="22" cy="9" rx="4.5" ry="2" fill="#e05a50"/>
+  <rect x="17.5" y="5" width="9" height="4" fill="#d6463d"/>
+  <ellipse cx="22" cy="5" rx="4.5" ry="2" fill="#ea6c62"/>
+</svg>
