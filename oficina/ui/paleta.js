@@ -51,7 +51,7 @@ App.Paleta = (function () {
   }
 
   function abrir() {
-    if (velo) return;
+    if (velo || document.querySelector('.paleta-velo')) return;
     if (!App.E.oficina) return;
     items = armar();
     var inp = h('input.paleta-buscar', { placeholder: 'Buscar agentes, salas, acciones…', autocomplete: 'off', spellcheck: false });
@@ -88,7 +88,10 @@ App.Paleta = (function () {
     App.api.get('/api/reuniones').then(function (r) { reuniones = r.reuniones || []; if (velo) { items = armar(); filtrar(); } }).catch(function () {});
   }
   function elegir(i) { var x = filtrados[i]; if (!x) return; cerrar(); x.hacer(); }
-  function cerrar() { if (velo) { velo.remove(); velo = null; } }
+  function cerrar() {
+    document.querySelectorAll('.paleta-velo').forEach(function (v) { v.remove(); });   /* por si quedó alguna copia */
+    velo = null;
+  }
 
   document.addEventListener('keydown', function (e) {
     if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
