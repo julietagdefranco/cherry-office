@@ -1,0 +1,323 @@
+{
+ "version": 1,
+ "base": {
+  "torsoLiso": "973",
+  "brazoD": "3818",
+  "brazoI": "3819",
+  "mano": "3820",
+  "cadera": "3815",
+  "piernaD": "3816",
+  "piernaI": "3817"
+ },
+ "pelo": {
+  "corto-liso": {
+   "nombre": "Corto liso",
+   "parte": "21788",
+   "genero": "m"
+  },
+  "corto-clasico": {
+   "nombre": "Corto clásico",
+   "parte": "3901",
+   "genero": "m"
+  },
+  "corto-lateral": {
+   "nombre": "Corto con raya",
+   "parte": "15500",
+   "genero": "m"
+  },
+  "despeinado": {
+   "nombre": "Despeinado",
+   "parte": "10048",
+   "genero": "u"
+  },
+  "largo-lacio": {
+   "nombre": "Largo lacio",
+   "parte": "41612",
+   "genero": "f"
+  },
+  "largo-ondulado": {
+   "nombre": "Largo ondulado",
+   "parte": "40251",
+   "genero": "f"
+  },
+  "rulos": {
+   "nombre": "Rulos",
+   "parte": "29634",
+   "genero": "f"
+  },
+  "bob": {
+   "nombre": "Bob",
+   "parte": "62711",
+   "genero": "f"
+  },
+  "rodete": {
+   "nombre": "Rodete",
+   "parte": "27186",
+   "genero": "f"
+  },
+  "cola": {
+   "nombre": "Cola de caballo",
+   "parte": "17630",
+   "genero": "f"
+  },
+  "hombros": {
+   "nombre": "Al hombro",
+   "parte": "4530",
+   "genero": "u"
+  },
+  "ondas-cortas": {
+   "nombre": "Ondas cortas",
+   "parte": "3277",
+   "genero": "u"
+  }
+ },
+ "cara": {
+  "f-sonrisa": {
+   "nombre": "Sonrisa labios durazno",
+   "parte": "3626cp8a",
+   "genero": "f"
+  },
+  "f-lentes": {
+   "nombre": "Anteojos negros",
+   "parte": "3626cp76",
+   "genero": "f"
+  },
+  "f-risa": {
+   "nombre": "Risa con anteojos",
+   "parte": "3626cp8u",
+   "genero": "f"
+  },
+  "f-labios": {
+   "nombre": "Labios rojos",
+   "parte": "3626cp89",
+   "genero": "f"
+  },
+  "f-abierta": {
+   "nombre": "Sonrisa abierta",
+   "parte": "3626cp8r",
+   "genero": "f"
+  },
+  "m-sonrisa": {
+   "nombre": "Sonrisa clásica",
+   "parte": "3626bp01",
+   "genero": "m"
+  },
+  "m-lentes": {
+   "nombre": "Anteojos finos",
+   "parte": "3626bp87",
+   "genero": "m"
+  },
+  "m-pecas": {
+   "nombre": "Anteojos rojos y pecas",
+   "parte": "3626cp83",
+   "genero": "m"
+  },
+  "m-redondos": {
+   "nombre": "Anteojos redondos",
+   "parte": "3626cp8y",
+   "genero": "m"
+  },
+  "m-gris": {
+   "nombre": "Marco gris",
+   "parte": "3626bp0i",
+   "genero": "m"
+  }
+ },
+ "torso": {
+  "liso": {
+   "nombre": "Liso",
+   "parte": "973"
+  },
+  "traje": {
+   "nombre": "Traje y corbata",
+   "parte": "973p18",
+   "paleta": [
+    "negro",
+    "azul-marino",
+    "gris",
+    "bordo"
+   ]
+  },
+  "saco-abierto": {
+   "nombre": "Saco abierto",
+   "parte": "973p9i",
+   "paleta": [
+    "negro",
+    "azul-marino",
+    "gris",
+    "bordo"
+   ]
+  },
+  "traje-gris": {
+   "nombre": "Traje gris",
+   "parte": "973p9y",
+   "paleta": [
+    "negro",
+    "azul-marino",
+    "gris",
+    "bordo"
+   ]
+  },
+  "saco-rosa": {
+   "nombre": "Saco con camisa rosa",
+   "parte": "973p7h",
+   "paleta": [
+    "negro",
+    "azul-marino",
+    "gris",
+    "bordo"
+   ]
+  },
+  "campera": {
+   "nombre": "Campera de cuero",
+   "parte": "973p28",
+   "paleta": [
+    "negro",
+    "azul-marino",
+    "gris",
+    "bordo"
+   ]
+  },
+  "saco-mujer": {
+   "nombre": "Saco abierto, top rojo",
+   "parte": "973p1w",
+   "paleta": [
+    "negro",
+    "azul-marino",
+    "gris",
+    "bordo"
+   ]
+  },
+  "remera": {
+   "nombre": "Remera con cadena",
+   "parte": "973p72"
+  },
+  "pinstripe": {
+   "nombre": "Traje a rayas",
+   "parte": "973p0m",
+   "paleta": [
+    "negro",
+    "azul-marino",
+    "gris",
+    "bordo"
+   ]
+  },
+  "camisa": {
+   "nombre": "Camisa blanca y saco",
+   "parte": "973p03",
+   "paleta": [
+    "negro",
+    "azul-marino",
+    "gris",
+    "bordo"
+   ]
+  }
+ },
+ "colores": {
+  "piel": [
+   "#f6c928"
+  ],
+  "torso": [
+   {
+    "id": "azul-marino",
+    "hex": "#1f3a5f"
+   },
+   {
+    "id": "bordo",
+    "hex": "#8a2b3a"
+   },
+   {
+    "id": "verde-salvia",
+    "hex": "#6f9a7d"
+   },
+   {
+    "id": "mostaza",
+    "hex": "#d9a21b"
+   },
+   {
+    "id": "coral",
+    "hex": "#e0644f"
+   },
+   {
+    "id": "celeste",
+    "hex": "#5aa9d6"
+   },
+   {
+    "id": "gris",
+    "hex": "#8a8f98"
+   },
+   {
+    "id": "lila",
+    "hex": "#8e78c4"
+   },
+   {
+    "id": "blanco",
+    "hex": "#f1f1ee"
+   },
+   {
+    "id": "negro",
+    "hex": "#26262b"
+   },
+   {
+    "id": "turquesa",
+    "hex": "#2a9d8f"
+   },
+   {
+    "id": "rosa",
+    "hex": "#e58aa6"
+   }
+  ],
+  "piernas": [
+   {
+    "id": "negro",
+    "hex": "#1c1c20"
+   },
+   {
+    "id": "azul-marino",
+    "hex": "#223a5e"
+   },
+   {
+    "id": "gris-oscuro",
+    "hex": "#4a4e57"
+   },
+   {
+    "id": "marron",
+    "hex": "#5a4030"
+   },
+   {
+    "id": "beige",
+    "hex": "#b7a183"
+   },
+   {
+    "id": "jean",
+    "hex": "#3d5f8f"
+   }
+  ],
+  "pelo": [
+   {
+    "id": "negro",
+    "hex": "#16161a"
+   },
+   {
+    "id": "marron-oscuro",
+    "hex": "#3a261a"
+   },
+   {
+    "id": "marron",
+    "hex": "#6b4426"
+   },
+   {
+    "id": "rubio",
+    "hex": "#d8b25a"
+   },
+   {
+    "id": "pelirrojo",
+    "hex": "#b4511f"
+   },
+   {
+    "id": "gris",
+    "hex": "#a3a6ab"
+   }
+  ]
+ }
+}

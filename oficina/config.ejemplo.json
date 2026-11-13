@@ -1,0 +1,15 @@
+{
+  "proyecto": "~/Próspera",
+  "dirs_extra": ["~/.claude/betty"],
+  "agentes": ["betty", "don-armando", "marce", "catalina", "patricia", "sofia", "mario", "nicolas"],
+  "herramientas": "Read,Glob,Grep,Skill",
+  "herramientas_agente": {},
+  "escritura": {
+    "*": ["_equipo/agentes/{id}.md"],
+    "betty": ["_betty/estado-actual.md", "_equipo/decisiones.md"]
+  },
+  "timeout": 600,
+  "puerto": 8765,
+  "claude_bin": null,
+  "datos_dir": null
+}
