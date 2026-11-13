@@ -51,14 +51,14 @@ App.Paleta = (function () {
   }
 
   function abrir() {
-    if (velo || document.querySelector('.paleta-velo')) return;
+    if (velo || document.querySelector('.cmdk-velo')) return;
     if (!App.E.oficina) return;
     items = armar();
-    var inp = h('input.paleta-buscar', { placeholder: 'Buscar agentes, salas, acciones…', autocomplete: 'off', spellcheck: false });
-    var lista = h('div.paleta-lista');
-    var caja = h('div.paleta', { onclick: function (e) { e.stopPropagation(); } }, h('div.paleta-cab', App.icono('buscar'), inp), lista,
-      h('div.paleta-pie', h('span', h('kbd', '↑'), h('kbd', '↓'), ' elegir'), h('span', h('kbd', '↵'), ' abrir'), h('span', h('kbd', 'esc'), ' cerrar')));
-    velo = h('div.velo.paleta-velo', { onclick: cerrar }, caja);
+    var inp = h('input.cmdk-buscar', { placeholder: 'Buscar agentes, salas, acciones…', autocomplete: 'off', spellcheck: false });
+    var lista = h('div.cmdk-lista');
+    var caja = h('div.cmdk', { onclick: function (e) { e.stopPropagation(); } }, h('div.cmdk-cab', App.icono('buscar'), inp), lista,
+      h('div.cmdk-pie', h('span', h('kbd', '↑'), h('kbd', '↓'), ' elegir'), h('span', h('kbd', '↵'), ' abrir'), h('span', h('kbd', 'esc'), ' cerrar')));
+    velo = h('div.velo.cmdk-velo', { onclick: cerrar }, caja);
     document.body.appendChild(velo);
     function filtrar() {
       var q = norm(inp.value.trim());
@@ -70,8 +70,8 @@ App.Paleta = (function () {
       App.vaciar(lista);
       if (!filtrados.length) { lista.appendChild(h('div.vacio', 'Nada con eso.')); return; }
       filtrados.forEach(function (x, i) {
-        var fila = h('div.paleta-item' + (i === sel ? '.sel' : ''), { onmousemove: function () { if (sel !== i) { sel = i; pintar(); } }, onclick: function () { elegir(i); } },
-          App.icono(x.icono), h('div.paleta-txt', h('b', x.txt), x.sub ? h('small', x.sub) : null), h('span.paleta-tipo', x.tipo));
+        var fila = h('div.cmdk-item' + (i === sel ? '.sel' : ''), { onmousemove: function () { if (sel !== i) { sel = i; pintar(); } }, onclick: function () { elegir(i); } },
+          App.icono(x.icono), h('div.cmdk-txt', h('b', x.txt), x.sub ? h('small', x.sub) : null), h('span.cmdk-tipo', x.tipo));
         lista.appendChild(fila);
       });
       var s = lista.querySelector('.sel'); if (s && s.scrollIntoView) s.scrollIntoView({ block: 'nearest' });
@@ -89,7 +89,7 @@ App.Paleta = (function () {
   }
   function elegir(i) { var x = filtrados[i]; if (!x) return; cerrar(); x.hacer(); }
   function cerrar() {
-    document.querySelectorAll('.paleta-velo').forEach(function (v) { v.remove(); });   /* por si quedó alguna copia */
+    document.querySelectorAll('.cmdk-velo').forEach(function (v) { v.remove(); });   /* por si quedó alguna copia */
     velo = null;
   }
 

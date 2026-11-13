@@ -314,20 +314,20 @@ select.campo { padding-right: 26px; }
 .avisos-banner kbd { margin-left: 6px; font: 600 10px/1 inherit; padding: 2px 5px; border: 1px solid var(--linea-fuerte); border-radius: 4px; color: var(--suave); }
 .persona.con-aviso .estado-dot { opacity: 1; background: var(--aviso); animation: none; }
 
-/* paleta ⌘K */
-.paleta-velo { align-items: flex-start; padding-top: 12vh; }
-.paleta { width: 560px; max-width: 100%; background: var(--panel); border: 1px solid var(--linea); border-radius: 14px; box-shadow: var(--sombra-alta); overflow: hidden; animation: subir .15s ease; }
-.paleta-cab { display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--linea); color: var(--suave); }
-.paleta-buscar { flex: 1; height: 50px; border: 0; outline: 0; background: none; font: inherit; font-size: 15px; color: var(--texto); }
-.paleta-lista { max-height: 380px; overflow: auto; padding: 6px; }
-.paleta-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radio-chico); cursor: pointer; color: var(--suave); }
-.paleta-item.sel { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--linea); color: var(--texto); }
-.paleta-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.paleta-txt b { font-weight: 550; color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.paleta-txt small { font-size: 12px; color: var(--tenue); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.paleta-tipo { font-size: 11px; color: var(--tenue); }
-.paleta-pie { display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--linea); font-size: 11px; color: var(--tenue); }
-.paleta-pie kbd, .pista kbd { font: 600 10px/1 inherit; padding: 2px 5px; margin-right: 3px; border: 1px solid var(--linea-fuerte); border-radius: 4px; }
+/* paleta ⌘K (clase propia: .cmdk es la fila de colores de contratar/perfil) */
+.cmdk-velo { align-items: flex-start; padding-top: 12vh; }
+.cmdk { width: 560px; max-width: 100%; background: var(--panel); border: 1px solid var(--linea); border-radius: 14px; box-shadow: var(--sombra-alta); overflow: hidden; animation: subir .15s ease; }
+.cmdk-cab { display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--linea); color: var(--suave); }
+.cmdk-buscar { flex: 1; height: 50px; border: 0; outline: 0; background: none; font: inherit; font-size: 15px; color: var(--texto); }
+.cmdk-lista { max-height: 380px; overflow: auto; padding: 6px; }
+.cmdk-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radio-chico); cursor: pointer; color: var(--suave); }
+.cmdk-item.sel { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--linea); color: var(--texto); }
+.cmdk-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cmdk-txt b { font-weight: 550; color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmdk-txt small { font-size: 12px; color: var(--tenue); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmdk-tipo { font-size: 11px; color: var(--tenue); }
+.cmdk-pie { display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--linea); font-size: 11px; color: var(--tenue); }
+.cmdk-pie kbd, .pista kbd { font: 600 10px/1 inherit; padding: 2px 5px; margin-right: 3px; border: 1px solid var(--linea-fuerte); border-radius: 4px; }
 .pista.viva { color: var(--texto); }
 
 /* consultas a colegas (Fase 4): bloque plegable bajo la respuesta y globito «?» sobre el agente que consulta en la maqueta */
