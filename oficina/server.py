@@ -39,6 +39,7 @@ import hq_explorador  # noqa: E402  (/api/fs/carpetas, /api/oficina/archivo*; ap
 import hq_biblioteca  # noqa: E402  (/api/archivos*, /api/vinculos*, /api/biblioteca*; app/Sources/Backend/Biblioteca.swift)
 import hq_tareas  # noqa: E402  (/api/tareas* y el programador; app/Sources/Backend/{Tareas,Programador,TareasRouter}.swift)
 import hq_vivo  # noqa: E402  (stream-json, /api/actividad, /api/costos; app/Sources/Backend/{Stream,Actividad}.swift)
+import hq_entregas  # noqa: E402  (/api/entregas*; app/Sources/Backend/{Entregas,EntregasRouter}.swift)
 import hq_mcp  # noqa: E402  (POST /mcp, /api/consultas; app/Sources/Backend/{MCPProtocolo,MCPServidor,Consultas}.swift)
 from hq_core import ErrorAPI  # noqa: E402
 
@@ -548,6 +549,7 @@ class App:
         self.actividad = hq_vivo.Actividad()
         self.costos = hq_vivo.Costos(os.path.join(cfg["datos_dir"], "hq.db"))
         self.avisos = hq_vivo.Avisos(os.path.join(cfg["datos_dir"], "hq.db"))
+        self.entregas = hq_entregas.Entregas(os.path.join(cfg["datos_dir"], "hq.db"))
         self.migrados = self.db.migrar_json(sesiones_json or os.path.join(ROOT, ".sesiones.json"))
         self.auth_ok = None
         self.home = _home()
@@ -687,15 +689,23 @@ class App:
             self.db.agregar(sid, agente, "u", msg)
 
             caja = hq_vivo.CajaCosto()
+            escritos = hq_entregas.CajaArchivos()
             # consultas a colegas: el token vive lo que dura este chat (se revoca al terminar)
             token = self.mcp.tokens.emitir(carpeta, agente, sid) if self.mcp else None
             try:
-                with self.actividad.seguir(carpeta, agente, "chat", msg, extra=caja.observador()) as (obs, token_act):
+                with self.actividad.seguir(carpeta, agente, "chat", msg, extra=caja.observador(escritos.observador())) as (obs, token_act):
                     resumen = hq_vivo.resumir_en_segundo_plano(self, sys.modules[__name__], msg, carpeta, agente, token_act)
                     try:
-                        return self._chat_correr(carpeta, definicion, msg, sid, ofi, obs, t0, token)
+                        code, obj = self._chat_correr(carpeta, definicion, msg, sid, ofi, obs, t0, token)
                     finally:
                         resumen.set()
+                # un chat que dejó archivos en archivos/entregables/ cuenta como entrega para revisar
+                entregables = hq_entregas.en_entregables(hq_entregas.relativos(escritos.valor, carpeta))
+                if code == 200 and entregables:
+                    f = self.entregas.crear(carpeta, agente, "chat", sid, hq_entregas.titulo(msg), obj.get("reply") or "",
+                                            sid, entregables, costo=caja.valor)
+                    obj["entrega"] = str(f[0])
+                return code, obj
             finally:
                 if token:
                     self.mcp.tokens.revocar(token)
@@ -801,9 +811,10 @@ class App:
             return 405, {"error": "método no permitido"}
         if path == "/api/actividad":
             if not carpeta:
-                return 200, {"agentes": {}, "version": 0, "avisos": []}
+                return 200, {"agentes": {}, "version": 0, "avisos": [], "entregasSinRevisar": 0}
             r = self.actividad.json(carpeta)
             r["avisos"] = self.avisos.pendientes(carpeta)
+            r["entregasSinRevisar"] = self.entregas.sin_revisar(carpeta)
             return 200, r
         if not carpeta:
             return 409, {"error": "No hay una oficina abierta."}
@@ -1180,6 +1191,8 @@ def crear_handler(app):
             if hq_tareas.es_ruta(u.path):
                 r = app.tareas(metodo, u.path, q, body) if app.tareas else None
                 return self._json(*(r or (404, {"error": "no"})))
+            if hq_entregas.es_ruta(u.path):  # fuera de app.mut, como /api/actividad
+                return self._json(*app.entregas(metodo, u.path, q, app.activa_carpeta))
             if hq_explorador.es_ruta(u.path):
                 r = app.explorador(metodo, u.path, q, body) if app.explorador else None
                 return self._json(*(r or (404, {"error": "no"})))
@@ -1203,19 +1216,17 @@ def configurar_logs(datos_dir):
 
 
 def _aviso_de_tarea(app, e):
-    """Una tarea programada que termina deja un aviso «te necesita» (paridad con Backend.swift)."""
+    """Una tarea programada que falla deja un aviso «te necesita»; las que terminan bien dejan una entrega (la crea
+    hq_tareas), que la reemplaza en la bandeja. Paridad con Backend.swift."""
     carpeta = app.activa_carpeta
-    if not carpeta:
+    if not carpeta or e.get("estado") == "ok":
         return
     try:
         o = hq_core.leer_oficina(carpeta)
     except ErrorAPI:
         o = {}
     nombre = next((t.get("nombre") for t in (o.get("tareas") or []) if t.get("id") == e.get("tarea")), e.get("tarea"))
-    if e.get("estado") == "ok":
-        app.avisos.crear(carpeta, "tarea", "«%s»: %s" % (nombre, hq_vivo.texto_respuesta(e.get("resultado"))), e.get("agente"), e.get("sid"))
-    else:
-        app.avisos.crear(carpeta, "error", "«%s» falló: %s" % (nombre, e.get("error") or "error"), e.get("agente"), e.get("sid"))
+    app.avisos.crear(carpeta, "error", "«%s» falló: %s" % (nombre, e.get("error") or "error"), e.get("agente"), e.get("sid"))
 
 
 def crear_servidor(cfg, sesiones_json=None):

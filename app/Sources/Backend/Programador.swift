@@ -195,6 +195,9 @@ public actor Programador {
 
     // MARK: revisión
 
+    /// Las corridas únicas que salen de un pendiente de reunión («Hacelo ahora») usan `encargo:<reunión>:<n>` como tarea.
+    static let prefijoEncargo = "encargo:"
+
     static func clave(_ oficina: String, _ tarea: String) -> String { oficina + "\u{1f}" + tarea }
 
     func estaCorriendo(oficina: String, tarea: String) -> Bool { reservadas.contains(Programador.clave(oficina, tarea)) }
@@ -261,13 +264,14 @@ public actor Programador {
         let ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
         let carpeta = act.carpeta, agente = def.id, sid = ej.sid, consigna = t.consigna, nombre = t.nombre
         let caja = CajaCosto()
+        let escritos = CajaArchivos()
         struct Resultado: Sendable { var texto: String; var error: String? }
         let r: Resultado = await runner.conCarril(oficina: carpeta, agente: agente) {
             do {
                 try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
                 try await store.agregar(sid: sid, rol: "u", texto: consigna)
                 let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "tarea", tarea: nombre,
-                                                              extra: caja.observador()) { obs, _ in
+                                                              extra: caja.observador(escritos.observador())) { obs, _ in
                     try await runner.ejecutarChat(agente: agente, mensaje: consigna, sid: sid, activa: false, oficina: ctx, obs: obs)
                 }
                 try await store.marcarActiva(sid)
@@ -285,6 +289,12 @@ public actor Programador {
         await store.registrarCosto(oficina: carpeta, agente: agente, origen: "tarea", ref: ej.tarea, costo: caja.valor)
         try? await store.terminarEjecucion(ej.id, estado: r.error == nil ? "ok" : "error", resultado: r.texto, error: r.error, costo: caja.valor)
         log.info("tarea \(ej.tarea) agente=\(agente) estado=\(r.error == nil ? "ok" : "error")")
+        if r.error == nil {
+            await RegistroEntregas.registrar(store, runner.canalAvisos, oficina: carpeta, agente: agente, nombre: def.nombre,
+                                             origen: ej.tarea.hasPrefix(Programador.prefijoEncargo) ? "encargo" : "tarea", ref: ej.tarea,
+                                             titulo: nombre, texto: r.texto, sid: sid,
+                                             archivos: ArchivosEntrega.relativos(escritos.valor, carpeta: carpeta), costo: caja.valor)
+        }
         if let fin = await store.ejecucion(ej.id) { await gancho(fin) }
     }
 }

@@ -5,7 +5,9 @@
 reducidos (sin contenido: solo nombre de herramienta y un objetivo corto) que alimentan el registro de actividad, y del
 `result` final se toma `total_cost_usd`. Formato verificado en docs/aprendizajes.md.
 
-Eventos: ("inicio", sesion) | ("pensando",) | ("herramienta", nombre, objetivo) | ("texto",) | ("resultado", costo, error)
+Eventos: ("inicio", sesion) | ("pensando",) | ("herramienta", nombre, objetivo) | ("archivo", ruta) | ("texto",) |
+("resultado", costo, error). ("archivo", ruta) llega después de la herramienta que escribe (Write, Edit, NotebookEdit):
+lo usan las entregas, la actividad lo ignora.
 """
 import json
 import os
@@ -17,6 +19,7 @@ from contextlib import contextmanager
 from urllib.parse import urlparse
 
 FORMATO_SALIDA = ["--output-format", "stream-json", "--verbose"]
+ESCRITORAS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
 
 def _corto(s, n=60):
@@ -69,7 +72,11 @@ def parsear_linea(linea):
             elif t == "text":
                 out.append(("texto",))
             elif t == "tool_use" and isinstance(b.get("name"), str):
-                out.append(("herramienta", b["name"], objetivo(b["name"], b.get("input"))))
+                entrada = b.get("input") if isinstance(b.get("input"), dict) else {}
+                out.append(("herramienta", b["name"], objetivo(b["name"], entrada)))
+                ruta = entrada.get("file_path") or entrada.get("notebook_path")
+                if b["name"] in ESCRITORAS and isinstance(ruta, str) and ruta:
+                    out.append(("archivo", ruta))
         return out
     if tipo == "result":
         c = o.get("total_cost_usd")

@@ -637,9 +637,11 @@ public actor ReunionesRouter: SubRouter {
         let hoy = Date()
         var errorActa: String?
         var rel: String?
+        let textoActa = ReunionTexto.acta(oficina: of, tema: f.tema, participantes: parts, turnos: turnos,
+                                          sintesis: sintesis, errorSintesis: errSint, fecha: hoy)
+        var salidaFinal: String?
         do {
-            let r = try escribirActa(a, f, ReunionTexto.acta(oficina: of, tema: f.tema, participantes: parts, turnos: turnos,
-                                                            sintesis: sintesis, errorSintesis: errSint, fecha: hoy), fecha: hoy)
+            let r = try escribirActa(a, f, textoActa, fecha: hoy)
             rel = r
             if let s = sintesis, !s.decisiones.isEmpty {
                 try Plantillas.anexarDecisiones(carpeta: a.carpeta, decisiones: s.decisiones, fecha: hoy)
@@ -664,6 +666,7 @@ public actor ReunionesRouter: SubRouter {
                 let definitiva = try escribirSalida(a, pedida, ReunionPatron.markdownSalida(oficina: of, f: f, participantes: parts, sintesis: sintesis,
                                                                                          errorSintesis: errSint, acta: rel, fecha: hoy))
                 try await store.reunionSalida(id, definitiva)
+                salidaFinal = definitiva
             } catch {
                 if errorActa == nil { errorActa = "No pude guardar el archivo de salida (\(pedida))." }
                 log.error("reuniones: salida: \(error)")
@@ -672,6 +675,11 @@ public actor ReunionesRouter: SubRouter {
         let js = sintesis.flatMap { try? JSONSerialization.data(withJSONObject: $0.json) }.flatMap { String(data: $0, encoding: .utf8) }
         do { try await store.reunionCerrar(id, sintesis: js, errorSintesis: errSint, acta: rel, error: errorActa) }
         catch { throw ErrorAPI(500, "No pude guardar el cierre de la reunión.") }
+        // el acta queda como entrega para revisar (sin agente: es de la reunión)
+        if let rel {
+            await RegistroEntregas.registrar(store, runner.canalAvisos, oficina: a.carpeta, agente: "", nombre: "", origen: "reunion", ref: id,
+                                             titulo: "Acta: \(f.tema)", texto: textoActa, archivos: [rel] + (salidaFinal.map { [$0] } ?? []))
+        }
         return try await respuesta(id, a)
     }
 

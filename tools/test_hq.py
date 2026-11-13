@@ -21,6 +21,7 @@ import hq_core  # noqa: E402
 import hq_tareas  # noqa: E402
 
 
+import hq_entregas  # noqa: E402
 import hq_mcp  # noqa: E402
 import hq_vivo  # noqa: E402
 
@@ -60,6 +61,15 @@ if [[ "$msg" == *CONSULTAR:* ]]; then
     echo >> "$D/mcp.$agent.out"
   done
   echo "{\"type\":\"result\",\"result\":\"consulte\",\"is_error\":false,\"total_cost_usd\":0.01}"
+  exit 0
+fi
+if [[ "$msg" == *ENTREGA:* ]]; then
+  # escribe el archivo pedido (relativo a la carpeta de trabajo) y lo informa como un Write de claude
+  rel="${msg#*ENTREGA:}"; rel="${rel%% *}"
+  mkdir -p "$(dirname "$PWD/$rel")"; echo "entregado por $agent" > "$PWD/$rel"
+  echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Write\",\"input\":{\"file_path\":\"$PWD/$rel\"}}]}}"
+  echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/fuera/de/la/oficina.md"}}]}}'
+  echo "{\"type\":\"result\",\"result\":\"Listo, dejé $rel\",\"is_error\":false,\"total_cost_usd\":0.03}"
   exit 0
 fi
 if [[ "$msg" == *STREAM* ]]; then
@@ -373,6 +383,16 @@ class ReunionesPatrones(unittest.TestCase):
         self.assertIn("archivo de salida", c3["error"])
         self.assertNotIn("salidaRuta", c3)
 
+
+    def test_acta_es_entrega(self):
+        st, r = self.crear()
+        self.esperar(r["id"])
+        st, c = self.reu("POST", "/api/reuniones/%s/cerrar" % r["id"])
+        self.assertEqual(st, 200, c)
+        es = self.app.entregas("GET", "/api/entregas", {"origen": ["reunion"]}, self.app.activa_carpeta)[1]["entregas"]
+        self.assertEqual(len(es), 1)
+        self.assertEqual((es[0]["agente"], es[0]["ref"], es[0]["titulo"]), ("", r["id"], "Acta: plan de lanzamiento"))
+        self.assertEqual(es[0]["archivos"][0], c["acta"])
 
 BA = "America/Argentina/Buenos_Aires"
 NY = "America/New_York"
@@ -1065,6 +1085,92 @@ class ConsultasAPI(Base):
         self.llamar("POST", "/api/oficinas/abrir", {"carpeta": self.carpeta})
         with open(ruta, encoding="utf-8") as f:
             self.assertEqual(f.read(), hoy)   # idempotente
+
+
+class EntregasUnit(unittest.TestCase):
+    def test_parsear_archivo(self):
+        w = '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/of/archivos/entregables/x.md"}}]}}'
+        self.assertEqual(hq_vivo.parsear_linea(w), [("herramienta", "Write", "x.md"), ("archivo", "/of/archivos/entregables/x.md")])
+        r = '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/of/a.md"}}]}}'
+        self.assertEqual(hq_vivo.parsear_linea(r), [("herramienta", "Read", "a.md")])
+
+    def test_caja_y_relativos(self):
+        c = hq_entregas.CajaArchivos()
+        vistos = []
+        obs = c.observador(vistos.append)
+        for ev in (("archivo", "/x/a.md"), ("archivo", "/x/a.md"), ("archivo", "/x/b.md"), ("texto",)):
+            obs(ev)
+        self.assertEqual(c.valor, ["/x/a.md", "/x/b.md"])
+        self.assertEqual(len(vistos), 4)
+        of = "/tmp/of-entregas"
+        r = hq_entregas.relativos([of + "/archivos/entregables/informe.md", of + "/archivos/entregables/informe.md", "/otra/cosa.md",
+                                   of + "/.claude/agents/marce.md", of + "/conocimiento/agentes/marce.md",
+                                   of + "/conocimiento/estado-actual.md", "archivos/relativo.md", of + "/../fuera.md"], of)
+        self.assertEqual(r, ["archivos/entregables/informe.md", "conocimiento/estado-actual.md", "archivos/relativo.md"])
+        self.assertEqual(hq_entregas.en_entregables(r), ["archivos/entregables/informe.md"])
+
+    def test_textos(self):
+        self.assertEqual(hq_entregas.resumen("hola\nmundo"), "hola mundo")
+        self.assertEqual(len(hq_entregas.resumen("a" * 400)), 280)
+        self.assertEqual(len(hq_entregas.titulo("b" * 100)), 70)
+
+
+class EntregasAPI(BaseAPI):
+    SIDS = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"]
+
+    def ent(self, metodo, path, **q):
+        return self.app.entregas(metodo, path, {k: [v] for k, v in q.items()}, self.app.activa_carpeta)
+
+    def test_chat_con_archivos(self):
+        st, r = self.llamar("POST", "/api/chat", {"agent": "marce", "message": "hola", "session": self.SIDS[0]})
+        self.assertEqual(self.ent("GET", "/api/entregas")[1]["entregas"], [])
+        st, r = self.llamar("POST", "/api/chat", {"agent": "marce", "message": "Armá el informe ENTREGA:archivos/entregables/informe.md",
+                                                  "session": self.SIDS[1]})
+        self.assertEqual(st, 200, r)
+        self.assertTrue(r.get("entrega"))
+        es = self.ent("GET", "/api/entregas")[1]["entregas"]
+        self.assertEqual(len(es), 1)
+        e = es[0]
+        self.assertEqual((e["origen"], e["agente"], e["sid"], e["estado"]), ("chat", "marce", self.SIDS[1], "sin_revisar"))
+        self.assertEqual(e["archivos"], ["archivos/entregables/informe.md"])
+        self.assertTrue(e["titulo"].startswith("Armá el informe"))
+        self.llamar("POST", "/api/chat", {"agent": "marce", "message": "ENTREGA:archivos/borrador.md", "session": self.SIDS[2]})
+        self.assertEqual(len(self.ent("GET", "/api/entregas")[1]["entregas"]), 1)
+
+    def test_estados(self):
+        for i, n in enumerate(("a", "b")):
+            self.llamar("POST", "/api/chat", {"agent": "marce", "message": "ENTREGA:archivos/entregables/%s.md" % n, "session": self.SIDS[i]})
+        self.assertEqual(self.ent("GET", "/api/entregas")[1]["sinRevisar"], 2)
+        self.assertEqual(self.app.vivo("GET", "/api/actividad", {})[1]["entregasSinRevisar"], 2)
+        id_ = self.ent("GET", "/api/entregas")[1]["entregas"][0]["id"]
+        self.assertTrue(self.ent("GET", "/api/entregas/%d" % id_)[1]["entrega"]["texto"].startswith("Listo, dejé"))
+        st, r = self.ent("POST", "/api/entregas/%d/revisada" % id_)
+        self.assertEqual((r["sinRevisar"], r["entrega"]["estado"]), (1, "revisada"))
+        self.assertEqual(len(self.ent("GET", "/api/entregas", estado="sin_revisar")[1]["entregas"]), 1)
+        self.assertEqual(len(self.ent("GET", "/api/entregas", estado="revisada")[1]["entregas"]), 1)
+        self.assertEqual(self.ent("POST", "/api/entregas/%d/sin-revisar" % id_)[1]["sinRevisar"], 2)
+        self.assertEqual(self.ent("GET", "/api/entregas/9999")[0], 404)
+        self.assertEqual(self.ent("GET", "/api/entregas/abc")[0], 404)
+        self.assertEqual(self.ent("GET", "/api/entregas", estado="raro")[0], 400)
+        self.assertEqual(self.ent("GET", "/api/entregas/%d/revisada" % id_)[0], 405)
+        self.assertEqual(self.ent("GET", "/api/entregas", agente="otro")[1]["entregas"], [])
+        self.assertEqual(len(self.ent("GET", "/api/entregas", origen="chat")[1]["entregas"]), 2)
+        self.assertEqual(self.app.entregas("GET", "/api/entregas", {}, None)[0], 409)
+
+    def test_tarea_deja_entrega_y_no_aviso(self):
+        self.app.tareas = hq_tareas.Tareas(self.app, self.server, env={"HQ_PROGRAMADOR": "0"}, sistema="UTC")
+        self.app.tareas.al_terminar = lambda e: self.server._aviso_de_tarea(self.app, e)
+        t = lambda m, p, b=None: self.app.tareas(m, p, {}, json.dumps(b).encode() if b is not None else None)
+        st, r = t("POST", "/api/tareas", {"agente": "marce", "nombre": "Informe diario", "consigna": "Armá el informe",
+                                          "dias": [1, 2, 3, 4, 5], "hora": "08:00", "zona": BA})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(t("POST", "/api/tareas/informe-diario/correr")[0], 202)
+        fin = time.time() + 15
+        while time.time() < fin and not self.ent("GET", "/api/entregas")[1]["entregas"]:
+            time.sleep(0.05)
+        e = self.ent("GET", "/api/entregas")[1]["entregas"][0]
+        self.assertEqual((e["origen"], e["ref"], e["agente"], e["titulo"]), ("tarea", "informe-diario", "marce", "Informe diario"))
+        self.assertFalse(any(a["tipo"] == "tarea" for a in self.app.vivo("GET", "/api/avisos", {})[1]["avisos"]))
 
 
 if __name__ == "__main__":

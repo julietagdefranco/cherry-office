@@ -826,10 +826,10 @@ class Reuniones:
                     err_sint = e.mensaje
                 self.app.costos.registrar(carpeta, "sintesis", caja.valor, ref=id_)
             hoy = datetime.date.today()
-            error_acta, rel = None, None
+            error_acta, rel, salida_final = None, None, None
+            texto_acta = acta_md(of, f["tema"], parts, turnos, sintesis, err_sint, hoy)
             try:
-                rel = self._escribir_acta(carpeta, f["tema"], hoy,
-                                          acta_md(of, f["tema"], parts, turnos, sintesis, err_sint, hoy))
+                rel = self._escribir_acta(carpeta, f["tema"], hoy, texto_acta)
                 if sintesis and sintesis["decisiones"]:
                     hq_core.anexar_decisiones(carpeta, sintesis["decisiones"], hoy)
                 if sintesis and sintesis["pendientes"]:
@@ -847,6 +847,7 @@ class Reuniones:
                 try:
                     final = self._escribir_salida(carpeta, f["salida"], markdown_salida(of, f, parts, sintesis, err_sint, rel, hoy))
                     self._sql("UPDATE reuniones SET salida=? WHERE id=?", (final, id_), escribir=True)
+                    salida_final = final
                 except (OSError, ErrorAPI):
                     if not error_acta:
                         error_acta = "No pude guardar el archivo de salida (%s)." % f["salida"]
@@ -854,6 +855,10 @@ class Reuniones:
             self._sql("UPDATE reuniones SET estado='cerrada', cerrada=?, sintesis=?, error_sintesis=?, acta=?, error=? WHERE id=?",
                       (time.time(), json.dumps(sintesis, ensure_ascii=False) if sintesis else None, err_sint, rel,
                        error_acta, id_), escribir=True)
+            # el acta queda como entrega para revisar (sin agente: es de la reunión)
+            if rel and getattr(self.app, "entregas", None):
+                self.app.entregas.crear(carpeta, "", "reunion", id_, "Acta: %s" % f["tema"], texto_acta,
+                                        archivos=[rel] + ([salida_final] if salida_final else []))
         finally:
             with self.mut:
                 self.cerrando.discard(id_)

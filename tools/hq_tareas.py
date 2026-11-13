@@ -20,6 +20,10 @@ import zoneinfo
 
 import hq_core
 import hq_vivo
+import hq_entregas
+
+# Las corridas únicas que salen de un pendiente de reunión («Hacelo ahora») usan `encargo:<reunión>:<n>` como tarea.
+PREFIJO_ENCARGO = "encargo:"
 from hq_core import ErrorAPI
 
 log = logging.getLogger("hq")
@@ -357,12 +361,14 @@ class Tareas:
         «tarea», ref = id de la tarea), en una sesión nueva donde quedan el pedido y la respuesta como un chat más."""
         app, agente = self.app, definicion["id"]
         caja = hq_vivo.CajaCosto()
+        escritos = hq_entregas.CajaArchivos()
         estado, texto, error = "ok", "", None
         try:
             with app._lock(carpeta, agente):
                 app.db.asegurar_sesion(sid, agente, carpeta)
                 app.db.agregar(sid, agente, "u", t["consigna"])
-                with app.actividad.seguir(carpeta, agente, "tarea", t["nombre"], extra=caja.observador()) as (obs, _tok):
+                with app.actividad.seguir(carpeta, agente, "tarea", t["nombre"],
+                                          extra=caja.observador(escritos.observador())) as (obs, _tok):
                     code, obj = app._chat_correr(carpeta, definicion, t["consigna"], sid, o, obs, time.time())
             if code == 200:
                 texto = obj.get("reply") or "(sin respuesta)"
@@ -379,6 +385,12 @@ class Tareas:
             except Exception:
                 log.exception("tarea %s: no pude guardar el resultado", t["id"])
             log.info("tarea %s agente=%s estado=%s", t["id"], agente, estado)
+            if estado == "ok" and getattr(app, "entregas", None):
+                try:
+                    app.entregas.crear(carpeta, agente, "encargo" if t["id"].startswith(PREFIJO_ENCARGO) else "tarea", t["id"],
+                                       t["nombre"], texto, sid, hq_entregas.relativos(escritos.valor, carpeta), costo=caja.valor)
+                except Exception:
+                    log.exception("tarea %s: no pude guardar la entrega", t["id"])
             with self.mut:
                 self.corriendo.pop((carpeta, t["id"]), None)
         try:

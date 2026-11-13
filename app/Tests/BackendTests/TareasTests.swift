@@ -324,20 +324,24 @@ struct TareasAPITests {
         #expect((await llamar(f.b, "PUT", "/api/tareas/informe-diario")).status == 405)
     }
 
-    @Test("una tarea que termina deja un aviso «te necesita» de tipo tarea y avisa al canal de notificaciones")
-    func avisoAlTerminar() async throws {
+    @Test("una tarea que termina bien deja una entrega sin revisar (no un aviso) y avisa al canal de notificaciones")
+    func entregaAlTerminar() async throws {
         let f = try await fix()
         let canal = Caja()
         f.b.avisos.alCrear { a, nombre in canal.agregar("\(a.tipo):\(nombre)") }
         _ = await nueva(f)
         #expect((await f.post("/api/tareas/informe-diario/correr")).status == 202)
         await terminada(f, "informe-diario")
-        let ok = await esperarAsync { lista(await f.get("/api/avisos").obj["avisos"]).contains { str($0["tipo"]) == "tarea" } }
+        let ok = await esperarAsync { !lista(await f.get("/api/entregas").obj["entregas"]).isEmpty }
         #expect(ok)
-        let av = lista(await f.get("/api/avisos").obj["avisos"]).first { str($0["tipo"]) == "tarea" } ?? [:]
-        #expect(str(av["agente"]) == "marce")
-        #expect(str(av["texto"]).hasPrefix("«"))
-        #expect(canal.lineas.contains { $0.hasPrefix("tarea:") })
+        let e = lista(await f.get("/api/entregas").obj["entregas"]).first ?? [:]
+        #expect(str(e["agente"]) == "marce")
+        #expect(str(e["origen"]) == "tarea")
+        #expect(str(e["ref"]) == "informe-diario")
+        #expect(str(e["estado"]) == "sin_revisar")
+        #expect(!str(e["sid"]).isEmpty)
+        #expect(!lista(await f.get("/api/avisos").obj["avisos"]).contains { str($0["tipo"]) == "tarea" })
+        #expect(canal.lineas.contains { $0 == "entrega:Marce" })
     }
 
     @Test("borrar: saca la tarea y sus ejecuciones; 404 si no existe")
