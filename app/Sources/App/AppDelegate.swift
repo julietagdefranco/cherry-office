@@ -11,13 +11,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private let env = ProcessInfo.processInfo.environment
     private var terminating = false
     private var notificador: Notificador?
+    /// Ícono de la barra de menú: mantiene la app (y las tareas programadas) a la vista con la ventana cerrada.
+    private var barraMenu: BarraMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         runtime = Runtime.make()
         NSApp.mainMenu = MainMenu.build(delegate: self)
         buildWindow()
-        notificador = Notificador(webView: webView) { [weak self] in self?.traerVentana() }
+        notificador = Notificador(webView: webView) { [weak self] in self?.mostrarVentana() }
         notificador?.escuchar(runtime.avisos)
+        if env["HQ_SPIKE"] != "1" { barraMenu = BarraMenu(router: runtime.router, abrir: { [weak self] in self?.mostrarVentana() }) }
         NSApp.activate(ignoringOtherApps: true)
         Task { await boot() }
     }
@@ -91,23 +94,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // MARK: Ciclo de vida
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// Cerrar la ventana no cierra la app: las tareas programadas siguen corriendo (⌘Q o «Salir» en la barra de menú cierran todo).
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Clic en el ícono del Dock: vuelve a mostrar la ventana.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { mostrarVentana() }
+        return true
+    }
+
+    func mostrarVentana() {
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminating { return .terminateLater }
         terminating = true
+        barraMenu?.quitar()
         let rt = runtime!
         Task {
             await rt.shutdown()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
-    }
-
-    /// Muestra la ventana y trae la app al frente (al tocar una notificación).
-    func traerVentana() {
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: Mensajes del WebView (onboarding, spike)

@@ -93,6 +93,12 @@ Los ids son slugs (`^[a-z0-9][a-z0-9-]{0,40}$`). Los chats guardados antes de la
 
 Varios agentes de la oficina activa opinan por **rondas** sobre un tema; el usuario puede intervenir, pedir otra ronda o cerrar. Al cerrar sale una síntesis (resumen, decisiones y pendientes). Código: `Sources/Backend/Reuniones.swift` (`ReunionesRouter`, registrado en `Backend.init` con `registrarReuniones`), paridad exacta (API, archivos y prompts) en `tools/hq_reuniones.py` (la usa `oficina/server.py`) y panel en `oficina/ui/reunion.js` (`App.Reunion.abrir()`). Si cambia una implementación, cambia la otra.
 
+## Tareas programadas y segundo plano
+
+Cada agente puede tener tareas (`tareas` en `oficina.json`: días ISO 1–7, hora `HH:MM`, zona IANA, consigna). El actor `Programador` (`Sources/Backend/Programador.swift`, iniciado en `Backend.init` y detenido en `shutdown()`) revisa cada 30 s la oficina activa y corre las que tocan como un chat del agente (carril, permisos, actividad y costo con origen «tarea»), en una sesión nueva que queda en el historial; las corridas se guardan en la tabla `ejecuciones`. La lógica de horarios es pura y está en `Sources/Backend/Tareas.swift` (`Programacion.proxima/debeCorrer`: una vez por horario, DST correcto, puesta al día si pasaron menos de 12 h). Rutas en `TareasRouter.swift` (`/api/tareas*`, registrado con `registrarTareas`); `programador.alTerminar { ejecucion in … }` es el gancho para avisos y notificaciones. Paridad en `tools/hq_tareas.py`; pestaña «Tareas» de la ficha en `oficina/ui/agente.js`.
+
+La app sigue viva con la ventana cerrada (`applicationShouldTerminateAfterLastWindowClosed` = false; el Dock la vuelve a abrir) y tiene un ícono en la barra de menú (`Sources/App/BarraMenu.swift`): abrir, próximas tareas, «Abrir al iniciar sesión» (`SMAppService.mainApp`, apagado por defecto) y salir. ⌘Q cierra todo. Variables de prueba: `HQ_PROGRAMADOR=0` apaga el bucle, `HQ_PROGRAMADOR_INTERVALO` (segundos) lo acelera.
+
 | Método | Ruta | Cuerpo | Respuesta |
 |---|---|---|---|
 | POST | `/api/reuniones` | `{tema, agentes:[ids], rondas?=1}` (tema ≤ 500 car., 1-20 agentes de la oficina, rondas 1-3) | La reunión (abajo). Arranca en segundo plano |
