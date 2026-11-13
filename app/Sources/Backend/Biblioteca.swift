@@ -893,7 +893,10 @@ public actor BibliotecaRouter: SubRouter {
                 let p = """
                 Describí la imagen que está en «\(ruta)» (usá la herramienta Read para verla). Incluí todo el texto visible tal cual, números, objetos, personas (sin identificarlas), colores y contexto. Respondé en español, en texto plano, sin inventar lo que no se ve.
                 """
-                let t = try await runner.correrConLectura(prompt: p, cwd: carpeta, dirs: [(ruta as NSString).deletingLastPathComponent], timeout: timeoutImagen)
+                let caja = CajaCosto()
+                defer { let c = caja.valor, st = store; Task { await st.registrarCosto(oficina: carpeta, origen: "biblioteca", ref: slug, costo: c) } }
+                let t = try await runner.correrConLectura(prompt: p, cwd: carpeta, dirs: [(ruta as NSString).deletingLastPathComponent],
+                                                          timeout: timeoutImagen, obs: caja.observador())
                 let limpio = t.trimmingCharacters(in: .whitespacesAndNewlines)
                 if limpio.isEmpty { r.aviso = "Claude no devolvió una descripción de la imagen." } else { r.texto = limpio }
             } catch let e as ClaudeError {
@@ -920,7 +923,9 @@ public actor BibliotecaRouter: SubRouter {
         var errorFicha: String?
         do {
             let p = Biblioteca.promptFicha(oficina: a.oficina, carpeta: carpeta, nombre: f.nombre, tipo: f.tipo, departamento: f.departamento, texto: texto)
-            let t = try await runner.correrSinAgente(prompt: p, timeout: timeoutFicha, cwd: carpeta)
+            let caja = CajaCosto()
+            defer { let c = caja.valor, st = store; Task { await st.registrarCosto(oficina: carpeta, origen: "biblioteca", ref: slug, costo: c) } }
+            let t = try await runner.correrSinAgente(prompt: p, timeout: timeoutFicha, cwd: carpeta, obs: caja.observador())
             if let (fi, cs) = Biblioteca.parsearFicha(t, nombre: f.nombre, oficina: a.oficina) { ficha = fi; contradicciones = cs }
             else { errorFicha = "El bibliotecario no devolvió la ficha en el formato esperado." }
         } catch let e as ClaudeError { errorFicha = e.mensaje }
@@ -973,9 +978,15 @@ public actor BibliotecaRouter: SubRouter {
             let ctx = ContextoOficina(carpeta: carpeta, escritura: [a.ruta("conocimiento/agentes/\(id).md")],
                                       dirsExtra: Permisos.dirsVinculos(a.oficina, agente: ag))
             let runner = self.runner
+            let caja = CajaCosto(), st = store
+            defer { let c = caja.valor; Task { await st.registrarCosto(oficina: carpeta, agente: id, origen: "biblioteca", ref: slug, costo: c) } }
             do {
                 _ = try await runner.conCarril(oficina: carpeta, agente: id) {
-                    try await runner.ejecutarChat(agente: id, mensaje: prompt, sid: UUID().uuidString.lowercased(), activa: false, oficina: ctx)
+                    try await runner.actividad.seguir(oficina: carpeta, agente: id, origen: "biblioteca", tarea: "Leyendo " + f.nombre,
+                                                      extra: caja.observador()) { obs, _ in
+                        try await runner.ejecutarChat(agente: id, mensaje: prompt, sid: UUID().uuidString.lowercased(), activa: false,
+                                                      oficina: ctx, obs: obs)
+                    }
                 }
                 resultados[id] = "ok"
             } catch let e as ClaudeError {

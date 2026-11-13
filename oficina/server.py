@@ -37,6 +37,7 @@ import hq_core  # noqa: E402  (lógica de oficinas compartida con tools/importar
 import hq_reuniones  # noqa: E402  (/api/reuniones*, misma lógica que app/Sources/Backend/Reuniones.swift)
 import hq_explorador  # noqa: E402  (/api/fs/carpetas, /api/oficina/archivo*; app/Sources/Backend/Explorador.swift)
 import hq_biblioteca  # noqa: E402  (/api/archivos*, /api/vinculos*, /api/biblioteca*; app/Sources/Backend/Biblioteca.swift)
+import hq_vivo  # noqa: E402  (stream-json, /api/actividad, /api/costos; app/Sources/Backend/{Stream,Actividad}.swift)
 from hq_core import ErrorAPI  # noqa: E402
 
 VERSION = "1.0.0"
@@ -180,8 +181,7 @@ def construir_comando(cfg, agente, msg, sid, flag):
     if escribibles:
         herr += ",Edit,Write"
         extra = ["--allowedTools"] + [regla_permiso(h, p) for p in escribibles for h in ("Edit", "Write")]
-    cmd = [cfg["claude_bin"], "-p", "--agent", agente, flag, sid,
-           "--output-format", "json", "--tools", herr]
+    cmd = [cfg["claude_bin"], "-p", "--agent", agente, flag, sid] + hq_vivo.FORMATO_SALIDA + ["--tools", herr]
     for d in cfg["dirs_extra"]:
         cmd += ["--add-dir", d]
     return cmd + extra + ["--", msg]
@@ -206,7 +206,7 @@ def construir_comando_oficina(cfg, carpeta, definicion, msg, sid, flag, oficina=
     herr = cfg["herramientas_agente"].get(agente) or cfg["herramientas"]
     escribibles = contexto_oficina(carpeta, definicion)
     herr += ",Edit,Write"
-    cmd = [cfg["claude_bin"], "-p", "--agent", agente, flag, sid, "--output-format", "json", "--tools", herr]
+    cmd = [cfg["claude_bin"], "-p", "--agent", agente, flag, sid] + hq_vivo.FORMATO_SALIDA + ["--tools", herr]
     for d in list(cfg["oficina_dirs_extra"]) + hq_core.dirs_vinculos(oficina, definicion):
         cmd += ["--add-dir", d]
     cmd += ["--allowedTools"] + [regla_permiso(h, p) for p in escribibles for h in ("Edit", "Write")]
@@ -420,11 +420,43 @@ def matar_grupo(p):
             pass
 
 
-def ejecutar(cmd, cwd, timeout):
-    """Corre cmd; devuelve (returncode, stdout, stderr). TiempoAgotado si vence (mata el grupo)."""
+_CONFIG_DE_USUARIO = {
+    "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+    "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY", "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_SUBAGENT_MODEL",
+}
+
+
+def heredada_de_sesion(k):
+    """Variables que una sesión de Claude Code inyecta a sus hijos (igual que ClaudeLocator.heredadaDeSesion).
+
+    Si el server se lanza desde una sesión, el `claude` hijo las hereda, se cree anidado y no guarda el
+    transcript. Se conservan CLAUDE_CODE_USE_* / CLAUDE_CODE_SKIP_* y la config puesta por el usuario.
+    """
+    if k in ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT") or k.startswith("CLAUDE_AGENT_SDK_"):
+        return True
+    if not k.startswith("CLAUDE_CODE_"):
+        return False
+    if k.startswith("CLAUDE_CODE_USE_") or k.startswith("CLAUDE_CODE_SKIP_"):
+        return False
+    return k not in _CONFIG_DE_USUARIO
+
+
+def entorno_hijo(env=None):
+    env = os.environ if env is None else env
+    return {k: v for k, v in env.items() if not heredada_de_sesion(k)}
+
+
+def ejecutar(cmd, cwd, timeout, al_linea=None, env_extra=None):
+    """Corre cmd; devuelve (returncode, stdout, stderr). TiempoAgotado si vence (mata el grupo).
+    `al_linea`: recibe cada línea de stdout apenas llega (stream-json). `env_extra`: variables extra para el hijo."""
     kw = {"start_new_session": True} if os.name == "posix" else {}
+    env = entorno_hijo()
+    env.update(env_extra or {})
     p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         stdin=subprocess.DEVNULL, text=True, **kw)
+                         stdin=subprocess.DEVNULL, text=True, env=env, **kw)
+    if al_linea is not None:
+        return _ejecutar_por_lineas(p, timeout, al_linea)
     try:
         out, err = p.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -435,6 +467,41 @@ def ejecutar(cmd, cwd, timeout):
             pass
         raise TiempoAgotado()
     return p.returncode, out, err
+
+
+def _ejecutar_por_lineas(p, timeout, al_linea):
+    lineas, errores = [], []
+
+    def leer_out():
+        for linea in p.stdout:
+            lineas.append(linea)
+            try:
+                al_linea(linea.rstrip("\n"))
+            except Exception:
+                log.exception("al_linea falló")
+
+    def leer_err():
+        errores.append(p.stderr.read())
+    hilos = [threading.Thread(target=leer_out, daemon=True), threading.Thread(target=leer_err, daemon=True)]
+    for h in hilos:
+        h.start()
+    try:
+        p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        matar_grupo(p)
+        try:
+            p.wait(timeout=5)
+        except Exception:
+            pass
+        raise TiempoAgotado()
+    for h in hilos:
+        h.join(timeout=5)
+    for f in (p.stdout, p.stderr):
+        try:
+            f.close()
+        except Exception:
+            pass
+    return p.returncode, "".join(lineas), "".join(errores)
 
 
 def error_de(rc, stdout, stderr, out):
@@ -455,6 +522,9 @@ def clasificar_error(e):
 
 # ----------------------------------------------------------------------------- aplicación
 
+_DIFERIDO = object()  # _despachar devuelve (_DIFERIDO, fn): fn corre después de soltar self.mut
+
+
 class App:
     def __init__(self, cfg, sesiones_json=None):
         self.cfg = cfg
@@ -466,6 +536,8 @@ class App:
         self.locks_guard = threading.Lock()
         self.mut = threading.RLock()  # serializa lecturas-modificaciones-escrituras de oficina.json y del estado
         self.db = Datos(os.path.join(cfg["datos_dir"], "hq.db"))
+        self.actividad = hq_vivo.Actividad()
+        self.costos = hq_vivo.Costos(os.path.join(cfg["datos_dir"], "hq.db"))
         self.migrados = self.db.migrar_json(sesiones_json or os.path.join(ROOT, ".sesiones.json"))
         self.auth_ok = None
         self.home = _home()
@@ -602,48 +674,53 @@ class App:
             self.db.asegurar_sesion(sid, agente, carpeta)
             self.db.agregar(sid, agente, "u", msg)
 
-            def correr(flag):
-                rc, so, se = ejecutar(construir_comando_oficina(cfg, carpeta, definicion, msg, sid, flag, oficina=ofi),
-                                      carpeta, cfg["timeout"])
-                try:
-                    out = json.loads(so)
-                    if not isinstance(out, dict):
-                        out = None
-                except Exception:
-                    out = None
-                return rc, so, se, out
-
+            caja = hq_vivo.CajaCosto()
             try:
-                flag = "--resume" if self.db.esta_activa(sid) else "--session-id"
-                rc, so, se, out = correr(flag)
+                with self.actividad.seguir(carpeta, agente, "chat", msg, extra=caja.observador()) as (obs, _token):
+                    return self._chat_correr(carpeta, definicion, msg, sid, ofi, obs, t0)
+            finally:
+                self.costos.registrar(carpeta, "chat", caja.valor, agente, sid)
+
+    def _chat_correr(self, carpeta, definicion, msg, sid, ofi, obs, t0):
+        """Corre claude para un mensaje (con el carril ya tomado) y guarda la respuesta. -> (http_status, dict)."""
+        cfg, agente = self.cfg, definicion["id"]
+
+        def correr(flag):
+            rc, so, se = ejecutar(construir_comando_oficina(cfg, carpeta, definicion, msg, sid, flag, oficina=ofi),
+                                  carpeta, cfg["timeout"], al_linea=hq_vivo.lector(obs))
+            return rc, so, se, hq_vivo.ultimo_json(so)
+
+        try:
+            flag = "--resume" if self.db.esta_activa(sid) else "--session-id"
+            rc, so, se, out = correr(flag)
+            e = error_de(rc, so, se, out)
+            # si la conversación ya existe (o no existe), probamos la otra forma
+            if e and "already in use" in e:
+                rc, so, se, out = correr("--resume")
                 e = error_de(rc, so, se, out)
-                # si la conversación ya existe (o no existe), probamos la otra forma
-                if e and "already in use" in e:
-                    rc, so, se, out = correr("--resume")
-                    e = error_de(rc, so, se, out)
-                elif e and flag == "--resume" and ("No conversation" in e or "not found" in e.lower()):
-                    rc, so, se, out = correr("--session-id")
-                    e = error_de(rc, so, se, out)
-            except TiempoAgotado:
-                texto = "Tardó demasiado en responder."
-                self.db.agregar(sid, agente, "a", "No pude responder: " + texto, True)
-                log.warning("chat agente=%s sid=%s tipo=timeout seg=%.1f", agente, sid[:8], time.time() - t0)
-                return 504, {"error": texto}
-            except (FileNotFoundError, PermissionError, OSError) as ex:
-                texto = "No pude ejecutar Claude Code en esta compu."
-                self.db.agregar(sid, agente, "a", "No pude responder: " + texto, True)
-                log.error("chat agente=%s sid=%s tipo=no_ejecuta (%s)", agente, sid[:8], type(ex).__name__)
-                return 500, {"error": texto}
-            if e:
-                tipo, texto = clasificar_error(e)
-                self.db.agregar(sid, agente, "a", "No pude responder: " + texto, True)
-                log.warning("chat agente=%s sid=%s tipo=%s rc=%s seg=%.1f", agente, sid[:8], tipo, rc, time.time() - t0)
-                return 500, {"error": texto}
-            texto = (out or {}).get("result") or so.strip()
-            self.db.marcar_activa(sid)
-            self.db.agregar(sid, agente, "a", texto or "(sin respuesta)")
-            log.info("chat agente=%s sid=%s tipo=ok seg=%.1f", agente, sid[:8], time.time() - t0)
-            return 200, {"reply": texto}
+            elif e and flag == "--resume" and ("No conversation" in e or "not found" in e.lower()):
+                rc, so, se, out = correr("--session-id")
+                e = error_de(rc, so, se, out)
+        except TiempoAgotado:
+            texto = "Tardó demasiado en responder."
+            self.db.agregar(sid, agente, "a", "No pude responder: " + texto, True)
+            log.warning("chat agente=%s sid=%s tipo=timeout seg=%.1f", agente, sid[:8], time.time() - t0)
+            return 504, {"error": texto}
+        except (FileNotFoundError, PermissionError, OSError) as ex:
+            texto = "No pude ejecutar Claude Code en esta compu."
+            self.db.agregar(sid, agente, "a", "No pude responder: " + texto, True)
+            log.error("chat agente=%s sid=%s tipo=no_ejecuta (%s)", agente, sid[:8], type(ex).__name__)
+            return 500, {"error": texto}
+        if e:
+            tipo, texto = clasificar_error(e)
+            self.db.agregar(sid, agente, "a", "No pude responder: " + texto, True)
+            log.warning("chat agente=%s sid=%s tipo=%s rc=%s seg=%.1f", agente, sid[:8], tipo, rc, time.time() - t0)
+            return 500, {"error": texto}
+        texto = (out or {}).get("result") or so.strip()
+        self.db.marcar_activa(sid)
+        self.db.agregar(sid, agente, "a", texto or "(sin respuesta)")
+        log.info("chat agente=%s sid=%s tipo=ok seg=%.1f", agente, sid[:8], time.time() - t0)
+        return 200, {"reply": texto}
 
     def historial(self, carpeta, agente, sid):
         if sid is None:
@@ -658,28 +735,44 @@ class App:
     # ---- claude sin agente (borradores)
 
     def correr_sin_agente(self, prompt, cwd):
-        """`claude -p` sin agente y sin herramientas. -> texto de `result`; ErrorAPI(502) si falla."""
+        """`claude -p` sin agente y sin herramientas. -> texto de `result`; ErrorAPI(502) si falla. Registra el costo."""
         def falla(m):
             return ErrorAPI(502, "No pude armar el borrador del agente: " + m)
         if not self.claude:
             raise falla("No encontré Claude Code en esta compu.")
         try:
-            rc, so, se = ejecutar([self.claude, "-p", "--output-format", "json", "--tools", "", "--", prompt],
-                                  cwd, self.cfg["timeout"])
+            caja = hq_vivo.CajaCosto()
+            rc, so, se = ejecutar([self.claude, "-p"] + hq_vivo.FORMATO_SALIDA + ["--tools", "", "--", prompt],
+                                  cwd, self.cfg["timeout"], al_linea=hq_vivo.lector(caja.observador()))
+            self.costos.registrar(cwd, "borrador", caja.valor)
         except TiempoAgotado:
             raise falla("Tardó demasiado en responder.")
         except (FileNotFoundError, PermissionError, OSError):
             raise falla("No pude ejecutar Claude Code en esta compu.")
-        try:
-            out = json.loads(so)
-            if not isinstance(out, dict):
-                out = None
-        except Exception:
-            out = None
+        out = hq_vivo.ultimo_json(so)
         e = error_de(rc, so, se, out)
         if e:
             raise falla(clasificar_error(e)[1])
         return (out or {}).get("result") or (so.strip() if out is None else "")
+
+    # ---- en vivo (fuera de self.mut: no se traba mientras dura un chat)
+
+    def vivo(self, metodo, path, query):
+        """/api/actividad y /api/costos. -> (status, dict) o None si no es una de esas rutas."""
+        if path not in ("/api/actividad", "/api/costos"):
+            return None
+        if metodo != "GET":
+            return 405, {"error": "método no permitido"}
+        carpeta = self.activa_carpeta
+        if path == "/api/actividad":
+            return 200, (self.actividad.json(carpeta) if carpeta else {"agentes": {}, "version": 0})
+        if not carpeta:
+            return 409, {"error": "No hay una oficina abierta."}
+        try:
+            desde = float((query.get("desde") or ["0"])[0])
+        except ValueError:
+            desde = 0.0
+        return 200, self.costos.totales(carpeta, desde)
 
     # ---- API
 
@@ -691,7 +784,10 @@ class App:
             return 404, {"error": "no"}
         try:
             with self.mut:
-                return self._despachar(metodo, partes, query, body, no)
+                r = self._despachar(metodo, partes, query, body, no)
+            if r[0] is _DIFERIDO:
+                return r[1]()
+            return r
         except ErrorAPI as e:
             return e.status, {"error": e.mensaje}
 
@@ -741,7 +837,8 @@ class App:
             definicion = next((a for a in o["agentes"] if a["id"] == agente), None) if isinstance(agente, str) else None
             if (definicion is None or not msg or len(msg) > MAX_MENSAJE or not uuid_valido(sid)):
                 return 400, {"error": "pedido inválido"}
-            return self.chat(carpeta, definicion, msg, sid.lower())
+            # el chat corre FUERA de self.mut (ver api): si no, un chat largo traba /api/estado y todo el resto
+            return _DIFERIDO, lambda: self.chat(carpeta, definicion, msg, sid.lower())
         if p1 == "oficinas":
             return self._oficinas(m, partes, body, no)
         if p1 == "oficina" and n == 2:
@@ -989,6 +1086,9 @@ def crear_handler(app):
 
         def _api(self, metodo, u, body):
             q = parse_qs(u.query)
+            r = app.vivo(metodo, u.path, q)
+            if r is not None:
+                return self._json(*r)
             if u.path == "/api/reuniones" or u.path.startswith("/api/reuniones/"):
                 r = app.reuniones(metodo, u.path, q, body) if app.reuniones else None
                 return self._json(*(r or (404, {"error": "no"})))
