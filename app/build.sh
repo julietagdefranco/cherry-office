@@ -36,7 +36,7 @@ rsync -a --exclude '.DS_Store' "$APP_DIR/Resources/vendor/" "$APP/Contents/Resou
 
 # El bundle tiene que llevar el front modular, las piezas LDraw con sus licencias y el LDrawLoader; y ninguna página de laboratorio.
 RES="$APP/Contents/Resources/oficina"
-for f in index.html ui/estilo.css ui/piezas.js ui/oficina3d.js ui/base.js ui/actividad.js ui/avisos.js ui/carpetas.js ui/contratar.js ui/agente.js ui/deptos.js ui/reunion.js ui/biblioteca.js ui/app.js \
+for f in index.html ui/estilo.css ui/piezas.js ui/oficina3d.js ui/base.js ui/actividad.js ui/avisos.js ui/paleta.js ui/carpetas.js ui/contratar.js ui/agente.js ui/deptos.js ui/reunion.js ui/biblioteca.js ui/app.js \
          ldraw/catalogo.json ldraw/minifigs.mpd ldraw/LICENSE-LDraw.txt vendor/three.min.js vendor/LDrawLoader.js \
          vendor/LICENSE-three.txt vendor/LICENSE-Poppins-OFL.txt; do
   [ -f "$RES/$f" ] || { echo "Falta en el bundle: oficina/$f" >&2; exit 1; }

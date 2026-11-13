@@ -17,7 +17,7 @@ App.Oficina3D = (function () {
   var pendiente = false, sombrasSucias = true, ultimo = 0, construyendo = 0, sombraAnim = false, soloLento = true;
   var hover = null, elegido = null, hablando = null;
   var orb = { az: 0.42, el: 0.78, d: 60, tx: 0, tz: 0, minD: 10, maxD: 200 };
-  var cbAgente = function () {}, cbLugar = function () {};
+  var cbAgente = function () {}, cbLugar = function () {}, cbHover = function () {};
   var ray = new T.Raycaster(), v2 = new T.Vector2(), v3 = new T.Vector3();
   var BLANCO = '#f4f4f1', GRIS_CLARO = '#a3a7aa', GRIS_OSCURO = '#5d6166', NEGRO = '#2a2b2e', MADERA = '#8b6d4c', TOSTADO = '#c9b58c';
 
@@ -213,7 +213,7 @@ App.Oficina3D = (function () {
     }
     cv.addEventListener('pointerup', soltar);
     cv.addEventListener('pointercancel', function () { drag = null; });
-    cv.addEventListener('pointerleave', function () { if (hover) { hover = null; cv.style.cursor = ''; actualizarEtiquetasHover(); pedir(); } });
+    cv.addEventListener('pointerleave', function () { if (hover) { hover = null; cv.style.cursor = ''; actualizarEtiquetasHover(); pedir(); cbHover(null); } });
     cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     cv.addEventListener('wheel', function (e) {
       e.preventDefault();
@@ -254,7 +254,7 @@ App.Oficina3D = (function () {
       var ev = hoverPend; hoverPend = null;
       var h = rayo(ev), clave = h ? (h.tipo + ':' + (h.id || '')) : null;
       cv.style.cursor = h ? 'pointer' : '';
-      if (clave !== hover) { hover = clave; actualizarEtiquetasHover(); pedir(); }
+      if (clave !== hover) { hover = clave; actualizarEtiquetasHover(); pedir(); cbHover(h); }
     });
   }
   function elegir(e) {
@@ -847,6 +847,7 @@ App.Oficina3D = (function () {
     construir: construir,
     alElegirAgente: function (fn) { cbAgente = fn; },
     alElegirLugar: function (fn) { cbLugar = fn; },
+    alPasar: function (fn) { cbHover = fn; },
     elegir: function (id) { elegido = id; actualizarEtiquetasHover(); pedir(); },
     ocupado: function (id, si) { var f = figuras[id]; if (!f) return; f.ocupado = !!si; f.etiqueta.el.classList.toggle('ocupado', !!si); actualizarEtiquetasHover(); pedir(); },
     reunion: reunion,

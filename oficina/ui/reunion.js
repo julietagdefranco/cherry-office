@@ -277,7 +277,7 @@
   }
 
   App.Reunion = {
-    abrir: abrir, nueva: nueva, retomar: retomar,
+    abrir: abrir, nueva: nueva, retomar: retomar, ver: panel,
     alCerrarPanel: function () { visto = null; sincronizar(); }
   };
 })();
