@@ -370,8 +370,10 @@ public final class Router: APIHandler {
                 try await store.agregar(sid: sid, rol: "u", texto: msg)
                 let activa = await store.estaActiva(sid)
                 let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "chat", tarea: msg,
-                                                              extra: caja.observador()) { obs, _ in
-                    try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctx, obs: obs)
+                                                              extra: caja.observador()) { obs, token in
+                    let resumen = runner.resumirTarea(msg, oficina: carpeta, agente: agente, token: token, store: store)
+                    defer { resumen?.cancel() }
+                    return try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctx, obs: obs)
                 }
                 try await store.marcarActiva(sid)
                 try await store.agregar(sid: sid, rol: "a", texto: texto.isEmpty ? "(sin respuesta)" : texto)

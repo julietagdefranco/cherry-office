@@ -676,8 +676,12 @@ class App:
 
             caja = hq_vivo.CajaCosto()
             try:
-                with self.actividad.seguir(carpeta, agente, "chat", msg, extra=caja.observador()) as (obs, _token):
-                    return self._chat_correr(carpeta, definicion, msg, sid, ofi, obs, t0)
+                with self.actividad.seguir(carpeta, agente, "chat", msg, extra=caja.observador()) as (obs, token):
+                    resumen = hq_vivo.resumir_en_segundo_plano(self, sys.modules[__name__], msg, carpeta, agente, token)
+                    try:
+                        return self._chat_correr(carpeta, definicion, msg, sid, ofi, obs, t0)
+                    finally:
+                        resumen.set()
             finally:
                 self.costos.registrar(carpeta, "chat", caja.valor, agente, sid)
 

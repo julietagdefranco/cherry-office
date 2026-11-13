@@ -296,3 +296,51 @@ class Costos:
                     "reuniones": agrupar("ref", "AND origen IN ('reunion','sintesis')")}
         finally:
             c.close()
+
+
+# ----------------------------------------------------------------------------- resumen de la tarea (Haiku)
+
+RESUMEN_MIN = 40
+RESUMEN_TIMEOUT = 20
+
+
+def hace_falta_resumen(msg):
+    return len((msg or "").strip()) > RESUMEN_MIN
+
+
+def prompt_resumen(msg):
+    m = msg if len(msg) <= 2000 else msg[:2000] + "…"
+    return ("Resumí en 3 a 6 palabras, en español, qué le están pidiendo a la persona en este mensaje. Empezá con un verbo "
+            "en gerundio (por ejemplo «Armando el calendario de reels»). Respondé solo con el resumen, sin comillas ni punto "
+            "final.\n\nMensaje:\n" + m)
+
+
+def limpiar_resumen(s):
+    t = ((s or "").split("\n") or [""])[0].strip(" \t\"'«»“”*")
+    while t.endswith("."):
+        t = t[:-1]
+    return recortar(t) if t else None
+
+
+def resumir_en_segundo_plano(app, srv, msg, carpeta, agente, token):
+    """Hilo que pide el resumen a Haiku y lo vuelca en la actividad. -> threading.Event para avisar que terminó el chat."""
+    listo = threading.Event()
+    if not hace_falta_resumen(msg) or not app.claude:
+        return listo
+
+    def correr():
+        caja = CajaCosto()
+        try:
+            rc, so, _ = srv.ejecutar([app.claude, "-p"] + FORMATO_SALIDA + ["--tools", "", "--model", "haiku", "--",
+                                     prompt_resumen(msg)], carpeta, RESUMEN_TIMEOUT, al_linea=lector(caja.observador()))
+            out = ultimo_json(so)
+            if rc == 0 and out and not out.get("is_error") and not listo.is_set():
+                r = limpiar_resumen(out.get("result"))
+                if r:
+                    app.actividad.tarea(carpeta, agente, token, r)
+        except Exception:
+            pass
+        finally:
+            app.costos.registrar(carpeta, "resumen", caja.valor, agente)
+    threading.Thread(target=correr, daemon=True).start()
+    return listo

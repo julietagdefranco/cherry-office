@@ -78,7 +78,7 @@ final class Sandbox: @unchecked Sendable {
       prev="$a"
     done
     msg="${@: -1}"
-    { printf '%s\x1f' "$@"; printf '\x1e'; } >> "$D/args.log"
+    rec="$(printf '%s\x1f' "$@")"; printf '%s\x1e' "$rec" >> "$D/args.log"   # una sola escritura: corridas paralelas no se mezclan
     echo "S $agent" >> "$D/events.log"
     fin() { echo "E $agent" >> "$D/events.log"; }
     has() { [[ " $* " == *" $1 "* ]]; }
@@ -89,6 +89,7 @@ final class Sandbox: @unchecked Sendable {
       elif [[ "$msg" == *"secretario de actas"* ]]; then kind=acta
       elif [[ "$msg" == *"Sos el bibliotecario"* ]]; then kind=ficha
       elif [[ "$msg" == *"imagen que est"* ]]; then kind=imagen
+      elif [[ "$msg" == *"en 3 a 6 palabras"* ]]; then kind=resumen
       fi
     else
       if [[ "$msg" == *"en una reuni"* ]]; then kind=turno
@@ -136,6 +137,7 @@ final class Sandbox: @unchecked Sendable {
         acta) echo '{"type":"result","result":"{\"resumen\":\"Se acordó avanzar con el plan.\",\"decisiones\":[\"Lanzar en diciembre\",\"Priorizar los reels\"],\"pendientes\":[{\"quien\":\"Marce\",\"que\":\"Armar el calendario\"}]}","is_error":false}';;
         ficha) echo '{"type":"result","result":"{\"titulo\":\"Ficha de prueba\",\"resumen\":\"Resumen de prueba del documento.\",\"datos_clave\":[\"dato uno\"],\"temas\":[\"pruebas\"],\"util_para\":[\"direccion\"],\"fechas\":[],\"contradicciones\":[]}","is_error":false}';;
         imagen) echo '{"type":"result","result":"Una imagen de prueba con el texto HOLA MUNDO.","is_error":false}';;
+        resumen) echo '{"type":"result","result":"«Armando el plan de diciembre.»","is_error":false,"total_cost_usd":0.001}';;
         turno) echo "{\"type\":\"result\",\"result\":\"Opinión de $agent sobre el tema.\",\"is_error\":false,\"total_cost_usd\":0.02}";;
         lectura) mkdir -p conocimiento/agentes; echo "- leyó el documento (prueba)" >> "conocimiento/agentes/$agent.md"; echo '{"type":"result","result":"listo","is_error":false}';;
       esac
@@ -149,6 +151,7 @@ final class Sandbox: @unchecked Sendable {
         acta) echo '{"type":"result","result":"{\"resumen\":\"Se acordó avanzar con el plan.\",\"decisiones\":[\"Lanzar en diciembre\",\"Priorizar los reels\"],\"pendientes\":[{\"quien\":\"Marce\",\"que\":\"Armar el calendario\"}]}","is_error":false}';;
         ficha) echo '{"type":"result","result":"{\"titulo\":\"Ficha de prueba\",\"resumen\":\"Resumen de prueba del documento.\",\"datos_clave\":[\"dato uno\"],\"temas\":[\"pruebas\"],\"util_para\":[\"direccion\"],\"fechas\":[],\"contradicciones\":[]}","is_error":false}';;
         imagen) echo '{"type":"result","result":"Una imagen de prueba con el texto HOLA MUNDO.","is_error":false}';;
+        resumen) echo '{"type":"result","result":"«Armando el plan de diciembre.»","is_error":false,"total_cost_usd":0.001}';;
         turno) echo "{\"type\":\"result\",\"result\":\"Opinión de $agent sobre el tema.\",\"is_error\":false,\"total_cost_usd\":0.02}";;
         lectura) mkdir -p conocimiento/agentes; echo "- leyó el documento (prueba)" >> "conocimiento/agentes/$agent.md"; echo '{"type":"result","result":"listo","is_error":false}';;
       esac

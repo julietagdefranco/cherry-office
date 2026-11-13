@@ -115,6 +115,36 @@ struct ActividadAPITests {
         #expect(abs((dict(c.obj["origenes"])["chat"] as? Double ?? 0) - 0.25) < 1e-9)
     }
 
+    @Test("cartel: un pedido largo se resume con haiku y el resumen reemplaza al mensaje recortado; uno corto no se resume")
+    func resumen() async throws {
+        let f = try await Fix.crear(agentes: [("marce", "direccion", nil)])
+        async let r = chat(f.b, agent: "marce", message: "STREAM PAUSA necesito que me armes el plan completo de reels para diciembre", session: U.c)
+        let ok = await esperarAsync {
+            str(dict(dict(await f.get("/api/actividad").obj["agentes"])["marce"])["tarea"]) == "Armando el plan de diciembre"
+        }
+        let diag = await f.get("/api/actividad").obj
+        #expect(ok, "actividad: \(diag) llamadas: \(f.sb.llamadas.map { $0.prefix(6) })")
+        f.sb.abrirPuerta()
+        _ = await r
+        let haiku = f.sb.llamadas.filter { Sandbox.valor($0, "--model") == "haiku" }
+        #expect(haiku.count == 1)
+        #expect(haiku.first.map { Sandbox.valor($0, "--tools") } == "")
+        #expect(haiku.first?.contains("--agent") == false)
+        let c = await esperarAsync { (dict(await f.get("/api/costos").obj["origenes"])["resumen"] as? Double ?? 0) > 0 }
+        #expect(c)
+        let antes = f.sb.llamadas.count
+        _ = await chat(f.b, agent: "marce", message: "hola", session: U.d)
+        #expect(f.sb.llamadas.count == antes + 1, "un mensaje corto no lanza el resumen")
+    }
+
+    @Test("limpiar resumen: primera línea, sin comillas ni punto, recortado")
+    func limpiarResumen() {
+        #expect(ResumenTarea.limpiar("«Armando el plan.»\notra") == "Armando el plan")
+        #expect(ResumenTarea.limpiar("   ") == nil)
+        #expect((ResumenTarea.limpiar(String(repeating: "x", count: 90)) ?? "").count == 48)
+        #expect(!ResumenTarea.hace(falta: "hola"))
+    }
+
     @Test("todas las corridas usan stream-json --verbose")
     func formato() async throws {
         let f = try await Fix.crear(agentes: [("marce", "direccion", nil)])

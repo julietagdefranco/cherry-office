@@ -29,6 +29,9 @@ for a in "$@"; do
 done
 msg="${@: -1}"
 { printf '%s\x1f' "$@"; printf '\x1e'; } >> "$D/args.log"
+if [[ "$msg" == *"en 3 a 6 palabras"* ]]; then
+  echo '{"type":"result","result":"«Armando el plan.»","is_error":false,"total_cost_usd":0.001}'; exit 0
+fi
 if [[ "$msg" == *STREAM* ]]; then
   echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-$agent\"}"
   echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/x/conocimiento/oficina.md"}}]}}'
@@ -117,13 +120,16 @@ class VivoAPI(unittest.TestCase):
         self.assertEqual(st, 200, r)
 
     def tearDown(self):
+        for t in threading.enumerate():   # hilos de resumen o chat que todavía escriben en la base
+            if t is not threading.current_thread() and t.daemon:
+                t.join(5)
         shutil.rmtree(self.d, ignore_errors=True)
 
     def test_chat_en_vivo_y_costo(self):
         res = {}
         sid = "11111111-1111-4111-8111-111111111111"
         t = threading.Thread(target=lambda: res.update(r=self.llamar(
-            "POST", "/api/chat", {"agent": "marce", "message": "STREAM PAUSA armame el plan", "session": sid})))
+            "POST", "/api/chat", {"agent": "marce", "message": "STREAM PAUSA armame el plan completo de reels para diciembre", "session": sid})))
         t.start()
         visto = None
         for _ in range(100):
@@ -135,18 +141,25 @@ class VivoAPI(unittest.TestCase):
             time.sleep(0.05)
         self.assertIsNotNone(visto, "la actividad no mostró la lectura")
         self.assertEqual(visto["objetivo"], "oficina.md")
-        self.assertTrue(visto["tarea"].startswith("STREAM PAUSA"))
+        self.assertTrue(visto["tarea"].startswith("STREAM PAUSA") or visto["tarea"] == "Armando el plan", visto)
         self.assertNotIn("secreto", json.dumps(a))
+        for _ in range(100):
+            if self.app.vivo("GET", "/api/actividad", {})[1]["agentes"].get("marce", {}).get("tarea") == "Armando el plan":
+                break
+            time.sleep(0.05)
+        self.assertEqual(self.app.vivo("GET", "/api/actividad", {})[1]["agentes"]["marce"]["tarea"], "Armando el plan")
         open(os.path.join(self.bin, "go"), "w").close()
         t.join(10)
         st, r = res["r"]
         self.assertEqual((st, r.get("reply")), (200, "stream marce"))
         self.assertEqual(self.app.vivo("GET", "/api/actividad", {})[1]["agentes"], {})
         st, c = self.app.vivo("GET", "/api/costos", {})
-        self.assertAlmostEqual(c["total"], 0.25)
-        self.assertAlmostEqual(c["agentes"]["marce"], 0.25)
+        self.assertAlmostEqual(c["total"], 0.251)
+        self.assertAlmostEqual(c["agentes"]["marce"], 0.251)
         with open(os.path.join(self.bin, "args.log")) as f:
-            args = f.read().split("\x1e")[-2].split("\x1f")
+            corridas = [r.split("\x1f") for r in f.read().split("\x1e") if r]
+        args = [r for r in corridas if "--agent" in r][-1]
+        self.assertTrue(any("haiku" in r for r in corridas))
         self.assertIn("stream-json", args)
         self.assertIn("--verbose", args)
 
