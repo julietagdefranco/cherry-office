@@ -12,6 +12,7 @@ App.Avisos = (function () {
   function titulo(a) {
     if (a.tipo === 'reunion') return 'Reunión esperándote';
     if (a.tipo === 'propuestas') return 'Biblioteca';
+    if (a.tipo === 'pendiente') return 'Pendientes para vos';
     return (nombre(a) || 'Un agente') + (TITULO[a.tipo] || '');
   }
   function hace(ts) {
@@ -80,6 +81,7 @@ App.Avisos = (function () {
     }
     if (a.tipo === 'reunion') { App.Reunion.abrir(); if (App.Oficina3D.enfocarLugar) App.Oficina3D.enfocarLugar('reunion'); return; }
     if (a.tipo === 'propuestas') { App.Biblioteca.abrir(); return; }
+    if (a.tipo === 'pendiente') { visto({ id: a.id }); if (App.Reunion.ver && a.ref) App.Reunion.ver(a.ref); else App.Reunion.abrir(); return; }
     if (a.agente && App.agente(a.agente)) {
       App.Agente.abrir(a.agente, 'chat');
       if (App.Oficina3D.enfocarAgente) App.Oficina3D.enfocarAgente(a.agente);

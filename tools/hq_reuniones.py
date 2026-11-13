@@ -318,14 +318,82 @@ def markdown_salida(oficina, f, participantes, sintesis, error_sintesis, acta, f
         s += ("\n".join("- " + d for d in sintesis["decisiones"]) + "\n") if sintesis["decisiones"] else "_(ninguna)_\n"
         s += "\n## Pendientes\n\n"
         if sintesis["pendientes"]:
-            s += "\n".join(("- **%s:** %s" % (p["quien"], p["que"])) if p["quien"] else "- " + p["que"]
-                           for p in sintesis["pendientes"]) + "\n"
+            s += "\n".join(linea_md(p) for p in sintesis["pendientes"]) + "\n"
         else:
             s += "_(ninguno)_\n"
     else:
         s += "_No se pudo generar la síntesis%s._\n" % (": " + error_sintesis.strip().rstrip(".…").rstrip() if error_sintesis else "")
     s += "\n---\n" + ("Acta completa con la transcripción: `%s`.\n" % acta if acta else "_(el acta no se pudo guardar)_\n")
     return s
+
+
+# ---- pendientes que llegan a quien se encarga (Pendientes.swift)
+
+TITULO_PENDIENTES = "## Pendientes de reuniones"
+
+
+def _normal(s):
+    return unicodedata.normalize("NFD", (s or "").lower()).encode("ascii", "ignore").decode().strip()
+
+
+def agente_de_pendiente(quien, oficina):
+    """Agente responsable: id exacto, nombre completo o primera palabra del nombre (si es única). None = nadie / la persona."""
+    q = _normal(quien)
+    if not q:
+        return None
+    for a in oficina.get("agentes") or []:
+        if _normal(a["id"]) == q or _normal(a["nombre"]) == q:
+            return a
+    primera = q.split(" ")[0]
+    cand = [a for a in oficina.get("agentes") or [] if (_normal(a["nombre"]).split(" ") or [""])[0] == primera]
+    return cand[0] if len(cand) == 1 else None
+
+
+def linea_md(p):
+    base = ("- **%s:** %s" % (p["quien"], p["que"])) if p["quien"] else "- " + p["que"]
+    return base + (" _(necesita a la persona)_" if p.get("necesita_usuario") else "")
+
+
+def consigna_secretario(duenio):
+    return ("\n\nPara cada pendiente agregá \"necesita_usuario\": true si el responsable NO lo puede hacer solo. Los agentes de la "
+            "oficina solo pueden leer archivos de la oficina y escribir sus notas y sus entregables: no pueden correr programas ni "
+            "scripts, mandar mensajes o mails, publicar, ni mirar el calendario, el correo u otras apps. Si un pendiente necesita "
+            "eso, asignalo a %s (o al agente, con \"necesita_usuario\": true si el agente prepara algo y la persona lo ejecuta). "
+            "Usá en \"quien\" el nombre exacto de un participante o el de la persona."
+            % (duenio or "la persona dueña de la oficina"))
+
+
+def repartir_pendientes(carpeta, oficina, tema, pendientes, fecha):
+    """Anexa cada pendiente asignado a un agente en sus notas (sección «Pendientes de reuniones»). -> {id: cantidad}."""
+    dia = fecha.strftime("%Y-%m-%d")
+    por = {}
+    for p in pendientes:
+        a = agente_de_pendiente(p["quien"], oficina)
+        if a:
+            que = " ".join(p["que"].split("\n"))
+            por.setdefault(a["id"], []).append("- [ ] %s · reunión «%s»: %s%s" % (
+                dia, tema, que, " (necesita a la persona: avisale qué hace falta)" if p.get("necesita_usuario") else ""))
+    for id_, lineas in por.items():
+        ruta = os.path.join(carpeta, "conocimiento", "agentes", id_ + ".md")
+        try:
+            with open(ruta, encoding="utf-8") as fh:
+                t = fh.read()
+        except OSError:
+            t = ""
+        if t and not t.endswith("\n"):
+            t += "\n"
+        if TITULO_PENDIENTES not in t:
+            t += ("\n" if t else "") + TITULO_PENDIENTES + "\n"
+        i = t.index(TITULO_PENDIENTES) + len(TITULO_PENDIENTES)
+        j = t.find("\n## ", i)
+        j = len(t) if j < 0 else j
+        bloque = t[i:j]
+        if not bloque.endswith("\n"):
+            bloque += "\n"
+        bloque += "\n".join(lineas) + "\n"
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        hq_core.escribir_atomico(ruta, t[:i] + bloque + t[j:])
+    return {k: len(v) for k, v in por.items()}
 
 
 def prompt_turno(oficina, carpeta, tema, participantes, quien, turnos, ronda, fichas_texto="",
@@ -351,11 +419,13 @@ def prompt_sintesis(oficina, tema, participantes, turnos, patron="debate", lider
         "Transcripción:\n%s\n\n"
         "Devolvé SOLO un objeto JSON estricto (sin texto antes ni después, sin bloques de código) con esta forma:\n"
         "{\"resumen\": \"resumen de la reunión en 3-6 oraciones\", \"decisiones\": [\"decisión concreta confirmada por la "
-        "conversación\"], \"pendientes\": [{\"quien\": \"nombre de quien se encarga\", \"que\": \"tarea concreta\"}]}\n"
+        "conversación\"], \"pendientes\": [{\"quien\": \"nombre de quien se encarga\", \"que\": \"tarea concreta\", "
+        "\"necesita_usuario\": false}]}\n"
         "Incluí en \"decisiones\" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "
-        "\"pendientes\" los próximos pasos con responsable.%s"
+        "\"pendientes\" los próximos pasos con responsable.%s%s"
     ) % (oficina["nombre"], tema, _gente(participantes),
-         transcripcion(turnos, oficina, True, MAX_TRANSCRIPCION_ACTA), variante_sintesis(patron, lider, bando_a, bando_b))
+         transcripcion(turnos, oficina, True, MAX_TRANSCRIPCION_ACTA), consigna_secretario(oficina.get("duenio") or ""),
+         variante_sintesis(patron, lider, bando_a, bando_b))
 
 
 def parsear_sintesis(t):
@@ -379,9 +449,10 @@ def parsear_sintesis(t):
     for p in (o.get("pendientes") if isinstance(o.get("pendientes"), list) else []):
         if isinstance(p, dict):
             if cad(p.get("que")):
-                pend.append({"quien": cad(p.get("quien")), "que": cad(p.get("que"))})
+                pend.append({"quien": cad(p.get("quien")), "que": cad(p.get("que")),
+                             "necesita_usuario": p.get("necesita_usuario") is True})
         elif cad(p):
-            pend.append({"quien": "", "que": cad(p)})
+            pend.append({"quien": "", "que": cad(p), "necesita_usuario": False})
     if not resumen and not decisiones and not pend:
         return None
     return {"resumen": resumen, "decisiones": decisiones, "pendientes": pend}
@@ -410,8 +481,7 @@ def acta_md(oficina, tema, participantes, turnos, sintesis, error_sintesis, fech
         s += ("\n".join("- " + d for d in sintesis["decisiones"]) + "\n") if sintesis["decisiones"] else "_(ninguna)_\n"
         s += "\n### Pendientes\n\n"
         if sintesis["pendientes"]:
-            s += "\n".join(("- **%s:** %s" % (p["quien"], p["que"])) if p["quien"] else "- " + p["que"]
-                           for p in sintesis["pendientes"]) + "\n"
+            s += "\n".join(linea_md(p) for p in sintesis["pendientes"]) + "\n"
         else:
             s += "_(ninguno)_\n"
     else:
@@ -762,6 +832,13 @@ class Reuniones:
                                           acta_md(of, f["tema"], parts, turnos, sintesis, err_sint, hoy))
                 if sintesis and sintesis["decisiones"]:
                     hq_core.anexar_decisiones(carpeta, sintesis["decisiones"], hoy)
+                if sintesis and sintesis["pendientes"]:
+                    repartir_pendientes(carpeta, of, f["tema"], sintesis["pendientes"], hoy)
+                    para_vos = sum(1 for p in sintesis["pendientes"] if p.get("necesita_usuario") or agente_de_pendiente(p["quien"], of) is None)
+                    if para_vos and getattr(self.app, "avisos", None):
+                        self.app.avisos.crear(carpeta, "pendiente",
+                                              "Quedó 1 pendiente de «%s» que necesita tu parte" % f["tema"] if para_vos == 1 else
+                                              "Quedaron %d pendientes de «%s» que necesitan tu parte" % (para_vos, f["tema"]), ref=id_)
             except (OSError, ErrorAPI):
                 error_acta = "No pude guardar el acta o las decisiones en la carpeta de la oficina."
                 self.srv.log.exception("reuniones: no pude escribir el acta")

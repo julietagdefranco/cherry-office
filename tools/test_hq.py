@@ -747,5 +747,36 @@ class TareasAPI(BaseAPI):
             auto.detener()
 
 
+class PendientesReunion(unittest.TestCase):
+    def test_repartir_y_responsable(self):
+        import datetime
+        import hq_reuniones as hr
+        of = {"duenio": "Ana", "agentes": [{"id": "armando", "nombre": "Don Armando"}, {"id": "betty", "nombre": "Betty"},
+                                            {"id": "sofia", "nombre": "Doña Sofía"}]}
+        self.assertEqual(hr.agente_de_pendiente("don armando", of)["id"], "armando")
+        self.assertEqual(hr.agente_de_pendiente("Dona Sofia", of)["id"], "sofia")
+        self.assertIsNone(hr.agente_de_pendiente("Ana", of))
+        d = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(d, "conocimiento", "agentes"))
+            with open(os.path.join(d, "conocimiento", "agentes", "betty.md"), "w", encoding="utf-8") as fh:
+                fh.write("# Notas de Betty\n\n## Otra cosa\n- x\n")
+            pend = [{"quien": "Betty", "que": "Leer decisiones.md", "necesita_usuario": False},
+                    {"quien": "Betty", "que": "Mandarle a Ana un mensaje", "necesita_usuario": True},
+                    {"quien": "Ana", "que": "Revisar el Calendar", "necesita_usuario": False}]
+            n = hr.repartir_pendientes(d, of, "prueba", pend, datetime.date(2026, 11, 13))
+            self.assertEqual(n, {"betty": 2})
+            hr.repartir_pendientes(d, of, "otra", pend[:1], datetime.date(2026, 11, 14))
+            with open(os.path.join(d, "conocimiento", "agentes", "betty.md"), encoding="utf-8") as fh:
+                t = fh.read()
+            self.assertEqual(t.count("## Pendientes de reuniones"), 1)
+            self.assertIn("- [ ] 2026-11-13 · reunión «prueba»: Mandarle a Ana un mensaje (necesita a la persona", t)
+            self.assertIn("2026-11-14 · reunión «otra»", t)
+            self.assertIn("## Otra cosa", t)
+            self.assertIn("asignalo a Ana", hr.consigna_secretario("Ana"))
+        finally:
+            shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

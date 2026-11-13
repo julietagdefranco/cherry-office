@@ -152,7 +152,7 @@ enum ReunionPatron {
             s += (x.resumen.isEmpty ? "_(sin resumen)_" : x.resumen) + "\n\n## " + (patron == .revision ? "Cambios recomendados" : "Decisiones") + "\n\n"
             s += x.decisiones.isEmpty ? "_(ninguna)_\n" : x.decisiones.map { "- \($0)" }.joined(separator: "\n") + "\n"
             s += "\n## Pendientes\n\n"
-            s += x.pendientes.isEmpty ? "_(ninguno)_\n" : x.pendientes.map { $0.quien.isEmpty ? "- \($0.que)" : "- **\($0.quien):** \($0.que)" }.joined(separator: "\n") + "\n"
+            s += x.pendientes.isEmpty ? "_(ninguno)_\n" : x.pendientes.map(\.lineaMD).joined(separator: "\n") + "\n"
         } else {
             s += "_No se pudo generar la síntesis\(errorSintesis.map { ": " + ReunionTexto.sinPuntoFinal($0) } ?? "")._\n"
         }

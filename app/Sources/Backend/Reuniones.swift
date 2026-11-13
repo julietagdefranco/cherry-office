@@ -18,6 +18,13 @@ struct TurnoReunion: Sendable, Equatable {
 struct Pendiente: Sendable, Equatable {
     var quien: String
     var que: String
+    /// El responsable no lo puede hacer solo (correr programas, mandar mensajes…): necesita a la persona.
+    var usuario: Bool = false
+
+    var json: [String: Any] { ["quien": quien, "que": que, "necesita_usuario": usuario] }
+    var lineaMD: String {
+        (quien.isEmpty ? "- \(que)" : "- **\(quien):** \(que)") + (usuario ? " _(necesita a la persona)_" : "")
+    }
 }
 
 struct SintesisReunion: Sendable, Equatable {
@@ -26,7 +33,7 @@ struct SintesisReunion: Sendable, Equatable {
     var pendientes: [Pendiente]
 
     var json: [String: Any] {
-        ["resumen": resumen, "decisiones": decisiones, "pendientes": pendientes.map { ["quien": $0.quien, "que": $0.que] }]
+        ["resumen": resumen, "decisiones": decisiones, "pendientes": pendientes.map(\.json)]
     }
 }
 
@@ -300,8 +307,8 @@ enum ReunionTexto {
         \(transcripcion(turnos, oficina: oficina, conRol: true, max: maxTranscripcionActa))
 
         Devolvé SOLO un objeto JSON estricto (sin texto antes ni después, sin bloques de código) con esta forma:
-        {"resumen": "resumen de la reunión en 3-6 oraciones", "decisiones": ["decisión concreta confirmada por la conversación"], "pendientes": [{"quien": "nombre de quien se encarga", "que": "tarea concreta"}]}
-        Incluí en "decisiones" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "pendientes" los próximos pasos con responsable.\(ReunionPatron.varianteSintesis(patron: patron, lider: lider, bandoA: bandoA, bandoB: bandoB))
+        {"resumen": "resumen de la reunión en 3-6 oraciones", "decisiones": ["decisión concreta confirmada por la conversación"], "pendientes": [{"quien": "nombre de quien se encarga", "que": "tarea concreta", "necesita_usuario": false}]}
+        Incluí en "decisiones" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "pendientes" los próximos pasos con responsable.\(PendientesReunion.consignaSecretario(duenio: oficina.duenio))\(ReunionPatron.varianteSintesis(patron: patron, lider: lider, bandoA: bandoA, bandoB: bandoB))
         """
     }
 
@@ -315,7 +322,10 @@ enum ReunionTexto {
         let decisiones = ((o["decisiones"] as? [Any]) ?? []).map(cadena).filter { !$0.isEmpty }
         var pend: [Pendiente] = []
         for p in (o["pendientes"] as? [Any]) ?? [] {
-            if let m = p as? [String: Any] { let q = cadena(m["quien"]), k = cadena(m["que"]); if !k.isEmpty { pend.append(Pendiente(quien: q, que: k)) } }
+            if let m = p as? [String: Any] {
+                let q = cadena(m["quien"]), k = cadena(m["que"])
+                if !k.isEmpty { pend.append(Pendiente(quien: q, que: k, usuario: (m["necesita_usuario"] as? Bool) == true)) }
+            }
             else if let s = p as? String, !cadena(s).isEmpty { pend.append(Pendiente(quien: "", que: cadena(s))) }
         }
         if resumen.isEmpty && decisiones.isEmpty && pend.isEmpty { return nil }
@@ -354,7 +364,7 @@ enum ReunionTexto {
             s += (x.resumen.isEmpty ? "_(sin resumen)_" : x.resumen) + "\n\n### Decisiones\n\n"
             s += x.decisiones.isEmpty ? "_(ninguna)_\n" : x.decisiones.map { "- \($0)" }.joined(separator: "\n") + "\n"
             s += "\n### Pendientes\n\n"
-            s += x.pendientes.isEmpty ? "_(ninguno)_\n" : x.pendientes.map { $0.quien.isEmpty ? "- \($0.que)" : "- **\($0.quien):** \($0.que)" }.joined(separator: "\n") + "\n"
+            s += x.pendientes.isEmpty ? "_(ninguno)_\n" : x.pendientes.map(\.lineaMD).joined(separator: "\n") + "\n"
         } else {
             s += "_No se pudo generar la síntesis\(errorSintesis.map { ": " + Self.sinPuntoFinal($0) } ?? "")._\n"
         }
@@ -633,6 +643,16 @@ public actor ReunionesRouter: SubRouter {
             rel = r
             if let s = sintesis, !s.decisiones.isEmpty {
                 try Plantillas.anexarDecisiones(carpeta: a.carpeta, decisiones: s.decisiones, fecha: hoy)
+            }
+            if let s = sintesis, !s.pendientes.isEmpty {
+                try PendientesReunion.repartir(carpeta: a.carpeta, oficina: of, tema: f.tema, pendientes: s.pendientes, fecha: hoy)
+                // lo que necesita a la persona (asignado a ella o marcado) deja un aviso «te necesita»
+                let paraVos = s.pendientes.filter { $0.usuario || PendientesReunion.agente(de: $0.quien, en: of) == nil }.count
+                if paraVos > 0 {
+                    await store.avisoCrear(oficina: a.carpeta, tipo: "pendiente",
+                                           texto: paraVos == 1 ? "Quedó 1 pendiente de «\(f.tema)» que necesita tu parte"
+                                                               : "Quedaron \(paraVos) pendientes de «\(f.tema)» que necesitan tu parte", ref: id)
+                }
             }
         } catch {
             errorActa = "No pude guardar el acta o las decisiones en la carpeta de la oficina."
