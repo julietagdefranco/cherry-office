@@ -3,7 +3,8 @@ import Foundation
 // Explorador de carpetas (para elegir dónde abrir/crear/vincular) y de la carpeta de la oficina (solo lectura).
 // Misma API, mismos topes y mismas reglas de seguridad que tools/hq_explorador.py (modo desarrollo): si cambia una, cambia la otra.
 //
-//   GET  /api/fs/carpetas?ruta=&ocultas=0|1   subcarpetas de una carpeta DENTRO de $HOME (nunca contenido de archivos)
+//   GET  /api/fs/carpetas?ruta=&ocultas=0|1&archivos=zip   subcarpetas de una carpeta DENTRO de $HOME (nunca contenido de
+//        archivos); con `archivos=zip` también la lista de .zip (nombre, ruta, tamaño)
 //   POST /api/fs/carpetas {padre, nombre}     crea una subcarpeta dentro de $HOME
 //   GET  /api/oficina/archivos?ruta=<rel>     lista de la carpeta de la oficina activa
 //   GET  /api/oficina/archivo?ruta=<rel>      vista previa: {texto} (tope 512 KB) o {base64, mime} (imágenes, tope 2 MB)
@@ -133,6 +134,9 @@ public struct ExploradorRouter: SubRouter {
         let home = self.home
         let real = try resolverEnHome((q["ruta"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         let ocultas = ["1", "true"].contains(q["ocultas"] ?? "")
+        // `archivos=zip`: también lista los .zip (para elegir una oficina exportada); ningún otro tipo de archivo
+        let conZip = q["archivos"] == "zip"
+        var zips: [[String: Any]] = []
         guard var nombres = try? FileManager.default.contentsOfDirectory(atPath: real) else {
             throw ErrorAPI(403, "No tengo permiso para leer esa carpeta.")
         }
@@ -143,14 +147,22 @@ public struct ExploradorRouter: SubRouter {
             if !ocultas && n.hasPrefix(".") { continue }
             let p = (real as NSString).appendingPathComponent(n)
             if Self.esEnlace(p), !Self.dentro(home, Self.realAunqueFalte(p)) { continue } // un enlace que sale de $HOME no se muestra
-            guard Self.esDirectorio(p) else { continue }
+            guard Self.esDirectorio(p) else {
+                if conZip, n.lowercased().hasSuffix(".zip"), Self.esArchivoRegular(p), zips.count < Self.maxEntradas {
+                    let tam = ((try? FileManager.default.attributesOfItem(atPath: p))?[.size] as? NSNumber)?.int64Value ?? 0
+                    zips.append(["nombre": n, "ruta": p, "tam": tam])
+                }
+                continue
+            }
             if lista.count >= Self.maxEntradas { truncado = true; break }
             let esOfi = Self.esArchivoRegular((p as NSString).appendingPathComponent("oficina.json"))
             lista.append(["nombre": n, "ruta": p, "esOficina": esOfi])
         }
-        return ["ruta": real, "padre": real == home ? NSNull() : ((real as NSString).deletingLastPathComponent as Any),
+        var r: [String: Any] = ["ruta": real, "padre": real == home ? NSNull() : ((real as NSString).deletingLastPathComponent as Any),
                 "esOficina": Self.esArchivoRegular((real as NSString).appendingPathComponent("oficina.json")),
                 "accesos": accesos(home), "carpetas": lista, "truncado": truncado]
+        if conZip { r["archivos"] = zips }
+        return r
     }
 
     private func crearCarpeta(_ body: Data?) throws -> [String: Any] {

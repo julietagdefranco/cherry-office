@@ -44,6 +44,14 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     acerca: function () { if (puente) puente.postMessage({ accion: 'acerca' }); },
     /* número en el ícono del Dock (avisos pendientes); 0 lo saca */
     insignia: function (n) { if (puente) puente.postMessage({ accion: 'insignia', n: n | 0 }); },
+    /* selector de un .zip (importar una oficina); undefined si no hay app nativa o falla, null si se cancela */
+    elegirArchivo: function (titulo) {
+      if (!puente) return Promise.resolve(undefined);
+      try {
+        return Promise.resolve(puente.postMessage({ accion: 'elegirArchivo', titulo: titulo }))
+          .then(function (r) { return typeof r === 'string' && r ? r : null; });
+      } catch (e) { return Promise.resolve(undefined); }
+    },
     elegirCarpeta: function (titulo, inicio, crear) {
       if (!puente) return Promise.resolve(undefined);
       try {
