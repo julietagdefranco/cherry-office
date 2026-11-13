@@ -12,11 +12,12 @@ App.Oficina3D = (function () {
   var lugares = [];                 // [{tipo:'reunion'|'biblioteca', caja}]
   var etiquetas = [];               // [{el, p:Vector3}]
   var plano = null;                 // datos del armado (salas, pasillos, asientos de reunión)
-  var animando = {};                // id -> true mientras camina o habla
-  var pendiente = false, sombrasSucias = true, ultimo = 0, construyendo = 0;
+  var animando = {};                // id -> true mientras camina, habla o trabaja en su escritorio
+  var trabajo = {};                 // id -> {estado, herramienta, objetivo, tarea} (de /api/actividad; sobrevive a reconstruir)
+  var pendiente = false, sombrasSucias = true, ultimo = 0, construyendo = 0, sombraAnim = false, soloLento = true;
   var hover = null, elegido = null, hablando = null;
   var orb = { az: 0.42, el: 0.78, d: 60, tx: 0, tz: 0, minD: 10, maxD: 200 };
-  var cbAgente = function () {}, cbLugar = function () {};
+  var cbAgente = function () {}, cbLugar = function () {}, cbHover = function () {};
   var ray = new T.Raycaster(), v2 = new T.Vector2(), v3 = new T.Vector3();
   var BLANCO = '#f4f4f1', GRIS_CLARO = '#a3a7aa', GRIS_OSCURO = '#5d6166', NEGRO = '#2a2b2e', MADERA = '#8b6d4c', TOSTADO = '#c9b58c';
   /* paleta "ciudad de ladrillos": colores de pieza saturados y alegres */
@@ -236,13 +237,46 @@ App.Oficina3D = (function () {
     pendiente = false;
     var dt = ultimo ? Math.min(0.05, (t - ultimo) / 1000) : 0.016; ultimo = t;
     var hayAnim = false;
+    sombraAnim = false; soloLento = true;
     for (var id in animando) { if (animar(id, dt)) hayAnim = true; else delete animando[id]; }
+    if (camara(dt)) { hayAnim = true; soloLento = false; }
     var amb = AMBIENTE && mundo ? ambiente(dt) : false;
     posCam();
-    if (sombrasSucias || hayAnim) { renderer.shadowMap.needsUpdate = true; sombrasSucias = false; }
+    /* las sombras solo se recalculan si algo se mueve de lugar (caminar), no por gestos sentados, pantallas ni autos */
+    if (sombrasSucias || sombraAnim) { renderer.shadowMap.needsUpdate = true; sombrasSucias = false; }
     dibujar();
     for (var i = 0; i < etiquetas.length; i++) proyectar(etiquetas[i]);
-    if (hayAnim) pedir(); else if (amb) pedirLuego(); else ultimo = 0;
+    if (hayAnim) { if (soloLento) setTimeout(pedir, 60); else pedir(); }   /* gestos de trabajo a ~16 fps; caminatas y cámara a pleno */
+    else if (amb) pedirLuego(); else ultimo = 0;
+  }
+
+  /* ---------------- cámara animada (enfocar) ---------------- */
+  var vuelo = null;
+  function camara(dt) {
+    if (!vuelo) return false;
+    vuelo.t = Math.min(1, vuelo.t + dt / vuelo.dur);
+    var k = vuelo.t < 0.5 ? 2 * vuelo.t * vuelo.t : 1 - Math.pow(-2 * vuelo.t + 2, 2) / 2;
+    orb.tx = vuelo.a.tx + (vuelo.b.tx - vuelo.a.tx) * k;
+    orb.tz = vuelo.a.tz + (vuelo.b.tz - vuelo.a.tz) * k;
+    orb.d = vuelo.a.d + (vuelo.b.d - vuelo.a.d) * k;
+    if (vuelo.t >= 1) vuelo = null;
+    return true;
+  }
+  function enfocar(x, z, d) {
+    vuelo = { t: 0, dur: 0.7, a: { tx: orb.tx, tz: orb.tz, d: orb.d }, b: { tx: x, tz: z, d: lim(d || orb.minD * 1.6, orb.minD, orb.maxD) } };
+    pedir();
+  }
+  function enfocarAgente(id) {
+    var f = figuras[id]; if (!f) return false;
+    enfocar(f.obj.position.x, f.obj.position.z + 1, orb.minD * 1.5);
+    return true;
+  }
+  function enfocarLugar(tipo) {
+    var l = lugares.filter(function (x) { return x.tipo === tipo; })[0];
+    if (!l) return false;
+    var c = l.caja.getCenter(new T.Vector3());
+    enfocar(c.x, c.z + 1, orb.minD * 2);
+    return true;
   }
 
   /* ---------------- vida: autos que circulan y gente que teclea ----------------
@@ -264,19 +298,10 @@ App.Oficina3D = (function () {
     for (var id in figuras) {
       var f = figuras[id];
       if (animando[id] || !f.obj.userData.partes) continue;
-      if (f.estado === 'escritorio' && f.asiento) { teclear(f, id, dt); algo = true; }
+      if (f.estado === 'escritorio' && f.asiento) { mirar(f, id, dt); algo = true; }   /* reposo: el tecleo real lo animan las poses de trabajo */
       else if (f.estado === 'en-reunion') { mirar(f, id, dt); algo = true; }
     }
     return algo;
-  }
-  function teclear(f, id, dt) {
-    var p = f.obj.userData.partes;
-    if (f.t === undefined) { f.fs = (semilla(id) % 628) / 100; f.t = f.fs * 3; }
-    f.t += dt;
-    var rapido = !!f.ocupado, activo = rapido || Math.sin(f.t * 0.31 + f.fs) > -0.25, vel = rapido ? 17 : 8;
-    p.brazoD.rotation.x = -0.95 + (activo ? Math.sin(f.t * vel) * 0.09 : 0.08);
-    p.brazoI.rotation.x = -0.95 + (activo ? Math.sin(f.t * vel + 1.9) * 0.09 : 0.08);
-    p.cabeza.rotation.y = activo ? Math.sin(f.t * 0.8) * 0.07 : Math.sin(f.t * 0.6 + f.fs) * 0.45;
   }
   function mirar(f, id, dt) {
     if (f.t === undefined) { f.fs = (semilla(id) % 628) / 100; f.t = f.fs * 3; }
@@ -325,7 +350,7 @@ App.Oficina3D = (function () {
     }
     cv.addEventListener('pointerup', soltar);
     cv.addEventListener('pointercancel', function () { drag = null; });
-    cv.addEventListener('pointerleave', function () { if (hover) { hover = null; cv.style.cursor = ''; actualizarEtiquetasHover(); pedir(); } });
+    cv.addEventListener('pointerleave', function () { if (hover) { hover = null; cv.style.cursor = ''; actualizarEtiquetasHover(); pedir(); cbHover(null); } });
     cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     cv.addEventListener('wheel', function (e) {
       e.preventDefault();
@@ -366,7 +391,7 @@ App.Oficina3D = (function () {
       var ev = hoverPend; hoverPend = null;
       var h = rayo(ev), clave = h ? (h.tipo + ':' + (h.id || '')) : null;
       cv.style.cursor = h ? 'pointer' : '';
-      if (clave !== hover) { hover = clave; actualizarEtiquetasHover(); pedir(); }
+      if (clave !== hover) { hover = clave; actualizarEtiquetasHover(); pedir(); cbHover(h); }
     });
   }
   function elegir(e) {
@@ -376,7 +401,7 @@ App.Oficina3D = (function () {
   }
   function actualizarEtiquetasHover() {
     for (var id in figuras) {
-      var f = figuras[id], ver = hover === 'agente:' + id || elegido === id || f.ocupado || hablando === id;
+      var f = figuras[id], ver = hover === 'agente:' + id || elegido === id || f.ocupado || hablando === id || !!trabajo[id];
       f.etiqueta.oculta = !ver;
       f.etiqueta.el.classList.toggle('activa', elegido === id);
       f.etiqueta.el.classList.toggle('hablando', hablando === id);
@@ -521,7 +546,12 @@ App.Oficina3D = (function () {
       mundo = grupo; escena.add(mundo);
       autos = autosNuevos || [];
       var viejas = figuras; figuras = {};
-      Object.keys(viejas).forEach(function (id) { viejas[id].etiqueta.el.remove(); });
+      Object.keys(viejas).forEach(function (id) {
+        viejas[id].etiqueta.el.remove();
+        if (viejas[id].etqTarea) viejas[id].etqTarea.el.remove();
+        if (viejas[id].etqFaro) viejas[id].etqFaro.el.remove();
+        if (viejas[id].pantalla) { viejas[id].pantalla.tex.dispose(); viejas[id].pantalla.mat.dispose(); }
+      });
       animando = {};
       var cambioTam = !plano || plano.W !== nuevo.W || plano.D !== nuevo.D;
       plano = nuevo;
@@ -531,8 +561,12 @@ App.Oficina3D = (function () {
         mundo.add(x.fig);
         f.etiqueta = etiqueta('agente', x.a.nombre, null);
         f.etiqueta.obj = x.fig; f.etiqueta.off = new T.Vector3(0, 4.6, 0); f.etiqueta.oculta = true;
+        f.etqTarea = etiquetaTarea(x.fig);
         figuras[x.a.id] = f;
+        crearPantalla(f);
       });
+      actividad(trabajo);
+      faros(faroDe);
       encuadrar(cambioTam);
       actualizarEtiquetasHover();
       sombrasSucias = true;
@@ -575,6 +609,17 @@ App.Oficina3D = (function () {
     etiquetas.push(e);
     return e;
   }
+
+  /* cartel de tarea sobre la cabeza: título (qué pidieron) y detalle (qué está haciendo ahora) */
+  function etiquetaTarea(obj) {
+    var e = etiqueta('tarea', '', null);
+    vaciarNodo(e.el.firstChild);
+    var t = document.createElement('b'), d = document.createElement('small');
+    e.el.firstChild.appendChild(t); e.el.firstChild.appendChild(d);
+    e.titulo = t; e.detalle = d; e.obj = obj; e.off = new T.Vector3(0, 5.9, 0); e.oculta = true;
+    return e;
+  }
+  function vaciarNodo(n) { while (n.firstChild) n.removeChild(n.firstChild); }
 
   function pisoBaldosas(L, x, z, w, d, hex, hex2) {
     for (var a = 0; a < w; a += 2) for (var b = 0; b < d; b += 2) {
@@ -1231,15 +1276,133 @@ App.Oficina3D = (function () {
       }
       f.fase += dt * 11;
       P.pose(obj, 'caminar', f.fase);
+      sombraAnim = true; soloLento = false;
       return true;
     }
     if (f.estado === 'hablando') {
       f.fase += dt * 6;
       P.pose(f.obj, 'sentado');
       P.pose(f.obj, 'hablar', f.fase);
+      soloLento = false;
+      return true;
+    }
+    if (f.estado === 'escritorio' && trabajo[id]) {
+      f.fase += dt * 9;
+      P.pose(f.obj, 'sentado');
+      P.pose(f.obj, POSE[trabajo[id].estado] || 'tipear', f.fase);
+      f.tPant = (f.tPant || 0) + dt;
+      if (f.pantalla && f.tPant > 0.12) { f.tPant = 0; f.cuadroPant = (f.cuadroPant || 0) + 1; dibujarPantalla(f); }
       return true;
     }
     return false;
+  }
+
+  /* ---------------- trabajo en vivo: pose, pantalla y cartel ---------------- */
+  var POSE = { pensando: 'pensar', leyendo: 'leer', escribiendo: 'tipear', buscando: 'mirar', consultando: 'pensar', trabajando: 'tipear' };
+  var VERBO = { pensando: 'pensando', leyendo: 'leyendo', escribiendo: 'escribiendo', buscando: 'buscando',
+    consultando: 'consultando a', trabajando: 'trabajando' };
+
+  /* pantalla del escritorio: una textura de canvas en las dos caras (hacia el agente y hacia la cámara) */
+  function crearPantalla(f) {
+    if (!f.asiento) return;
+    var c = document.createElement('canvas'); c.width = 128; c.height = 80;
+    var tex = new T.CanvasTexture(c);
+    if (T.sRGBEncoding) tex.encoding = T.sRGBEncoding;
+    var mat = new T.MeshBasicMaterial({ map: tex, toneMapped: false });
+    /* sobre el monitor de escritorio(): marco 3x2 en z = cz+3.1+0.3, pantalla de 2.7x1.7 centrada en tope+1.9 */
+    var geo = geoCache.pantallaPlana || (geoCache.pantallaPlana = new T.PlaneGeometry(2.7, 1.7));
+    var cx = f.asiento.x, cz = f.asiento.z - 0.2, tope = PLACA + LADRILLO * 2 + PLACA, y = tope + 1.9, zm = cz + 3.1;
+    var g = new T.Group();
+    var adelante = new T.Mesh(geo, mat); adelante.position.set(cx + 1, y, zm + 0.065); adelante.rotation.y = Math.PI;
+    var atras = new T.Mesh(geo, mat); atras.position.set(cx + 1, y, zm + 0.515);
+    g.add(adelante, atras);
+    mundo.add(g);
+    f.pantalla = { canvas: c, ctx: c.getContext('2d'), tex: tex, mat: mat, grupo: g };
+    dibujarPantalla(f);
+  }
+
+  function dibujarPantalla(f) {
+    var P2 = f.pantalla; if (!P2) return;
+    var x = P2.ctx, w = 128, h = 80, t = trabajo[f.a.id], n = f.cuadroPant || 0, i;
+    var est = t ? t.estado : null;
+    /* libre: se oculta y se ve la pantalla decorada del monitor (y su parte de atrás negra) */
+    P2.grupo.visible = !!est;
+    if (!est) return;
+    x.fillStyle = est === 'leyendo' ? '#f1efe9' : '#1f2227';
+    x.fillRect(0, 0, w, h);
+    if (est === 'pensando' || est === 'consultando') {
+      /* destello giratorio (ocho rayos, uno resaltado que avanza) */
+      for (i = 0; i < 8; i++) {
+        var a = i / 8 * Math.PI * 2, on = (i === n % 8);
+        x.strokeStyle = on ? '#e8875b' : 'rgba(232,135,91,.32)'; x.lineWidth = 7; x.lineCap = 'round';
+        x.beginPath(); x.moveTo(64 + Math.cos(a) * 11, 40 + Math.sin(a) * 11); x.lineTo(64 + Math.cos(a) * 24, 40 + Math.sin(a) * 24); x.stroke();
+      }
+      if (est === 'consultando') { x.fillStyle = '#9ad1ff'; x.beginPath(); x.arc(104, 18, 9, 0, Math.PI * 2); x.fill(); }
+    } else if (est === 'leyendo') {
+      /* página con renglones que se desplazan */
+      var off = (n * 3) % 12;
+      x.fillStyle = '#bdb8ae';
+      for (i = -1; i < 8; i++) { var yy = 10 + i * 12 - off; if (yy > 4 && yy < 74) x.fillRect(16, yy, 60 + ((i * 37) % 36), 5); }
+      x.fillStyle = '#e8875b'; x.fillRect(8, 8, 3, 64);
+    } else if (est === 'escribiendo' || est === 'trabajando') {
+      /* editor: renglones de colores que van apareciendo y cursor */
+      var cols = ['#c792ea', '#82aaff', '#c3e88d', '#f78c6c', '#89ddff'], lineas = 1 + (n % 9);
+      for (i = 0; i < lineas && i < 8; i++) {
+        x.fillStyle = cols[(i * 3) % cols.length]; x.fillRect(10 + (i % 3) * 8, 8 + i * 8, 20 + ((i * 29) % 60), 4);
+      }
+      if (n % 2) { x.fillStyle = '#ffffff'; x.fillRect(12 + ((lineas % 3) * 8) + 40, 8 + Math.min(lineas, 8) * 8, 4, 6); }
+    } else if (est === 'buscando') {
+      x.fillStyle = '#3a3f47'; for (i = 0; i < 5; i++) x.fillRect(12, 10 + i * 13, 70, 5);
+      var mx = 70 + Math.sin(n * 0.5) * 22, my = 40 + Math.cos(n * 0.7) * 12;
+      x.strokeStyle = '#9ad1ff'; x.lineWidth = 5; x.beginPath(); x.arc(mx, my, 12, 0, Math.PI * 2); x.stroke();
+      x.beginPath(); x.moveTo(mx + 9, my + 9); x.lineTo(mx + 20, my + 20); x.stroke();
+    }
+    P2.tex.needsUpdate = true;
+  }
+
+  function pintarTarea(f) {
+    var t = trabajo[f.a.id], e = f.etqTarea; if (!e) return;
+    e.oculta = !t || f.estado !== 'escritorio' && f.estado !== 'caminando';
+    if (!t) return;
+    var linea2 = VERBO[t.estado] || t.estado;
+    if (t.objetivo) linea2 += ' ' + t.objetivo;
+    e.titulo.textContent = t.tarea || (t.origen === 'reunion' ? 'En reunión' : 'Trabajando');
+    e.detalle.textContent = linea2;
+    e.el.dataset.estado = t.estado;
+  }
+
+  /* faros «te necesita»: mapa {id: tipo}; una etiqueta que late sobre la cabeza */
+  var faroDe = {};
+  function faros(mapa) {
+    faroDe = mapa || {};
+    for (var id in figuras) {
+      var f = figuras[id];
+      if (!f.etqFaro) {
+        f.etqFaro = etiqueta('faro', '', null);
+        vaciarNodo(f.etqFaro.el.firstChild);
+        f.etqFaro.el.firstChild.appendChild(document.createElement('b'));
+        f.etqFaro.obj = f.obj; f.etqFaro.off = new T.Vector3(0, 6.3, 0);
+      }
+      f.etqFaro.oculta = !faroDe[id];
+      f.etqFaro.el.firstChild.firstChild.textContent = faroDe[id] === 'error' ? '!' : '•';
+      f.etqFaro.el.dataset.tipo = faroDe[id] || '';
+    }
+    pedir();
+  }
+
+  /* mapa: {id: {estado, herramienta, objetivo, tarea, origen}} de /api/actividad */
+  function actividad(mapa) {
+    trabajo = mapa || {};
+    for (var id in figuras) {
+      var f = figuras[id];
+      if (trabajo[id]) { if (f.estado === 'escritorio') animando[id] = true; }
+      else if (f.estado === 'escritorio') { sentar(f, f.asiento); f.cuadroPant = 0; }
+      dibujarPantalla(f);
+      pintarTarea(f);
+    }
+    consultasActualizar();
+    actualizarEtiquetasHover();
+    pedir();
   }
 
   /* Ruta escritorio -> silla de la sala de reuniones, siempre por pasillos:
@@ -1284,7 +1447,7 @@ App.Oficina3D = (function () {
           f.estado = hablando === id ? 'hablando' : 'en-reunion';
           if (f.estado === 'hablando') animando[id] = true; else sentar(f, f.enSilla || a);
         }
-      } else if (f.estado !== 'escritorio') {
+      } else if (f.estado !== 'escritorio' && !f.consulta) {
         volver(id);
       }
     });
@@ -1297,7 +1460,118 @@ App.Oficina3D = (function () {
     var ida = rutaHaciaReunion(f, f.enSilla || plano.reunion.asientos[0]).reverse();
     ida.shift();
     ida.push({ x: f.asiento.x, z: f.asiento.z });
-    caminar(id, ida, function () { f.estado = 'escritorio'; sentar(f, f.asiento); f.enSilla = null; sombrasSucias = true; });
+    caminar(id, ida, function () {
+      f.estado = 'escritorio'; sentar(f, f.asiento); f.enSilla = null; sombrasSucias = true;
+      if (trabajo[id]) animando[id] = true;
+      pintarTarea(f);
+    });
+  }
+
+
+  /* ---------------- consultas entre agentes (Fase 4) ----------------
+     Cuando la actividad de A muestra la herramienta mcp__hq__consultar con objetivo = B (id o nombre), A camina desde su
+     escritorio hasta el de B por los pasillos, queda parado ahí con un globito «?» y vuelve a su escritorio cuando su
+     actividad deja de estar en «consultando». f.consulta = {colega, fase: yendo|esperando|volviendo, ruta, volver}. */
+  function sinTildes(s) { return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
+
+  /* id del colega que A está consultando ahora (según /api/actividad), o null */
+  function colegaConsultado(id) {
+    var t = trabajo[id];
+    if (!t || t.estado !== 'consultando' || !/^mcp__hq__consultar/.test(t.herramienta || '') || !t.objetivo) return null;
+    if (t.objetivo !== id && figuras[t.objetivo]) return t.objetivo;
+    var q = sinTildes(t.objetivo);
+    for (var k in figuras) if (k !== id && (sinTildes(k) === q || sinTildes(figuras[k].a.nombre) === q)) return k;
+    return null;
+  }
+
+  /* Ruta escritorio de f -> al lado del escritorio de g, siempre por pasillos:
+     salida del escritorio -> puerta de su sala -> pasillo del ala -> (recepción si cambia de ala) -> puerta de la sala de g -> al lado de g.
+     `n`: cuántos otros esperan ya junto a g (se paran un poco más lejos para no apilarse). Null si alguno no tiene escritorio. */
+  function rutaHaciaColega(f, g, n) {
+    var pl = plano, pts = [];
+    if (!pl || !f.asiento || !g.asiento) return null;
+    var s = f.asiento.sala, d = g.asiento.sala, a = f.asiento.salida, b = g.asiento.salida;
+    pts.push({ x: a.x, z: a.z });
+    pts.push({ x: a.x, z: s.puertaZ });
+    if (s === d) {
+      pts.push({ x: b.x, z: s.puertaZ });
+    } else {
+      pts.push({ x: s.puertaX, z: s.puertaZ });
+      pts.push({ x: s.puertaX, z: s.ala.pasilloZ });
+      if (s.ala !== d.ala) { pts.push({ x: pl.pasilloX, z: s.ala.pasilloZ }); pts.push({ x: pl.pasilloX, z: d.ala.pasilloZ }); }
+      pts.push({ x: d.puertaX, z: d.ala.pasilloZ });
+      pts.push({ x: d.puertaX, z: d.puertaZ });
+      pts.push({ x: b.x, z: d.puertaZ });
+    }
+    pts.push({ x: b.x, z: b.z + (n || 0) * 1.4 });
+    return pts;
+  }
+
+  function globoConsulta(f, ver) {
+    if (!f.etqConsulta && ver) {
+      var e = etiqueta('consulta', '?', null);
+      e.obj = f.obj; e.off = new T.Vector3(0, 6.4, 0); e.oculta = true;
+      f.etqConsulta = e;
+    }
+    if (f.etqConsulta) f.etqConsulta.oculta = !ver;
+  }
+
+  function esperandoJuntoA(quien, salvo) {
+    var n = 0;
+    for (var k in figuras) if (k !== salvo && figuras[k].consulta && figuras[k].consulta.colega === quien) n++;
+    return n;
+  }
+
+  function irAConsultar(f, quien) {
+    var g = figuras[quien], ruta = g ? rutaHaciaColega(f, g, esperandoJuntoA(quien, f.a.id)) : null;
+    if (!ruta) return;
+    var c = f.consulta, previa = c && c.fase === 'esperando' && figuras[c.colega] ? c.ruta.slice().reverse() : [];
+    f.consulta = { colega: quien, fase: 'yendo', ruta: ruta, volver: false };
+    globoConsulta(f, false);
+    caminar(f.a.id, previa.concat(ruta), function () { llegoAConsultar(f); });
+    sombrasSucias = true;
+  }
+
+  function llegoAConsultar(f) {
+    var c = f.consulta, g = c && figuras[c.colega];
+    if (!c) return;
+    P.pose(f.obj, '');
+    if (g && g.asiento) f.obj.rotation.y = Math.atan2(g.asiento.x - f.obj.position.x, g.asiento.z - f.obj.position.z);
+    c.fase = 'esperando';
+    globoConsulta(f, true);
+    if (c.volver || !colegaConsultado(f.a.id)) volverDeConsulta(f); else consultasActualizar();
+    sombrasSucias = true; pedir();
+  }
+
+  function volverDeConsulta(f) {
+    var c = f.consulta;
+    if (!c || c.fase === 'volviendo') return;
+    c.fase = 'volviendo';
+    globoConsulta(f, false);
+    var ida = c.ruta.slice().reverse();
+    ida.push({ x: f.asiento.x, z: f.asiento.z });
+    caminar(f.a.id, ida, function () {
+      f.consulta = null; f.estado = 'escritorio'; sentar(f, f.asiento); sombrasSucias = true;
+      if (trabajo[f.a.id]) animando[f.a.id] = true;
+      pintarTarea(f);
+      consultasActualizar();
+      pedir();
+    });
+  }
+
+  /* se llama desde actividad(): arranca, mantiene o termina las consultas según el mapa de actividad */
+  function consultasActualizar() {
+    if (!plano) return;
+    Object.keys(figuras).forEach(function (id) {
+      var f = figuras[id], c = f.consulta, quien = colegaConsultado(id);
+      if (quien) {
+        if (!c) { if (f.estado === 'escritorio') irAConsultar(f, quien); }
+        else if (c.colega !== quien) { if (c.fase === 'esperando') irAConsultar(f, quien); }
+        else c.volver = false;
+      } else if (c) {
+        if (c.fase === 'esperando') volverDeConsulta(f); else if (c.fase === 'yendo') c.volver = true;
+      }
+    });
   }
 
   /* ---------------- API ---------------- */
@@ -1306,11 +1580,17 @@ App.Oficina3D = (function () {
     construir: construir,
     alElegirAgente: function (fn) { cbAgente = fn; },
     alElegirLugar: function (fn) { cbLugar = fn; },
+    alPasar: function (fn) { cbHover = fn; },
     elegir: function (id) { elegido = id; actualizarEtiquetasHover(); pedir(); },
     ocupado: function (id, si) { var f = figuras[id]; if (!f) return; f.ocupado = !!si; f.etiqueta.el.classList.toggle('ocupado', !!si); actualizarEtiquetasHover(); pedir(); },
     reunion: reunion,
     finReunion: function () { reunion([], null); },
     encuadrar: function () { encuadrar(true); pedir(); },
+    actividad: actividad,
+    faros: faros,
+    enfocar: enfocar,
+    enfocarAgente: enfocarAgente,
+    enfocarLugar: enfocarLugar,
     pedir: pedir,
     _estado: function () { return { figuras: Object.keys(figuras).length, animando: Object.keys(animando), orb: orb, plano: plano && { w: plano.x1, d: plano.z1 }, autos: autos.map(function (a) { return Math.round(a.g.position.x * 10) / 10; }), post: !!post, info: renderer.info.render }; }
   };

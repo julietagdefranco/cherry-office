@@ -134,13 +134,14 @@
           h('div.herramientas',
             h('button.btn', { onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), 'Llamar a reunión'),
             h('button.btn.primario', { onclick: function () { App.Contratar.abrir(); } }, App.icono('mas'), 'Contratar')),
-          h('div.pista', 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte'),
+          h('div.pista', App.Paleta ? App.Paleta.BASE : 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte'),
           dom.derecho));
       App.vaciar(raiz).appendChild(dom.app);
       App.dom = dom;
       if (!App.Oficina3D.iniciar(dom.lienzo)) dom.carga.textContent = 'Esta compu no puede mostrar la oficina en 3D. El resto funciona igual.';
       App.Oficina3D.alElegirAgente(function (id) { App.Agente.abrir(id); });
       App.Oficina3D.alElegirLugar(function (t) { if (t === 'reunion') App.Reunion.abrir(); else if (t === 'biblioteca') App.Biblioteca.abrir(); });
+      if (App.Oficina3D.alPasar && App.Paleta) App.Oficina3D.alPasar(App.Paleta.pista);
     }
     pintarTodo();
     App.Reunion.retomar();
@@ -191,6 +192,7 @@
       });
     });
     marcarEstados();
+    if (App.Actividad) { App.Actividad.repintar(); App.Actividad.iniciar(); }
   }
   function marcarEstados() {
     if (!dom.equipo) return;
@@ -198,7 +200,7 @@
     dom.equipo.querySelectorAll('.persona[data-id]').forEach(function (el) {
       var id = el.getAttribute('data-id');
       el.classList.toggle('activa', App.Agente.actual() === id);
-      el.classList.toggle('ocupada', !!E.ocupados[id]);
+      el.classList.toggle('ocupada', !!E.ocupados[id] || !!(E.actividad || {})[id]);
       el.classList.toggle('reunida', enReu.indexOf(id) >= 0);
     });
   }

@@ -332,4 +332,32 @@ struct RunnerTests {
         #expect(p.contains("/zzz") && p.contains("/usr/bin"))
         #expect(Set(p).count == p.count)
     }
+
+    @Test("childEnvironment: quita lo que inyecta una sesión de Claude Code y conserva la config del usuario")
+    func entornoHijoSinSesion() {
+        let heredado = ["PATH": "/zzz", "HOME": "/h", "CLAUDECODE": "1", "CLAUDE_PID": "123", "CLAUDE_EFFORT": "high",
+                        "CLAUDE_CODE_CHILD_SESSION": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_CODE_SESSION_ID": "x",
+                        "CLAUDE_AGENT_SDK_VERSION": "1",
+                        "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_SKIP_BEDROCK_AUTH": "1",
+                        "CLAUDE_CODE_OAUTH_TOKEN": "t", "ANTHROPIC_API_KEY": "k", "CLAUDE_BIN": "/c", "OTRA": "v"]
+        let e = ClaudeLocator.childEnvironment(claude: "/a/b/claude", env: heredado, home: "/h")
+        for k in ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT",
+                  "CLAUDE_CODE_SESSION_ID", "CLAUDE_AGENT_SDK_VERSION"] {
+            #expect(e[k] == nil, "\(k) debería quitarse")
+        }
+        for k in ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_OAUTH_TOKEN",
+                  "ANTHROPIC_API_KEY", "CLAUDE_BIN", "OTRA", "HOME"] {
+            #expect(e[k] == heredado[k], "\(k) debería conservarse")
+        }
+    }
+
+    @Test("desdeShell: shell de login interactivo y ruta entre marcadores aunque el rc imprima ruido")
+    func shellInteractivo() {
+        #expect(ClaudeLocator.argumentosShell().first == "-ilc")
+        let s = ClaudeLocator.marcaInicio, f = ClaudeLocator.marcaFin
+        #expect(ClaudeLocator.rutaDeSalida("Bienvenido!\n/tmp/ruido\n\(s)/Users/x/.local/bin/claude\(f)") == "/Users/x/.local/bin/claude")
+        #expect(ClaudeLocator.rutaDeSalida("\(s)\(f)") == nil)             // command -v no lo encontró
+        #expect(ClaudeLocator.rutaDeSalida("\(s)claude: not found\(f)") == nil)
+        #expect(ClaudeLocator.rutaDeSalida("/usr/local/bin/claude") == nil) // sin marcadores no se adivina
+    }
 }

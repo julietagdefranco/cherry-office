@@ -8,10 +8,17 @@ public final class Backend: Sendable {
     public let log: HQLog
     /// Oficina activa, recientes y todas las escrituras de `oficina.json` (agentes, departamentos).
     public let oficinas: Oficinas
+    /// Corre las tareas programadas de la oficina activa (Fase 5). `alTerminar` es el gancho para avisos y notificaciones.
+    public let programador: Programador
     private let apiRouter: Router
     private let migracion: Task<Migracion.Resultado, Never>
+    /// Servidor MCP de las consultas entre agentes (Fase 4).
+    let mcp: MCPServidor
 
     public var router: APIHandler { apiRouter }
+
+    /// La app se suscribe acá para mostrar una notificación de macOS por cada aviso nuevo.
+    public var avisos: CanalAvisos { runner.canalAvisos }
 
     /// Registra el enrutador de `/api/reuniones*` (lo hace la parte de reuniones al arrancar).
     public func registrarReuniones(_ r: SubRouter) { apiRouter.subrouters.reuniones = r }
@@ -21,6 +28,9 @@ public final class Backend: Sendable {
 
     /// Registra el enrutador de `/api/fs/carpetas` y `/api/oficina/archivo*` (explorador de carpetas y de la oficina).
     public func registrarExplorador(_ r: SubRouter) { apiRouter.subrouters.explorador = r }
+
+    /// Registra el enrutador de `/api/tareas*` (tareas programadas por agente).
+    public func registrarTareas(_ r: SubRouter) { apiRouter.subrouters.tareas = r }
 
     /// Configuración real: defaults + config.json + entorno, datos en ~/Library/Application Support/Próspera HQ.
     public static func makeDefault() throws -> Backend {
@@ -46,10 +56,29 @@ public final class Backend: Sendable {
         migracion = mig
         let oficinas = Oficinas(config: cfg, log: log)
         self.oficinas = oficinas
-        apiRouter = Router(config: cfg, store: store, runner: runner, log: log, oficinas: oficinas, listo: { _ = await mig.value })
+        let programador = Programador(store: store, runner: runner, oficinas: oficinas, config: cfg, log: log, env: env)
+        self.programador = programador
+        let mcp = MCPServidor(store: store, runner: runner, log: log, env: env)
+        self.mcp = mcp
+        apiRouter = Router(config: cfg, store: store, runner: runner, log: log, oficinas: oficinas, mcp: mcp, listo: { _ = await mig.value })
         registrarReuniones(ReunionesRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env))
         registrarBiblioteca(BibliotecaRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env))
         registrarExplorador(ExploradorRouter(config: cfg, oficinas: oficinas, log: log))
+        registrarTareas(TareasRouter(oficinas: oficinas, store: store, programador: programador))
+        let canal = runner.canalAvisos
+        Task {
+            // una tarea que termina deja un aviso «te necesita» (y la notificación de macOS, vía el canal)
+            await programador.alTerminar { e in
+                let of = await oficinas.activa()?.oficina
+                let tarea = of?.tareas?.first { $0.id == e.tarea }?.nombre ?? e.tarea
+                let ok = e.estado == "ok"
+                let texto = ok ? "«\(tarea)»: " + TextoAviso.respuesta(e.resultado) : "«\(tarea)» falló: " + (e.error ?? "error")
+                if let av = await store.avisoCrear(oficina: e.oficina, tipo: ok ? "tarea" : "error", agente: e.agente, texto: texto, ref: e.sid) {
+                    canal.emitir(av, nombre: of?.agente(e.agente)?.nombre ?? e.agente)
+                }
+            }
+            await programador.iniciar()
+        }
         log.info("arranque oficinasDir=\(cfg.oficinasDir) claude=\(runner.claudePath ?? "no")")
         // chequeo de arranque, sin bloquear
         Task.detached { _ = await runner.authStatus(timeout: 30) }
@@ -61,7 +90,10 @@ public final class Backend: Sendable {
 
     /// Mata los claude en curso y cierra la base. Llamar al cerrar la ventana o con ⌘Q.
     public func shutdown() async {
+        await programador.detener()
+        mcp.cerrar()
         await runner.shutdown()
+        await programador.esperar() // las corridas matadas guardan su estado antes de cerrar la base
         await store.close()
         log.info("shutdown")
         log.flush()

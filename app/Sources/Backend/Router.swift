@@ -16,6 +16,7 @@ final class SubRouterBox: @unchecked Sendable {
     private var valor: SubRouter?
     private var valorBiblioteca: SubRouter?
     private var valorExplorador: SubRouter?
+    private var valorTareas: SubRouter?
     var reuniones: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valor }
         set { lock.lock(); valor = newValue; lock.unlock() }
@@ -27,6 +28,10 @@ final class SubRouterBox: @unchecked Sendable {
     var biblioteca: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valorBiblioteca }
         set { lock.lock(); valorBiblioteca = newValue; lock.unlock() }
+    }
+    var tareas: SubRouter? {
+        get { lock.lock(); defer { lock.unlock() }; return valorTareas }
+        set { lock.lock(); valorTareas = newValue; lock.unlock() }
     }
 }
 
@@ -43,11 +48,14 @@ public final class Router: APIHandler {
     private let oficinas: Oficinas
     private let listo: @Sendable () async -> Void
     private let auth: AuthCache
+    /// Servidor MCP propio (consultas entre agentes, Fase 4). nil = los chats corren sin consultas.
+    private let mcp: MCPServidor?
     let subrouters = SubRouterBox()
 
-    init(config: Config, store: Store, runner: ClaudeRunner, log: HQLog, oficinas: Oficinas,
+    init(config: Config, store: Store, runner: ClaudeRunner, log: HQLog, oficinas: Oficinas, mcp: MCPServidor? = nil,
          listo: @escaping @Sendable () async -> Void) {
         self.config = config; self.store = store; self.runner = runner; self.log = log; self.oficinas = oficinas
+        self.mcp = mcp
         self.listo = listo
         auth = AuthCache(runner: runner)
     }
@@ -79,6 +87,10 @@ public final class Router: APIHandler {
             }
             return (404, Router.codificar(["error": "no"]))
         }
+        if TareasRouter.esRuta(p) { // /api/tareas*
+            if let r = subrouters.tareas, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
+            return (404, Router.codificar(["error": "no"]))
+        }
         if ExploradorRouter.esRuta(p) { // /api/fs/carpetas, /api/oficina/archivos, /api/oficina/archivo
             if let r = subrouters.explorador, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
             return (404, Router.codificar(["error": "no"]))
@@ -103,6 +115,30 @@ public final class Router: APIHandler {
                 return method == "GET" ? try await historial(query) : no
             case ("chat", 2):
                 return method == "POST" ? try await chat(body) : no
+            case ("consultas", 2):
+                return method == "GET" ? try await consultas(query) : no
+            case ("actividad", 2):
+                guard method == "GET" else { return no }
+                guard let act = await oficinas.activa() else { return (200, ["agentes": [String: Any](), "version": 0, "avisos": [Any]()]) }
+                var r = runner.actividad.json(oficina: act.carpeta)
+                r["avisos"] = await store.avisosPendientes(oficina: act.carpeta).map(\.json)
+                return (200, r)
+            case ("avisos", 2):
+                guard method == "GET" else { return no }
+                let act = try await oficinas.requerirActiva()
+                return (200, ["avisos": await store.avisosPendientes(oficina: act.carpeta).map(\.json)])
+            case ("avisos", 3) where partes[2] == "visto":
+                guard method == "POST" else { return no }
+                let act = try await oficinas.requerirActiva()
+                let d = try objeto(body)
+                let n = await store.avisosVistos(oficina: act.carpeta, id: d["id"] as? String,
+                                                 agente: (d["todos"] as? Bool) == true ? nil : d["agente"] as? String)
+                return (200, ["vistos": n])
+            case ("costos", 2):
+                guard method == "GET" else { return no }
+                let act = try await oficinas.requerirActiva()
+                let desde = query["desde"].flatMap { Double($0) } ?? 0
+                return (200, await store.costos(oficina: act.carpeta, desde: desde))
             case ("oficinas", 2):
                 switch method {
                 case "GET": return (200, ["oficinas": await oficinas.listar(), "activa": await oficinas.activa().map { $0.carpeta as Any } ?? NSNull()])
@@ -285,11 +321,13 @@ public final class Router: APIHandler {
         let (a, prompt) = try await oficinas.prepararBorrador(
             descripcion: (d["descripcion"] as? String) ?? "", departamento: (d["departamento"] as? String) ?? "")
         let texto: String
-        do { texto = try await runner.correrSinAgente(prompt: prompt, cwd: a.carpeta) }
+        let caja = CajaCosto()
+        do { texto = try await runner.correrSinAgente(prompt: prompt, cwd: a.carpeta, obs: caja.observador()) }
         catch let e as ClaudeError {
             log.error("borrador tipo=\(e.tipo)")
             return (502, ["error": "No pude armar el borrador del agente: \(e.mensaje)"])
         }
+        await store.registrarCosto(oficina: a.carpeta, origen: "borrador", costo: caja.valor)
         // los ids ocupados se recalculan por si cambió la oficina mientras Claude pensaba
         let ocupados = Set((await oficinas.activa()?.oficina ?? a.oficina).agentes.map(\.id))
         guard let b = Borrador.parsear(texto, ocupados: ocupados) else {
@@ -308,6 +346,22 @@ public final class Router: APIHandler {
     }
 
     // MARK: historial y chat
+
+    /// `GET /api/consultas?session=<sid>`: lo que ese agente le consultó a sus colegas en esa conversación (oficina activa).
+    private func consultas(_ q: [String: String]) async throws -> Resp {
+        let act = try await oficinas.requerirActiva()
+        guard let sidRaw = q["session"], Router.uuidValido(sidRaw) else { return (400, ["error": "pedido inválido"]) }
+        let filas = await store.consultasDe(oficina: act.carpeta, sid: sidRaw.lowercased())
+        func nombre(_ id: String) -> String { act.oficina.agente(id)?.nombre ?? id }
+        return (200, ["consultas": filas.map { f -> [String: Any] in
+            var d: [String: Any] = ["id": f.id, "de": f.de, "deNombre": nombre(f.de), "a": f.a, "aNombre": nombre(f.a),
+                                    "pregunta": f.pregunta, "ts": f.ts, "pos": f.pos]
+            if let r = f.respuesta { d["respuesta"] = r }
+            if let e = f.error { d["error"] = e }
+            if let c = f.costo { d["costo"] = c }
+            return d
+        }])
+    }
 
     private func historial(_ q: [String: String]) async throws -> Resp {
         let invalido: Resp = (400, ["error": "pedido inválido"])
@@ -349,19 +403,46 @@ public final class Router: APIHandler {
         if let of = await store.oficinaDe(sid), of != act.carpeta { return invalido }
         let t0 = Date()
         let store = self.store, runner = self.runner
-        let ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
+        var ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
         let carpeta = act.carpeta
+        let caja = CajaCosto()
+        defer { let c = caja.valor; Task { await store.registrarCosto(oficina: carpeta, agente: agente, origen: "chat", ref: sid, costo: c) } }
+        // Consultas a colegas: el token vive lo que dura este chat (se revoca al terminar). Si el servidor MCP no
+        // arrancó, el chat sale igual, sin la herramienta.
+        let mcpUrl = await mcp?.url()
+        ctx.mcpUrl = mcpUrl
+        let ctxFinal = ctx
+        let mcp = self.mcp
         let resultado: (Int, [String: String]) = await runner.conCarril(oficina: carpeta, agente: agente) {
+            var envExtra: [String: String] = [:]
+            if mcpUrl != nil, let mcp {
+                envExtra[Permisos.variableTokenMCP] = mcp.tokens.emitir(oficina: carpeta, agente: agente, sid: sid)
+            }
+            defer { if let t = envExtra[Permisos.variableTokenMCP] { mcp?.tokens.revocar(t) } }
             do {
                 try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
                 try await store.agregar(sid: sid, rol: "u", texto: msg)
                 let activa = await store.estaActiva(sid)
-                let texto = try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctx)
+                let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "chat", tarea: msg,
+                                                              extra: caja.observador()) { obs, token in
+                    let resumen = runner.resumirTarea(msg, oficina: carpeta, agente: agente, token: token, store: store)
+                    defer { resumen?.cancel() }
+                    return try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctxFinal, obs: obs,
+                                                         envExtra: envExtra)
+                }
                 try await store.marcarActiva(sid)
                 try await store.agregar(sid: sid, rol: "a", texto: texto.isEmpty ? "(sin respuesta)" : texto)
+                if let av = await store.avisoCrear(oficina: carpeta, tipo: "respuesta", agente: agente,
+                                                   texto: TextoAviso.respuesta(texto.isEmpty ? "(sin respuesta)" : texto), ref: sid) {
+                    runner.canalAvisos.emitir(av, nombre: def.nombre)
+                }
                 return (200, ["reply": texto])
             } catch let e as ClaudeError {
                 try? await store.agregar(sid: sid, rol: "a", texto: "No pude responder: " + e.mensaje, error: true)
+                if let av = await store.avisoCrear(oficina: carpeta, tipo: "error", agente: agente,
+                                                   texto: "No pudo responder: " + e.mensaje, ref: sid) {
+                    runner.canalAvisos.emitir(av, nombre: def.nombre)
+                }
                 return (e.status, ["error": e.mensaje])
             } catch {
                 let t = "No pude guardar la conversación."

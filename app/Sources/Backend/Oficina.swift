@@ -130,15 +130,17 @@ public struct Oficina: Codable, Sendable, Equatable {
     /// Carpetas vinculadas (opcional; ausente = ninguna).
     public var vinculos: [Vinculo]?
     public var biblioteca: BibliotecaCfg?
+    /// Tareas programadas por agente (opcional; ausente = ninguna). Ver Tareas.swift.
+    public var tareas: [TareaProgramada]?
 
     public init(version: Int = 1, nombre: String, duenio: String, departamentos: [Departamento] = [], agentes: [AgenteDef] = [],
-                vinculos: [Vinculo]? = nil, biblioteca: BibliotecaCfg? = nil) {
+                vinculos: [Vinculo]? = nil, biblioteca: BibliotecaCfg? = nil, tareas: [TareaProgramada]? = nil) {
         self.version = version; self.nombre = nombre; self.duenio = duenio
         self.departamentos = departamentos; self.agentes = agentes
-        self.vinculos = vinculos; self.biblioteca = biblioteca
+        self.vinculos = vinculos; self.biblioteca = biblioteca; self.tareas = tareas
     }
 
-    enum CodingKeys: String, CodingKey { case version, nombre, duenio, departamentos, agentes, vinculos, biblioteca }
+    enum CodingKeys: String, CodingKey { case version, nombre, duenio, departamentos, agentes, vinculos, biblioteca, tareas }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -149,6 +151,7 @@ public struct Oficina: Codable, Sendable, Equatable {
         agentes = try c.decodeIfPresent([AgenteDef].self, forKey: .agentes) ?? []
         vinculos = try c.decodeIfPresent([Vinculo].self, forKey: .vinculos)
         biblioteca = try c.decodeIfPresent(BibliotecaCfg.self, forKey: .biblioteca)
+        tareas = try c.decodeIfPresent([TareaProgramada].self, forKey: .tareas)
     }
 
     public func agente(_ id: String) -> AgenteDef? { agentes.first { $0.id == id } }
@@ -265,6 +268,7 @@ public enum Validar {
             guard Slug.valido(v.id), vins.insert(v.id).inserted else { throw ErrorAPI(400, "Carpeta vinculada con id inválido o repetido: \(v.id).") }
             guard v.ruta.hasPrefix("/") else { throw ErrorAPI(400, "La carpeta vinculada \(v.id) tiene que tener una ruta absoluta.") }
         }
+        try ValidarTareas.validar(o)
     }
 
     /// Relativa, dentro de `conocimiento/`, sin `..`.
@@ -438,6 +442,7 @@ public actor Oficinas {
         }
         let o = try OficinaStore.leer(carpeta: dir)
         try? Plantillas.completarEstructura(carpeta: dir)
+        Plantillas.actualizarMemoria(carpeta: dir, ids: o.agentes.map(\.id))
         activar(dir, nombre: o.nombre)
         return OficinaActiva(carpeta: dir, oficina: o)
     }

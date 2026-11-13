@@ -175,16 +175,11 @@ enum Extraccion {
 
 extension ClaudeRunner {
     /// Un `claude -p` SIN agente con la herramienta `Read` y carpetas extra (`--add-dir`): para describir imágenes.
-    func correrConLectura(prompt: String, cwd: String, dirs: [String], timeout: TimeInterval) async throws -> String {
+    func correrConLectura(prompt: String, cwd: String, dirs: [String], timeout: TimeInterval,
+                          obs: Observador? = nil) async throws -> String {
         try verificar(carpeta: cwd)
-        var a = ["-p", "--output-format", "json", "--tools", "Read"]
+        var a = ["-p"] + Self.formatoSalida + ["--tools", "Read"]
         for d in dirs { a += ["--add-dir", d] }
-        a += ["--", prompt]
-        let res = try await lanzar(args: a, timeout: timeout, cwd: cwd)
-        if res.timedOut { throw ClaudeError.timeout }
-        let c = Corrida(res: res, json: Self.parsearJSON(res.stdout))
-        if let e = c.error { throw ClaudeError.clasificar(e) }
-        if let r = c.json?["result"] as? String, !r.isEmpty { return r }
-        return c.json == nil ? res.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return try await resultado(a + ["--", prompt], timeout: timeout, cwd: cwd, obs: obs)
     }
 }

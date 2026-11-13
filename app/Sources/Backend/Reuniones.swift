@@ -18,6 +18,13 @@ struct TurnoReunion: Sendable, Equatable {
 struct Pendiente: Sendable, Equatable {
     var quien: String
     var que: String
+    /// El responsable no lo puede hacer solo (correr programas, mandar mensajes…): necesita a la persona.
+    var usuario: Bool = false
+
+    var json: [String: Any] { ["quien": quien, "que": que, "necesita_usuario": usuario] }
+    var lineaMD: String {
+        (quien.isEmpty ? "- \(que)" : "- **\(quien):** \(que)") + (usuario ? " _(necesita a la persona)_" : "")
+    }
 }
 
 struct SintesisReunion: Sendable, Equatable {
@@ -26,7 +33,7 @@ struct SintesisReunion: Sendable, Equatable {
     var pendientes: [Pendiente]
 
     var json: [String: Any] {
-        ["resumen": resumen, "decisiones": decisiones, "pendientes": pendientes.map { ["quien": $0.quien, "que": $0.que] }]
+        ["resumen": resumen, "decisiones": decisiones, "pendientes": pendientes.map(\.json)]
     }
 }
 
@@ -44,6 +51,13 @@ struct ReunionFila: Sendable {
     var error: String?
     /// slugs de documentos de la biblioteca adjuntos al tema (su ficha entra en el prompt de cada turno).
     var documentos: [String] = []
+    /// patrón de reunión: ver `PatronReunion` (debate si la fila es anterior a la fase 3).
+    var patron: String = "debate"
+    var lider: String?
+    /// {"a":[ids],"b":[ids]} solo en red/blue.
+    var bandos: [String: [String]]?
+    /// ruta relativa (dentro de `archivos/`) del archivo que se escribe al cerrar.
+    var salida: String?
 }
 
 // MARK: - SQLite (tablas `reuniones` y `turnos`, con clave de oficina)
@@ -80,6 +94,9 @@ extension Store {
         """)
         let cols = try db.query("PRAGMA table_info(reuniones)") { $0.text(1) }
         if !cols.contains("documentos") { try db.exec("ALTER TABLE reuniones ADD COLUMN documentos TEXT") }
+        for (c, tipo) in [("patron", "TEXT"), ("lider", "TEXT"), ("bandos", "TEXT"), ("salida", "TEXT")] where !cols.contains(c) {
+            try db.exec("ALTER TABLE reuniones ADD COLUMN \(c) \(tipo)")
+        }
         try db.run("UPDATE reuniones SET estado='esperando' WHERE estado='en_curso'")
     }
 
@@ -89,17 +106,28 @@ extension Store {
                            creada: r.double(5), cerrada: r.isNull(6) ? nil : r.double(6),
                            sintesis: r.isNull(7) ? nil : r.text(7), errorSintesis: r.isNull(8) ? nil : r.text(8),
                            acta: r.isNull(9) ? nil : r.text(9), error: r.isNull(10) ? nil : r.text(10),
-                           documentos: r.isNull(11) ? [] : ((try? JSONSerialization.jsonObject(with: Data(r.text(11).utf8))) as? [String] ?? []))
+                           documentos: r.isNull(11) ? [] : ((try? JSONSerialization.jsonObject(with: Data(r.text(11).utf8))) as? [String] ?? []),
+                           patron: r.isNull(12) ? "debate" : r.text(12), lider: r.isNull(13) ? nil : r.text(13),
+                           bandos: r.isNull(14) ? nil : (try? JSONSerialization.jsonObject(with: Data(r.text(14).utf8))) as? [String: [String]],
+                           salida: r.isNull(15) ? nil : r.text(15))
     }
 
-    private static let columnasReunion = "id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos"
+    private static let columnasReunion = "id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida"
 
-    func reunionCrear(id: String, oficina: String, tema: String, agentes: [String], documentos: [String] = []) throws {
+    func reunionCrear(id: String, oficina: String, tema: String, agentes: [String], documentos: [String] = [],
+                      patron: String = "debate", lider: String? = nil, bandos: [String: [String]]? = nil, salida: String? = nil) throws {
         let ags = String(data: (try? JSONSerialization.data(withJSONObject: agentes)) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
         let docs = String(data: (try? JSONSerialization.data(withJSONObject: documentos)) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
-        try db.run("INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos) VALUES(?,?,?,?,?,?,?)",
+        let bj = bandos.flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }.flatMap { String(data: $0, encoding: .utf8) }
+        try db.run("INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos,patron,lider,bandos,salida) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                    [.text(id), .text(oficina), .text(tema), .text(ags), .text("esperando"), .double(Date().timeIntervalSince1970),
-                    documentos.isEmpty ? .null : .text(docs)])
+                    documentos.isEmpty ? .null : .text(docs), .text(patron), lider.map { .text($0) } ?? .null,
+                    bj.map { .text($0) } ?? .null, salida.map { .text($0) } ?? .null])
+    }
+
+    /// Ruta final del archivo de salida (puede diferir de la pedida si ya existía una con ese nombre).
+    func reunionSalida(_ id: String, _ salida: String) throws {
+        try db.run("UPDATE reuniones SET salida=? WHERE id=?", [.text(salida), .text(id)])
     }
 
     func reunion(_ id: String, oficina: String) -> ReunionFila? {
@@ -242,9 +270,11 @@ enum ReunionTexto {
     }
 
     static func promptTurno(oficina: Oficina, carpeta: String, tema: String, participantes: [AgenteDef], quien: AgenteDef,
-                            turnos: [TurnoReunion], ronda: Int, fichas: String = "") -> String {
+                            turnos: [TurnoReunion], ronda: Int, fichas: String = "",
+                            patron: PatronReunion = .debate, fase: FaseTurno = .libre, lider: AgenteDef? = nil,
+                            bandoA: [AgenteDef] = [], bandoB: [AgenteDef] = []) -> String {
         let gente = participantes.map { "\($0.nombre) (\($0.rol))" }.joined(separator: ", ")
-        let dicho = transcripcion(turnos, oficina: oficina, max: maxTranscripcionTurno)
+        let dicho = transcripcion(ReunionPatron.visibles(patron: patron, turnos: turnos, ronda: ronda), oficina: oficina, max: maxTranscripcionTurno)
         let docs = fichas.isEmpty ? "" : "\n\nDocumentos adjuntos a la reunión (fichas de la biblioteca; el texto completo está en archivos/.texto/<slug>.md):\n\(fichas)"
         return """
         Estás en una reunión de la oficina «\(oficina.nombre)». Tema de la reunión:
@@ -261,11 +291,13 @@ enum ReunionTexto {
         Lo que se dijo hasta ahora (estamos en la ronda \(ronda)):
         \(dicho.isEmpty ? "(todavía no habló nadie)" : dicho)
 
-        Sos \(quien.nombre), \(quien.rol). Opiná desde tu rol en 120-180 palabras, sin repetir lo ya dicho; decí con qué estás de acuerdo y con qué no, y proponé un próximo paso concreto. Respondé solo con tu opinión, en primera persona y sin encabezados.
+        \(ReunionPatron.consigna(patron: patron, fase: fase, quien: quien, lider: lider, bandoA: bandoA, bandoB: bandoB))
         """
     }
 
-    static func promptSintesis(oficina: Oficina, tema: String, participantes: [AgenteDef], turnos: [TurnoReunion]) -> String {
+    static func promptSintesis(oficina: Oficina, tema: String, participantes: [AgenteDef], turnos: [TurnoReunion],
+                               patron: PatronReunion = .debate, lider: AgenteDef? = nil,
+                               bandoA: [AgenteDef] = [], bandoB: [AgenteDef] = []) -> String {
         let gente = participantes.map { "\($0.nombre) (\($0.rol))" }.joined(separator: ", ")
         return """
         Sos el secretario de actas de la oficina «\(oficina.nombre)». Tema de la reunión: \(tema)
@@ -275,8 +307,8 @@ enum ReunionTexto {
         \(transcripcion(turnos, oficina: oficina, conRol: true, max: maxTranscripcionActa))
 
         Devolvé SOLO un objeto JSON estricto (sin texto antes ni después, sin bloques de código) con esta forma:
-        {"resumen": "resumen de la reunión en 3-6 oraciones", "decisiones": ["decisión concreta confirmada por la conversación"], "pendientes": [{"quien": "nombre de quien se encarga", "que": "tarea concreta"}]}
-        Incluí en "decisiones" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "pendientes" los próximos pasos con responsable.
+        {"resumen": "resumen de la reunión en 3-6 oraciones", "decisiones": ["decisión concreta confirmada por la conversación"], "pendientes": [{"quien": "nombre de quien se encarga", "que": "tarea concreta", "necesita_usuario": false}]}
+        Incluí en "decisiones" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "pendientes" los próximos pasos con responsable.\(PendientesReunion.consignaSecretario(duenio: oficina.duenio))\(ReunionPatron.varianteSintesis(patron: patron, lider: lider, bandoA: bandoA, bandoB: bandoB))
         """
     }
 
@@ -290,7 +322,10 @@ enum ReunionTexto {
         let decisiones = ((o["decisiones"] as? [Any]) ?? []).map(cadena).filter { !$0.isEmpty }
         var pend: [Pendiente] = []
         for p in (o["pendientes"] as? [Any]) ?? [] {
-            if let m = p as? [String: Any] { let q = cadena(m["quien"]), k = cadena(m["que"]); if !k.isEmpty { pend.append(Pendiente(quien: q, que: k)) } }
+            if let m = p as? [String: Any] {
+                let q = cadena(m["quien"]), k = cadena(m["que"])
+                if !k.isEmpty { pend.append(Pendiente(quien: q, que: k, usuario: (m["necesita_usuario"] as? Bool) == true)) }
+            }
             else if let s = p as? String, !cadena(s).isEmpty { pend.append(Pendiente(quien: "", que: cadena(s))) }
         }
         if resumen.isEmpty && decisiones.isEmpty && pend.isEmpty { return nil }
@@ -329,7 +364,7 @@ enum ReunionTexto {
             s += (x.resumen.isEmpty ? "_(sin resumen)_" : x.resumen) + "\n\n### Decisiones\n\n"
             s += x.decisiones.isEmpty ? "_(ninguna)_\n" : x.decisiones.map { "- \($0)" }.joined(separator: "\n") + "\n"
             s += "\n### Pendientes\n\n"
-            s += x.pendientes.isEmpty ? "_(ninguno)_\n" : x.pendientes.map { $0.quien.isEmpty ? "- \($0.que)" : "- **\($0.quien):** \($0.que)" }.joined(separator: "\n") + "\n"
+            s += x.pendientes.isEmpty ? "_(ninguno)_\n" : x.pendientes.map(\.lineaMD).joined(separator: "\n") + "\n"
         } else {
             s += "_No se pudo generar la síntesis\(errorSintesis.map { ": " + Self.sinPuntoFinal($0) } ?? "")._\n"
         }
@@ -434,6 +469,10 @@ public actor ReunionesRouter: SubRouter {
     private func vista(_ f: ReunionFila, vivo: Bool, habla: String?, turnos: [TurnoReunion], resumen: Bool = false) -> [String: Any] {
         let estado = f.estado == "en_curso" && !vivo ? "esperando" : (vivo ? "en_curso" : f.estado)
         var o: [String: Any] = ["id": f.id, "tema": f.tema, "agentes": f.agentes, "estado": estado, "creada": Self.iso(f.creada)]
+        o["patron"] = f.patron
+        if let l = f.lider { o["lider"] = l }
+        if let b = f.bandos { o["bandos"] = b }
+        if let sa = f.salida { o["salida"] = sa }
         if resumen { o["turnos"] = turnos.count; return o }
         o["hablando"] = vivo ? (habla.map { $0 as Any } ?? NSNull()) : NSNull()
         o["rondas"] = turnos.map { $0.ronda }.max() ?? 0
@@ -447,6 +486,9 @@ public actor ReunionesRouter: SubRouter {
         if let c = f.cerrada { o["cerrada"] = Self.iso(c) }
         if let a = f.acta { o["acta"] = a; o["actaRuta"] = (f.oficina as NSString).appendingPathComponent(a) }
         if let e = f.error { o["error"] = e }
+        if f.estado == "cerrada", let sa = f.salida, FileManager.default.fileExists(atPath: (f.oficina as NSString).appendingPathComponent(sa)) {
+            o["salidaRuta"] = (f.oficina as NSString).appendingPathComponent(sa)
+        }
         if !f.documentos.isEmpty { o["documentos"] = f.documentos }
         return o
     }
@@ -504,9 +546,41 @@ public actor ReunionesRouter: SubRouter {
             }
             if documentos.count > 10 { throw ErrorAPI(400, "Máximo 10 documentos por reunión.") }
         }
+        var patron = PatronReunion.debate
+        if let v = d["patron"], !(v is NSNull) {
+            guard let t = v as? String, let p = PatronReunion(rawValue: t) else {
+                throw ErrorAPI(400, "«patron» tiene que ser uno de: " + PatronReunion.allCases.map { $0.rawValue }.joined(separator: ", ") + ".")
+            }
+            patron = p
+        }
+        var lider: String?
+        if patron == .lider {
+            guard let l = d["lider"] as? String, ids.contains(l) else { throw ErrorAPI(400, "«lider» tiene que ser uno de los participantes.") }
+            lider = l
+        }
+        var bandos: [String: [String]]?
+        if patron == .redblue {
+            let malo = ErrorAPI(400, "«bandos» tiene que repartir a todos los participantes entre «a» y «b», con al menos uno en cada bando.")
+            guard let b = d["bandos"] as? [String: Any], let la = b["a"] as? [Any], let lb = b["b"] as? [Any] else { throw malo }
+            let ba = la.compactMap { $0 as? String }, bb = lb.compactMap { $0 as? String }
+            guard ba.count == la.count, bb.count == lb.count, !ba.isEmpty, !bb.isEmpty,
+                  Set(ba).count == ba.count, Set(bb).count == bb.count, Set(ba).isDisjoint(with: bb),
+                  Set(ba).union(bb) == Set(ids) else { throw malo }
+            bandos = ["a": ba, "b": bb]
+        }
+        if patron == .revision, documentos.isEmpty { throw ErrorAPI(400, "El panel de revisión necesita al menos un documento adjunto.") }
+        let creada = Date()
+        var salida = ReunionPatron.salidaPorDefecto(tema: tema, fecha: creada)
+        if let v = d["salida"], !(v is NSNull) {
+            guard let t = (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), ReunionPatron.errorDeSalida(t) == nil else {
+                throw ErrorAPI(400, ReunionPatron.errorDeSalida((v as? String) ?? "") ?? "«salida» tiene que ser texto.")
+            }
+            salida = t
+        }
         let id = UUID().uuidString.lowercased()
         let ordenados = ReunionTexto.ordenar(ids.compactMap { a.oficina.agente($0) }, oficina: a.oficina, tema: tema).map { $0.id }
-        do { try await store.reunionCrear(id: id, oficina: a.carpeta, tema: tema, agentes: ordenados, documentos: documentos) }
+        do { try await store.reunionCrear(id: id, oficina: a.carpeta, tema: tema, agentes: ordenados, documentos: documentos,
+                                                   patron: patron.rawValue, lider: lider, bandos: bandos, salida: salida) }
         catch { throw ErrorAPI(500, "No pude guardar la reunión.") }
         try await arrancar(id, a, rondas: rondas)
         return try await respuesta(id, a)
@@ -542,14 +616,19 @@ public actor ReunionesRouter: SubRouter {
         let turnos = await store.turnosDe(reunion: id)
         let of = a.oficina
         let parts = f.agentes.compactMap { of.agente($0) }
+        let patron = PatronReunion(rawValue: f.patron) ?? .debate
+        let (liderDef, bandoA, bandoB) = Self.rolesDe(f, of)
         var sintesis: SintesisReunion?
         var errSint: String?
         if !turnos.contains(where: { !$0.error }) {
             errSint = "No hubo opiniones para resumir."
         } else {
             do {
-                let t = try await runner.correrSinAgente(prompt: ReunionTexto.promptSintesis(oficina: of, tema: f.tema, participantes: parts, turnos: turnos),
-                                                         timeout: timeoutSintesis, cwd: a.carpeta)
+                let caja = CajaCosto()
+                defer { let c = caja.valor; let st = store, car = a.carpeta; Task { await st.registrarCosto(oficina: car, origen: "sintesis", ref: id, costo: c) } }
+                let t = try await runner.correrSinAgente(prompt: ReunionTexto.promptSintesis(oficina: of, tema: f.tema, participantes: parts, turnos: turnos,
+                                                                                                patron: patron, lider: liderDef, bandoA: bandoA, bandoB: bandoB),
+                                                         timeout: timeoutSintesis, cwd: a.carpeta, obs: caja.observador())
                 if let s = ReunionTexto.parsearSintesis(t) { sintesis = s }
                 else { errSint = "La síntesis no vino en el formato esperado." }
             } catch let e as ClaudeError { errSint = e.mensaje }
@@ -565,9 +644,30 @@ public actor ReunionesRouter: SubRouter {
             if let s = sintesis, !s.decisiones.isEmpty {
                 try Plantillas.anexarDecisiones(carpeta: a.carpeta, decisiones: s.decisiones, fecha: hoy)
             }
+            if let s = sintesis, !s.pendientes.isEmpty {
+                try PendientesReunion.repartir(carpeta: a.carpeta, oficina: of, tema: f.tema, pendientes: s.pendientes, fecha: hoy)
+                // lo que necesita a la persona (asignado a ella o marcado) deja un aviso «te necesita»
+                let paraVos = s.pendientes.filter { $0.usuario || PendientesReunion.agente(de: $0.quien, en: of) == nil }.count
+                if paraVos > 0 {
+                    await store.avisoCrear(oficina: a.carpeta, tipo: "pendiente",
+                                           texto: paraVos == 1 ? "Quedó 1 pendiente de «\(f.tema)» que necesita tu parte"
+                                                               : "Quedaron \(paraVos) pendientes de «\(f.tema)» que necesitan tu parte", ref: id)
+                }
+            }
         } catch {
             errorActa = "No pude guardar el acta o las decisiones en la carpeta de la oficina."
             log.error("reuniones: \(error)")
+        }
+        // archivo de salida: lo escribe el backend (los turnos son de solo lectura). Un fallo se informa como el del acta.
+        if let pedida = f.salida {
+            do {
+                let definitiva = try escribirSalida(a, pedida, ReunionPatron.markdownSalida(oficina: of, f: f, participantes: parts, sintesis: sintesis,
+                                                                                         errorSintesis: errSint, acta: rel, fecha: hoy))
+                try await store.reunionSalida(id, definitiva)
+            } catch {
+                if errorActa == nil { errorActa = "No pude guardar el archivo de salida (\(pedida))." }
+                log.error("reuniones: salida: \(error)")
+            }
         }
         let js = sintesis.flatMap { try? JSONSerialization.data(withJSONObject: $0.json) }.flatMap { String(data: $0, encoding: .utf8) }
         do { try await store.reunionCerrar(id, sintesis: js, errorSintesis: errSint, acta: rel, error: errorActa) }
@@ -584,6 +684,27 @@ public actor ReunionesRouter: SubRouter {
         while fm.fileExists(atPath: a.ruta(rel)) { rel = "reuniones/\(base)-\(n).md"; n += 1 }
         try Data(texto.utf8).write(to: URL(fileURLWithPath: a.ruta(rel)), options: .atomic)
         return rel
+    }
+
+    /// Escribe `rel` (ya validada, dentro de `archivos/`) creando las carpetas; si existe agrega `-2`, `-3`. Devuelve la ruta final.
+    /// Se niega si un enlace simbólico sacaría el archivo de la carpeta de la oficina.
+    private func escribirSalida(_ a: OficinaActiva, _ rel: String, _ texto: String) throws -> String {
+        guard ReunionPatron.errorDeSalida(rel) == nil else { throw ErrorAPI(400, "salida inválida") }
+        let fm = FileManager.default
+        let definitiva = ReunionPatron.rutaLibre(rel) { fm.fileExists(atPath: a.ruta($0)) }
+        let url = URL(fileURLWithPath: a.ruta(definitiva))
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let base = URL(fileURLWithPath: a.carpeta).resolvingSymlinksInPath().path + "/"
+        guard (url.deletingLastPathComponent().resolvingSymlinksInPath().path + "/").hasPrefix(base) else {
+            throw ErrorAPI(400, "salida fuera de la oficina")
+        }
+        try Data(texto.utf8).write(to: url, options: .atomic)
+        return definitiva
+    }
+
+    /// Líder y bandos de la reunión como agentes (los que ya no existan en la oficina se omiten).
+    static func rolesDe(_ f: ReunionFila, _ of: Oficina) -> (AgenteDef?, [AgenteDef], [AgenteDef]) {
+        (f.lider.flatMap { of.agente($0) }, (f.bandos?["a"] ?? []).compactMap { of.agente($0) }, (f.bandos?["b"] ?? []).compactMap { of.agente($0) })
     }
 
     // MARK: rondas
@@ -610,39 +731,89 @@ public actor ReunionesRouter: SubRouter {
         hablando[id] = nil
     }
 
-    /// Una ronda: cada participante habla una vez, en orden. -> (hubo algún turno bueno, último error, abortada por cierre de la app).
+    /// Una ronda: cada participante habla una vez, en el orden y con la consigna que marca el patrón de la reunión.
+    /// -> (hubo algún turno bueno, último error, abortada por cierre de la app).
     private func correrRonda(_ id: String, carpeta: String) async -> (ok: Bool, error: String?, abortada: Bool) {
         guard let of = try? OficinaStore.leer(carpeta: carpeta) else { return (false, "No pude leer la oficina.", false) }
         guard let f = await store.reunion(id, oficina: carpeta) else { return (false, "No encontré la reunión.", false) }
         let ronda = ((await store.turnosDe(reunion: id)).map { $0.ronda }.max() ?? 0) + 1
         let participantes = f.agentes.compactMap { of.agente($0) }
+        let patron = PatronReunion(rawValue: f.patron) ?? .debate
+        let bandos = f.bandos.map { (a: $0["a"] ?? [], b: $0["b"] ?? []) }
+        let plan = ReunionPatron.plan(patron: patron, ids: participantes.map { $0.id }, lider: f.lider, bandos: bandos)
         var ok = false
         var ultimo: String?
-        for ag in participantes {
-            hablando[id] = ag.id
-            let prompt = ReunionTexto.promptTurno(oficina: of, carpeta: carpeta, tema: f.tema, participantes: participantes, quien: ag,
-                                                  turnos: await store.turnosDe(reunion: id), ronda: ronda,
-                                                  fichas: ReunionTexto.fichas(carpeta: carpeta, documentos: f.documentos))
-            var texto: String
-            var fallo = false
-            do {
-                let runner = self.runner, cwd = carpeta, t = timeoutTurno
-                let dirs = Permisos.dirsVinculos(of, agente: ag)
-                texto = try await runner.conCarril(oficina: carpeta, agente: ag.id) {
-                    try await runner.turnoSoloLectura(agente: ag.id, prompt: prompt, cwd: cwd, timeout: t, dirsExtra: dirs)
+        if patron == .mapreduce {
+            // todos a la vez; cada uno respeta su propio carril (conCarril) y no ve los turnos de esta ronda
+            var pendientes = Set(plan.map { $0.agente })
+            hablando[id] = plan.first?.agente
+            let resultados = await withTaskGroup(of: ResultadoTurno.self) { grupo -> [ResultadoTurno] in
+                for paso in plan {
+                    grupo.addTask { await self.hacerTurno(id, carpeta, of, f, ronda, participantes, paso) }
                 }
-                texto = texto.trimmingCharacters(in: .whitespacesAndNewlines)
-                if texto.isEmpty { texto = "(sin respuesta)"; fallo = true }
-            } catch let e as ClaudeError {
-                if e == .cerrando { return (ok, ultimo, true) }
-                texto = e.mensaje; fallo = true
-                log.warn("reunion turno agente=\(ag.id) tipo=\(e.tipo)")
-            } catch {
-                texto = "No pude responder."; fallo = true
+                var out: [ResultadoTurno] = []
+                for await r in grupo {
+                    out.append(r)
+                    pendientes.remove(r.agente)
+                    hablando[id] = plan.first { pendientes.contains($0.agente) }?.agente
+                }
+                return out
             }
-            if fallo { ultimo = texto } else { ok = true }
-            try? await store.turnoAgregar(reunion: id, oficina: carpeta, ronda: ronda, agente: ag.id, texto: texto, error: fallo)
+            for r in resultados {
+                if r.abortada { return (ok, ultimo, true) }
+                if r.fallo { ultimo = r.texto } else { ok = true }
+            }
+            return (ok, ultimo, false)
+        }
+        for paso in plan {
+            hablando[id] = paso.agente
+            let r = await hacerTurno(id, carpeta, of, f, ronda, participantes, paso)
+            if r.abortada { return (ok, ultimo, true) }
+            if r.fallo { ultimo = r.texto } else { ok = true }
         }
         return (ok, ultimo, false)
+    }
+
+    struct ResultadoTurno: Sendable {
+        var agente: String
+        var texto: String
+        var fallo: Bool
+        var abortada: Bool
+    }
+
+    /// Un turno: arma el prompt, corre `turnoSoloLectura` en el carril del agente (con actividad y costo) y guarda el resultado.
+    private func hacerTurno(_ id: String, _ carpeta: String, _ of: Oficina, _ f: ReunionFila, _ ronda: Int,
+                            _ participantes: [AgenteDef], _ paso: PasoTurno) async -> ResultadoTurno {
+        guard let ag = of.agente(paso.agente) else { return ResultadoTurno(agente: paso.agente, texto: "No encontré al agente.", fallo: true, abortada: false) }
+        let patron = PatronReunion(rawValue: f.patron) ?? .debate
+        let (liderDef, bandoA, bandoB) = Self.rolesDe(f, of)
+        let prompt = ReunionTexto.promptTurno(oficina: of, carpeta: carpeta, tema: f.tema, participantes: participantes, quien: ag,
+                                              turnos: await store.turnosDe(reunion: id), ronda: ronda,
+                                              fichas: ReunionTexto.fichas(carpeta: carpeta, documentos: f.documentos),
+                                              patron: patron, fase: paso.fase, lider: liderDef, bandoA: bandoA, bandoB: bandoB)
+        var texto: String
+        var fallo = false
+        do {
+            let runner = self.runner, cwd = carpeta, t = timeoutTurno
+            let dirs = Permisos.dirsVinculos(of, agente: ag)
+            let caja = CajaCosto(), agid = ag.id, st = store
+            defer { let c = caja.valor; Task { await st.registrarCosto(oficina: cwd, agente: agid, origen: "reunion", ref: id, costo: c) } }
+            texto = try await runner.conCarril(oficina: carpeta, agente: ag.id) {
+                try await runner.actividad.seguir(oficina: cwd, agente: agid, origen: "reunion", tarea: "Reunión: " + f.tema,
+                                                  extra: caja.observador()) { obs, _ in
+                    try await runner.turnoSoloLectura(agente: agid, prompt: prompt, cwd: cwd, timeout: t, dirsExtra: dirs, obs: obs)
+                }
+            }
+            texto = texto.trimmingCharacters(in: .whitespacesAndNewlines)
+            if texto.isEmpty { texto = "(sin respuesta)"; fallo = true }
+        } catch let e as ClaudeError {
+            if e == .cerrando { return ResultadoTurno(agente: ag.id, texto: "", fallo: true, abortada: true) }
+            texto = e.mensaje; fallo = true
+            log.warn("reunion turno agente=\(ag.id) tipo=\(e.tipo)")
+        } catch {
+            texto = "No pude responder."; fallo = true
+        }
+        try? await store.turnoAgregar(reunion: id, oficina: carpeta, ronda: ronda, agente: ag.id, texto: texto, error: fallo)
+        return ResultadoTurno(agente: ag.id, texto: texto, fallo: fallo, abortada: false)
     }
 }

@@ -12,6 +12,7 @@ import re
 import shutil
 import unicodedata
 import uuid
+import zoneinfo  # Python 3.9+
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -124,6 +125,68 @@ def validar_oficina(o):
         vins.add(v["id"])
         if not str(v.get("ruta") or "").startswith("/"):
             raise ErrorAPI(400, "La carpeta vinculada %s tiene que tener una ruta absoluta." % v["id"])
+    validar_tareas(o)
+
+
+# ----------------------------------------------------------------------------- tareas programadas (ver tools/hq_tareas.py)
+
+MAX_TAREAS = 50
+MAX_CONSIGNA = 4000
+MAX_NOMBRE_TAREA = 80
+HORA_RE = re.compile(r"^([01][0-9]|2[0-3]):([0-5][0-9])$")
+
+
+def hora_minuto(s):
+    """"HH:MM" estricto -> (hora, minuto) o None."""
+    m = HORA_RE.match(s) if isinstance(s, str) else None
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def zona_valida(z):
+    if not isinstance(z, str) or not z:
+        return False
+    try:
+        zoneinfo.ZoneInfo(z)
+        return True
+    except Exception:
+        return False
+
+
+def validar_tareas(o):
+    """Reglas de `tareas`: id slug único, agente existente (solo exigido a las activas: al despedir a un agente sus tareas
+    quedan desactivadas y se conservan), días 1..7 sin repetir y no vacíos, hora, zona, consigna y nombre."""
+    ts = o.get("tareas") or []
+    if len(ts) > MAX_TAREAS:
+        raise ErrorAPI(400, "Máximo %d tareas programadas." % MAX_TAREAS)
+    ids = set()
+    agentes = {a["id"] for a in o.get("agentes", [])}
+    for t in ts:
+        tid = t.get("id")
+        if not slug_valido(tid) or tid in ids:
+            raise ErrorAPI(400, "Tarea con id inválido o repetido: %s." % tid)
+        ids.add(tid)
+        if not slug_valido(t.get("agente")):
+            raise ErrorAPI(400, "La tarea %s tiene un agente inválido." % tid)
+        activa = t.get("activa", True)
+        if not isinstance(activa, bool):
+            raise ErrorAPI(400, "La tarea %s tiene un valor de «activa» inválido." % tid)
+        if activa and t["agente"] not in agentes:
+            raise ErrorAPI(400, "La tarea %s es de un agente que no existe (%s)." % (tid, t["agente"]))
+        n = t.get("nombre")
+        if not isinstance(n, str) or not n.strip() or len(n.strip()) > MAX_NOMBRE_TAREA:
+            raise ErrorAPI(400, "La tarea %s necesita un nombre (hasta %d caracteres)." % (tid, MAX_NOMBRE_TAREA))
+        c = t.get("consigna")
+        if not isinstance(c, str) or not c.strip() or len(c.strip()) > MAX_CONSIGNA:
+            raise ErrorAPI(400, "La consigna de la tarea %s tiene que tener entre 1 y %d caracteres." % (tid, MAX_CONSIGNA))
+        d = t.get("dias")
+        if (not isinstance(d, list) or not d or not all(type(x) is int and 1 <= x <= 7 for x in d) or len(set(d)) != len(d)):
+            raise ErrorAPI(400, "Los días de la tarea %s tienen que ser números del 1 (lunes) al 7 (domingo), sin repetir y al "
+                                "menos uno." % tid)
+        if hora_minuto(t.get("hora")) is None:
+            raise ErrorAPI(400, "La hora de la tarea %s tiene que ser HH:MM (por ejemplo 08:00)." % tid)
+        z = t.get("zona")
+        if z is not None and not zona_valida(z):
+            raise ErrorAPI(400, "La zona horaria de la tarea %s no existe: %s." % (tid, z))
 
 
 # ----------------------------------------------------------------------------- oficina.json
@@ -153,6 +216,8 @@ def leer_oficina(carpeta):
         if not isinstance(o["departamentos"], list) or not isinstance(o["agentes"], list):
             raise ValueError("formato")
         if not all(isinstance(x, dict) for x in o["departamentos"] + o["agentes"]):
+            raise ValueError("formato")
+        if o.get("tareas") is not None and (not isinstance(o["tareas"], list) or not all(isinstance(x, dict) for x in o["tareas"])):
             raise ValueError("formato")
     except ValueError:
         raise ErrorAPI(400, "oficina.json no se puede leer: tiene un formato inválido.")
@@ -208,6 +273,11 @@ def notas_agente_md(nombre, rol):
             % (nombre, rol, nombre))
 
 
+# Documenta las herramientas del servidor MCP de la oficina (Fase 4). Su presencia marca una sección al día.
+LINEA_CONSULTAS = ("Podés consultar a un colega con la herramienta consultar(colega, pregunta) cuando necesites su mirada; "
+                   "usá colegas() para ver quiénes son. Máximo 3 consultas por mensaje.")
+
+
 def seccion_memoria(id_):
     return (MARCA_MEMORIA + "\n"
             "Tu carpeta de trabajo es la raíz de la oficina; todas las rutas son relativas a ella.\n"
@@ -224,7 +294,31 @@ def seccion_memoria(id_):
             "- Lo que produzcas para el usuario (informes, borradores, archivos) guardalo con Write en "
             "`archivos/entregables/%s/`; esa es la única carpeta de archivos donde podés escribir.\n"
             "- No podés escribir ningún otro archivo (el sistema lo impide igual). Si algo debería quedar como "
-            "decisión, proponelo en una reunión o decile al usuario que lo registre.\n" % (id_, id_))
+            "decisión, proponelo en una reunión o decile al usuario que lo registre.\n"
+            "- " + LINEA_CONSULTAS + "\n") % (id_, id_)
+
+
+def actualizar_memoria(carpeta, ids):
+    """Al abrir una oficina: reescribe la sección de memoria de los `.md` de agente que la tienen desactualizada (sin la
+    línea de consultas). Solo toca desde `## Memoria de la oficina` hasta el final; el frontmatter y el prompt quedan
+    como están. Idempotente. Devuelve cuántos reescribió."""
+    n = 0
+    for id_ in ids:
+        p = os.path.join(carpeta, ".claude", "agents", "%s.md" % id_)
+        try:
+            with open(p, encoding="utf-8") as f:
+                t = f.read()
+        except OSError:
+            continue
+        i = t.find(MARCA_MEMORIA)
+        if i < 0 or LINEA_CONSULTAS in t:
+            continue
+        try:
+            escribir_atomico(p, t[:i] + seccion_memoria(id_) + "\n")
+            n += 1
+        except OSError:
+            pass
+    return n
 
 
 _YAML_RESERVADAS = {"null", "~", "true", "false", "yes", "no", "on", "off", "y", "n"}
@@ -492,6 +586,7 @@ def abrir_oficina(home, carpeta):
         completar_estructura(dirr)
     except OSError:
         pass
+    actualizar_memoria(dirr, [a["id"] for a in o["agentes"]])
     return dirr, o
 
 
@@ -779,6 +874,9 @@ def despedir(carpeta, id_):
             raise ErrorAPI(500, "No pude archivar el agente.")
         rel = ".claude/agents/.archivados/%s.md" % nombre
     o["agentes"] = [a for a in o["agentes"] if a["id"] != id_]
+    for t in o.get("tareas") or []:  # sus tareas programadas quedan desactivadas (no se borran)
+        if t.get("agente") == id_:
+            t["activa"] = False
     try:
         escribir_oficina(o, carpeta)
     except ErrorAPI:

@@ -322,6 +322,8 @@ extension Oficinas {
             rel = ".claude/agents/.archivados/\(nombre).md"
         }
         o.agentes.removeAll { $0.id == id }
+        // sus tareas programadas quedan desactivadas (no se borran)
+        if o.tareas != nil { for i in o.tareas!.indices where o.tareas![i].agente == id { o.tareas![i].activa = false } }
         do { try OficinaStore.escribir(o, carpeta: a.carpeta) }
         catch {
             if let d = destino { try? fm.moveItem(atPath: d, toPath: md) }
