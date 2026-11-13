@@ -775,6 +775,7 @@ App.Oficina3D = (function () {
       dibujarPantalla(f);
       pintarTarea(f);
     }
+    consultasActualizar();
     actualizarEtiquetasHover();
     pedir();
   }
@@ -821,7 +822,7 @@ App.Oficina3D = (function () {
           f.estado = hablando === id ? 'hablando' : 'en-reunion';
           if (f.estado === 'hablando') animando[id] = true; else sentar(f, f.enSilla || a);
         }
-      } else if (f.estado !== 'escritorio') {
+      } else if (f.estado !== 'escritorio' && !f.consulta) {
         volver(id);
       }
     });
@@ -838,6 +839,113 @@ App.Oficina3D = (function () {
       f.estado = 'escritorio'; sentar(f, f.asiento); f.enSilla = null; sombrasSucias = true;
       if (trabajo[id]) animando[id] = true;
       pintarTarea(f);
+    });
+  }
+
+
+  /* ---------------- consultas entre agentes (Fase 4) ----------------
+     Cuando la actividad de A muestra la herramienta mcp__hq__consultar con objetivo = B (id o nombre), A camina desde su
+     escritorio hasta el de B por los pasillos, queda parado ahí con un globito «?» y vuelve a su escritorio cuando su
+     actividad deja de estar en «consultando». f.consulta = {colega, fase: yendo|esperando|volviendo, ruta, volver}. */
+  function sinTildes(s) { return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
+
+  /* id del colega que A está consultando ahora (según /api/actividad), o null */
+  function colegaConsultado(id) {
+    var t = trabajo[id];
+    if (!t || t.estado !== 'consultando' || !/^mcp__hq__consultar/.test(t.herramienta || '') || !t.objetivo) return null;
+    if (t.objetivo !== id && figuras[t.objetivo]) return t.objetivo;
+    var q = sinTildes(t.objetivo);
+    for (var k in figuras) if (k !== id && (sinTildes(k) === q || sinTildes(figuras[k].a.nombre) === q)) return k;
+    return null;
+  }
+
+  /* Ruta escritorio de f -> al lado del escritorio de g, siempre por pasillos:
+     salida del escritorio -> puerta de su sala -> pasillo del ala -> (recepción si cambia de ala) -> puerta de la sala de g -> al lado de g.
+     `n`: cuántos otros esperan ya junto a g (se paran un poco más lejos para no apilarse). Null si alguno no tiene escritorio. */
+  function rutaHaciaColega(f, g, n) {
+    var pl = plano, pts = [];
+    if (!pl || !f.asiento || !g.asiento) return null;
+    var s = f.asiento.sala, d = g.asiento.sala, a = f.asiento.salida, b = g.asiento.salida;
+    pts.push({ x: a.x, z: a.z });
+    pts.push({ x: a.x, z: s.puertaZ });
+    if (s === d) {
+      pts.push({ x: b.x, z: s.puertaZ });
+    } else {
+      pts.push({ x: s.puertaX, z: s.puertaZ });
+      pts.push({ x: s.puertaX, z: s.ala.pasilloZ });
+      if (s.ala !== d.ala) { pts.push({ x: pl.pasilloX, z: s.ala.pasilloZ }); pts.push({ x: pl.pasilloX, z: d.ala.pasilloZ }); }
+      pts.push({ x: d.puertaX, z: d.ala.pasilloZ });
+      pts.push({ x: d.puertaX, z: d.puertaZ });
+      pts.push({ x: b.x, z: d.puertaZ });
+    }
+    pts.push({ x: b.x, z: b.z + (n || 0) * 1.4 });
+    return pts;
+  }
+
+  function globoConsulta(f, ver) {
+    if (!f.etqConsulta && ver) {
+      var e = etiqueta('consulta', '?', null);
+      e.obj = f.obj; e.off = new T.Vector3(0, 6.4, 0); e.oculta = true;
+      f.etqConsulta = e;
+    }
+    if (f.etqConsulta) f.etqConsulta.oculta = !ver;
+  }
+
+  function esperandoJuntoA(quien, salvo) {
+    var n = 0;
+    for (var k in figuras) if (k !== salvo && figuras[k].consulta && figuras[k].consulta.colega === quien) n++;
+    return n;
+  }
+
+  function irAConsultar(f, quien) {
+    var g = figuras[quien], ruta = g ? rutaHaciaColega(f, g, esperandoJuntoA(quien, f.a.id)) : null;
+    if (!ruta) return;
+    var c = f.consulta, previa = c && c.fase === 'esperando' && figuras[c.colega] ? c.ruta.slice().reverse() : [];
+    f.consulta = { colega: quien, fase: 'yendo', ruta: ruta, volver: false };
+    globoConsulta(f, false);
+    caminar(f.a.id, previa.concat(ruta), function () { llegoAConsultar(f); });
+    sombrasSucias = true;
+  }
+
+  function llegoAConsultar(f) {
+    var c = f.consulta, g = c && figuras[c.colega];
+    if (!c) return;
+    P.pose(f.obj, '');
+    if (g && g.asiento) f.obj.rotation.y = Math.atan2(g.asiento.x - f.obj.position.x, g.asiento.z - f.obj.position.z);
+    c.fase = 'esperando';
+    globoConsulta(f, true);
+    if (c.volver || !colegaConsultado(f.a.id)) volverDeConsulta(f); else consultasActualizar();
+    sombrasSucias = true; pedir();
+  }
+
+  function volverDeConsulta(f) {
+    var c = f.consulta;
+    if (!c || c.fase === 'volviendo') return;
+    c.fase = 'volviendo';
+    globoConsulta(f, false);
+    var ida = c.ruta.slice().reverse();
+    ida.push({ x: f.asiento.x, z: f.asiento.z });
+    caminar(f.a.id, ida, function () {
+      f.consulta = null; f.estado = 'escritorio'; sentar(f, f.asiento); sombrasSucias = true;
+      if (trabajo[f.a.id]) animando[f.a.id] = true;
+      pintarTarea(f);
+      consultasActualizar();
+      pedir();
+    });
+  }
+
+  /* se llama desde actividad(): arranca, mantiene o termina las consultas según el mapa de actividad */
+  function consultasActualizar() {
+    if (!plano) return;
+    Object.keys(figuras).forEach(function (id) {
+      var f = figuras[id], c = f.consulta, quien = colegaConsultado(id);
+      if (quien) {
+        if (!c) { if (f.estado === 'escritorio') irAConsultar(f, quien); }
+        else if (c.colega !== quien) { if (c.fase === 'esperando') irAConsultar(f, quien); }
+        else c.volver = false;
+      } else if (c) {
+        if (c.fase === 'esperando') volverDeConsulta(f); else if (c.fase === 'yendo') c.volver = true;
+      }
     });
   }
 

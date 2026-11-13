@@ -442,6 +442,7 @@ public actor Oficinas {
         }
         let o = try OficinaStore.leer(carpeta: dir)
         try? Plantillas.completarEstructura(carpeta: dir)
+        Plantillas.actualizarMemoria(carpeta: dir, ids: o.agentes.map(\.id))
         activar(dir, nombre: o.nombre)
         return OficinaActiva(carpeta: dir, oficina: o)
     }

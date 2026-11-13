@@ -12,6 +12,8 @@ public final class Backend: Sendable {
     public let programador: Programador
     private let apiRouter: Router
     private let migracion: Task<Migracion.Resultado, Never>
+    /// Servidor MCP de las consultas entre agentes (Fase 4).
+    let mcp: MCPServidor
 
     public var router: APIHandler { apiRouter }
 
@@ -56,7 +58,9 @@ public final class Backend: Sendable {
         self.oficinas = oficinas
         let programador = Programador(store: store, runner: runner, oficinas: oficinas, config: cfg, log: log, env: env)
         self.programador = programador
-        apiRouter = Router(config: cfg, store: store, runner: runner, log: log, oficinas: oficinas, listo: { _ = await mig.value })
+        let mcp = MCPServidor(store: store, runner: runner, log: log, env: env)
+        self.mcp = mcp
+        apiRouter = Router(config: cfg, store: store, runner: runner, log: log, oficinas: oficinas, mcp: mcp, listo: { _ = await mig.value })
         registrarReuniones(ReunionesRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env))
         registrarBiblioteca(BibliotecaRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env))
         registrarExplorador(ExploradorRouter(config: cfg, oficinas: oficinas, log: log))
@@ -87,6 +91,7 @@ public final class Backend: Sendable {
     /// Mata los claude en curso y cierra la base. Llamar al cerrar la ventana o con ⌘Q.
     public func shutdown() async {
         await programador.detener()
+        mcp.cerrar()
         await runner.shutdown()
         await programador.esperar() // las corridas matadas guardan su estado antes de cerrar la base
         await store.close()
