@@ -3,13 +3,17 @@
 
 Uso:
   python3 tools/empaquetar_ldraw.py <ruta-a-ldraw> [--catalogo oficina/ldraw/catalogo.json] [--salida oficina/ldraw/minifigs.mpd]
+  python3 tools/empaquetar_ldraw.py <ruta-a-ldraw> --partes oficina/ldraw/piezas-oficina.txt --salida oficina/ldraw/oficina.mpd
+
+Con --partes se empaqueta una lista de piezas (una por linea, "#" comenta) en vez del catalogo de minifigs:
+asi se arma oficina.mpd, con los muebles, plantas, arboles y autos de la maqueta.
 
 Lee oficina/ldraw/catalogo.json (la unica fuente del catalogo; figuras.js lo lee
 tambien), resuelve recursivamente los subarchivos (parts/, p/, parts/s/, p/48/,
 con backslashes y sin distinguir mayusculas) y escribe un MPD con un
 "0 FILE <nombre>" por archivo. Los nombres son las claves que usa LDrawLoader
 (r128) en su cache de subarchivos: minusculas, tal cual se referencian ("3818.dat",
-"stud.dat"), salvo "s/x.dat" -> "parts/s/x.dat" y "48/x.dat" -> "p/48/x.dat". El primer FILE ("ldconfig") lleva solo los colores usados.
+"stud.dat"), salvo "s/x.dat" -> "parts/s/x.dat" y "48/x.dat" -> "p/48/x.dat" ("8/x.dat" queda igual). El primer FILE ("ldconfig") lleva solo los colores usados.
 
 Se descartan lineas condicionales (tipo 5), comentarios y metadatos que el
 loader no usa; se conservan las lineas tipo 2 (el loader las usa para suavizar
@@ -39,8 +43,8 @@ def clave(nombre):
     n = nombre.strip().replace("\\", "/").lower()
     if n.startswith("s/"):
         n = "parts/" + n
-    elif n.startswith("48/") or n.startswith("8/"):
-        n = "p/" + n
+    elif n.startswith("48/"):
+        n = "p/" + n            # LDrawLoader r128 solo antepone p/ a 48/; 8/ queda tal cual
     elif n.startswith("parts/") or n.startswith("p/"):
         n = n.split("/", 1)[1] if not n.startswith(("parts/s/", "p/48/", "p/8/")) else n
     return n
@@ -94,13 +98,19 @@ def main():
     ap.add_argument("ldraw")
     ap.add_argument("--catalogo", default=os.path.join(RAIZ, "oficina/ldraw/catalogo.json"))
     ap.add_argument("--salida", default=os.path.join(RAIZ, "oficina/ldraw/minifigs.mpd"))
+    ap.add_argument("--partes", help="archivo con una pieza por linea (en vez del catalogo de minifigs)")
     a = ap.parse_args()
 
-    with open(a.catalogo, encoding="utf-8") as f:
-        cat = json.load(f)
-    raiz_partes = list(cat["base"].values())
-    for grupo in ("pelo", "cara", "torso"):
-        raiz_partes += [v["parte"] for v in cat[grupo].values()]
+    if a.partes:
+        with open(a.partes, encoding="utf-8") as f:
+            raiz_partes = [ln.split("#", 1)[0].strip() for ln in f]
+        raiz_partes = [p for p in raiz_partes if p]
+    else:
+        with open(a.catalogo, encoding="utf-8") as f:
+            cat = json.load(f)
+        raiz_partes = list(cat["base"].values())
+        for grupo in ("pelo", "cara", "torso"):
+            raiz_partes += [v["parte"] for v in cat[grupo].values()]
 
     idx = indexar(a.ldraw)
     archivos = {}   # clave -> texto limpio

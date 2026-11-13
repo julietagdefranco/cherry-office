@@ -23,34 +23,51 @@ App.Piezas = (function () {
     return m;
   }
 
-  /* ---------- paquete MPD ---------- */
+  /* ---------- paquetes MPD ----------
+     minifigs.mpd: piezas de las figuras (+ catalogo.json). oficina.mpd: muebles, plantas, árboles y autos de la maqueta. */
+  function leerMPD(texto) {
+    var archivos = {}, actual = null, buf = [];
+    var lineas = texto.split(/\r?\n/);
+    for (var i = 0; i < lineas.length; i++) {
+      var l = lineas[i];
+      if (l.lastIndexOf('0 FILE ', 0) === 0) {
+        if (actual) archivos[actual] = buf.join('\n');
+        actual = l.slice(7).trim().toLowerCase(); buf = [];
+      } else if (l.lastIndexOf('0 NOFILE', 0) !== 0) buf.push(l);
+    }
+    if (actual) archivos[actual] = buf.join('\n');
+    var ldconfig = (archivos.ldconfig || '') + '\n0 !COLOUR HQ_Principal CODE ' + COD_PRINCIPAL + ' VALUE #FF00FF EDGE #333333\n';
+    return { archivos: archivos, ldconfig: ldconfig };
+  }
+  /* no-cache: revalida con el servidor, así un paquete reempaquetado no queda viejo en la caché del navegador */
+  function traer(ruta) {
+    return fetch((window.APP_BASE || '') + ruta, { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error(ruta + ' ' + r.status); return r.text(); });
+  }
   function cargar() {
     if (paquete) return paquete;
     paquete = Promise.all([
-      fetch((window.APP_BASE || '') + 'ldraw/minifigs.mpd').then(function (r) { if (!r.ok) throw new Error('minifigs.mpd ' + r.status); return r.text(); }),
+      traer('ldraw/minifigs.mpd'),
       fetch((window.APP_BASE || '') + 'ldraw/catalogo.json').then(function (r) { if (!r.ok) throw new Error('catalogo.json ' + r.status); return r.json(); })
     ]).then(function (res) {
-      var archivos = {}, actual = null, buf = [];
-      var lineas = res[0].split(/\r?\n/);
-      for (var i = 0; i < lineas.length; i++) {
-        var l = lineas[i];
-        if (l.lastIndexOf('0 FILE ', 0) === 0) {
-          if (actual) archivos[actual] = buf.join('\n');
-          actual = l.slice(7).trim().toLowerCase(); buf = [];
-        } else if (l.lastIndexOf('0 NOFILE', 0) !== 0) buf.push(l);
-      }
-      if (actual) archivos[actual] = buf.join('\n');
-      var ldconfig = (archivos.ldconfig || '') + '\n0 !COLOUR HQ_Principal CODE ' + COD_PRINCIPAL + ' VALUE #FF00FF EDGE #333333\n';
-      return { archivos: archivos, ldconfig: ldconfig, catalogo: res[1] };
+      var p = leerMPD(res[0]);
+      p.catalogo = res[1];
+      return p;
     });
     return paquete;
   }
+  var paqueteOficina = null;
+  function cargarOficina() {
+    if (!paqueteOficina) paqueteOficina = traer('ldraw/oficina.mpd').then(leerMPD);
+    return paqueteOficina;
+  }
 
   /* Parsea una pieza y la deja como UNA geometría con grupos por color. Las caras de color principal (16 en LDraw)
-     quedan marcadas como ranura 'principal' para pintarlas con el color del avatar. */
-  function pieza(parte) {
-    if (geos[parte]) return geos[parte];
-    geos[parte] = cargar().then(function (p) {
+     quedan marcadas como ranura 'principal' para pintarlas con el color del avatar (o del mueble).
+     fuente: 'oficina' para las piezas de la maqueta; si no, las de las figuras. */
+  function pieza(parte, fuente) {
+    var clave = (fuente || '') + ':' + parte;
+    if (geos[clave]) return geos[clave];
+    geos[clave] = (fuente === 'oficina' ? cargarOficina() : cargar()).then(function (p) {
       if (!p.archivos[parte.toLowerCase() + '.dat']) throw new Error('Pieza fuera del paquete: ' + parte);
       return new Promise(function (ok) {
         var L = new T.LDrawLoader();
@@ -74,7 +91,7 @@ App.Piezas = (function () {
       grupo.traverse(function (o) { if (o !== malla && o.geometry) o.geometry.dispose(); });
       return { geo: geo, ranuras: ranuras };
     });
-    return geos[parte];
+    return geos[clave];
   }
 
   function malla(def, hexPrincipal) {
@@ -244,7 +261,7 @@ App.Piezas = (function () {
   function catalogo() { return cargar().then(function (p) { return p.catalogo; }); }
 
   return {
-    cargar: cargar, catalogo: catalogo, figura: figura, pose: pose, retrato: retrato,
+    cargar: cargar, catalogo: catalogo, figura: figura, pieza: pieza, pose: pose, retrato: retrato,
     completar: function (av, semilla) { return catalogo().then(function (c) { return completar(av, c, semilla); }); },
     plastico: plastico, lineal: lineal, entorno: entorno, prepararRenderer: prepararRenderer, LDU: LDU
   };
