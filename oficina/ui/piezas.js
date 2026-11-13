@@ -158,11 +158,26 @@ App.Piezas = (function () {
     } else if (nombre === 'hablar') {
       p.brazoD.rotation.x = -0.55 - Math.max(0, s) * 0.5;
       p.cabeza.rotation.y = Math.sin((fase || 0) * 0.5) * 0.15;
+    } else if (nombre === 'tipear') {          /* sobre 'sentado': manos al teclado, alternando */
+      p.brazoD.rotation.x = -1.05 + Math.max(0, s) * 0.12;
+      p.brazoI.rotation.x = -1.05 + Math.max(0, -s) * 0.12;
+      p.cabeza.rotation.y = 0;
+    } else if (nombre === 'leer') {            /* mira la pantalla y recorre con la vista */
+      p.brazoD.rotation.x = p.brazoI.rotation.x = -0.8;
+      p.cabeza.rotation.y = Math.sin((fase || 0) * 0.35) * 0.22;
+    } else if (nombre === 'pensar') {          /* mano al mentón */
+      p.brazoD.rotation.x = -1.75 + Math.sin((fase || 0) * 0.4) * 0.05;
+      p.brazoI.rotation.x = -0.55;
+      p.cabeza.rotation.y = 0.18;
+    } else if (nombre === 'mirar') {           /* busca: gira la cabeza de lado a lado */
+      p.brazoD.rotation.x = p.brazoI.rotation.x = -0.75;
+      p.cabeza.rotation.y = Math.sin((fase || 0) * 0.6) * 0.45;
     } else {
       p.piernaD.rotation.x = p.piernaI.rotation.x = 0;
       p.brazoD.rotation.x = p.brazoI.rotation.x = 0;
       p.cabeza.rotation.y = 0;
     }
+    if (nombre === 'sentado') p.cabeza.rotation.y = 0;
   }
 
   /* ---------- entorno de estudio (iluminación basada en imagen, generada sin texturas externas) ---------- */

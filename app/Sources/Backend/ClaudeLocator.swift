@@ -3,7 +3,7 @@ import Foundation
 /// Encuentra el binario de `claude` y arma el entorno para los procesos hijos.
 public enum ClaudeLocator {
     /// Orden: CLAUDE_BIN, `explicito` (config), rutas conocidas, app de Claude en Application Support
-    /// (la más nueva) y, último recurso, `zsh -lc 'command -v claude'` (con timeout, solo si `usarShell`).
+    /// (la más nueva) y, último recurso, `$SHELL -ilc 'command -v claude'` (con timeout, solo si `usarShell`).
     public static func locate(explicito: String? = nil,
                               env: [String: String] = ProcessInfo.processInfo.environment,
                               home: String = NSHomeDirectory(),
@@ -37,11 +37,29 @@ public enum ClaudeLocator {
         return candidatos.max(by: { $0.1 < $1.1 })?.0
     }
 
-    /// `/bin/zsh -lc 'command -v claude'` con timeout. Usa el PATH del shell de login (nvm, etc.).
-    static func desdeShell(timeout: TimeInterval = 5) -> String? {
+    static let marcaInicio = "__HQ_CLAUDE_S__", marcaFin = "__HQ_CLAUDE_E__"
+
+    /// Shell de login *interactivo* (`-ilc`): el PATH que agregan nvm, el instalador de claude, etc. suele
+    /// estar en `.zshrc`, que un shell solo de login (`-lc`) no lee. El resultado va entre marcadores porque
+    /// los rc interactivos imprimen ruido (banners, avisos de job control).
+    static func argumentosShell() -> [String] {
+        ["-ilc", "printf '\(marcaInicio)%s\(marcaFin)' \"$(command -v claude)\""]
+    }
+
+    /// Extrae la ruta de la salida del shell: lo que está entre los marcadores, si es absoluta.
+    static func rutaDeSalida(_ s: String) -> String? {
+        guard let a = s.range(of: marcaInicio), let b = s.range(of: marcaFin, range: a.upperBound..<s.endIndex) else { return nil }
+        let ruta = s[a.upperBound..<b.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        return ruta.hasPrefix("/") ? ruta : nil
+    }
+
+    /// `$SHELL -ilc` (o `/bin/zsh`) con timeout, stdin cerrado.
+    static func desdeShell(timeout: TimeInterval = 5,
+                           env: [String: String] = ProcessInfo.processInfo.environment) -> String? {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-lc", "command -v claude"]
+        let shell = env["SHELL"].flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil } ?? "/bin/zsh"
+        p.executableURL = URL(fileURLWithPath: shell)
+        p.arguments = argumentosShell()
         let out = Pipe()
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
@@ -67,10 +85,8 @@ public enum ClaudeLocator {
             return nil
         }
         _ = g.wait(timeout: .now() + 2)
-        let s = String(decoding: leido.data, as: UTF8.self)
-        // un .zshrc puede imprimir ruido: nos quedamos con la última línea que sea ruta absoluta
-        let ruta = s.split(separator: "\n").map(String.init).last { $0.hasPrefix("/") }
-        guard let ruta, FileManager.default.isExecutableFile(atPath: ruta) else { return nil }
+        guard let ruta = rutaDeSalida(String(decoding: leido.data, as: UTF8.self)),
+              FileManager.default.isExecutableFile(atPath: ruta) else { return nil }
         return ruta
     }
 
@@ -100,8 +116,26 @@ public enum ClaudeLocator {
         var e = env
         e["PATH"] = childPath(claude: claude, env: env, home: home)
         if e["HOME"] == nil { e["HOME"] = home }
-        e.removeValue(forKey: "CLAUDECODE")
+        for k in e.keys where heredadaDeSesion(k) { e.removeValue(forKey: k) }
         return e
+    }
+
+    /// Variables `CLAUDE_CODE_*` que el usuario pone a propósito (proveedor, auth, límites): se conservan.
+    static let configDeUsuario: Set<String> = [
+        "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+        "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY", "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_SUBAGENT_MODEL",
+    ]
+
+    /// ¿Es una variable que inyecta una sesión de Claude Code a sus procesos hijos? Si la app (o el server de
+    /// desarrollo) se lanzó desde una sesión, el `claude` hijo las hereda y se comporta como sesión anidada:
+    /// entre otras cosas no guarda el transcript. Se conservan `CLAUDE_CODE_USE_*` / `CLAUDE_CODE_SKIP_*`
+    /// (Bedrock, Vertex…) y `configDeUsuario`.
+    static func heredadaDeSesion(_ k: String) -> Bool {
+        if ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"].contains(k) || k.hasPrefix("CLAUDE_AGENT_SDK_") { return true }
+        guard k.hasPrefix("CLAUDE_CODE_") else { return false }
+        if k.hasPrefix("CLAUDE_CODE_USE_") || k.hasPrefix("CLAUDE_CODE_SKIP_") { return false }
+        return !configDeUsuario.contains(k)
     }
 }
 

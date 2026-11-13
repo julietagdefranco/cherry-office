@@ -61,6 +61,43 @@ public actor Store {
             try db.exec("ALTER TABLE sesiones ADD COLUMN oficina TEXT NOT NULL DEFAULT ''")
         }
         try db.exec("CREATE INDEX IF NOT EXISTS sesiones_oficina ON sesiones(oficina, agente)")
+        // v3: costo estimado de cada corrida de claude (`total_cost_usd`), de cualquier origen.
+        try db.exec("""
+        CREATE TABLE IF NOT EXISTS costos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            oficina TEXT NOT NULL,
+            agente TEXT NOT NULL DEFAULT '',
+            origen TEXT NOT NULL,
+            ref TEXT NOT NULL DEFAULT '',
+            costo REAL NOT NULL,
+            ts REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS costos_oficina ON costos(oficina, ts);
+        """)
+    }
+
+    // MARK: costos
+
+    /// Guarda el costo estimado de una corrida. `agente` '' = sin agente (síntesis, fichas, resúmenes).
+    /// `origen`: chat | reunion | sintesis | biblioteca | tarea | consulta | resumen. `ref`: sesión, reunión, tarea…
+    public func registrarCosto(oficina: String, agente: String = "", origen: String, ref: String = "", costo: Double?) {
+        guard let costo, costo > 0, costo.isFinite else { return }
+        _ = try? db.run("INSERT INTO costos(oficina,agente,origen,ref,costo,ts) VALUES(?,?,?,?,?,?)",
+                        [.text(oficina), .text(agente), .text(origen), .text(ref), .double(costo),
+                         .double(Date().timeIntervalSince1970)])
+    }
+
+    /// Totales de una oficina desde `desde` (epoch): total, por agente, por origen y por referencia de reunión.
+    public func costos(oficina: String, desde: Double = 0) -> [String: Any] {
+        let p: [SQLValue] = [.text(oficina), .double(desde)]
+        let total = (try? db.query("SELECT COALESCE(SUM(costo),0) FROM costos WHERE oficina=? AND ts>=?", p) { $0.double(0) })?.first ?? 0
+        func agrupar(_ col: String, _ extra: String = "") -> [String: Double] {
+            let filas = (try? db.query("SELECT \(col), SUM(costo) FROM costos WHERE oficina=? AND ts>=? \(extra) GROUP BY \(col)", p) {
+                ($0.text(0), $0.double(1)) }) ?? []
+            return Dictionary(filas.filter { !$0.0.isEmpty }, uniquingKeysWith: +)
+        }
+        return ["total": total, "agentes": agrupar("agente"), "origenes": agrupar("origen"),
+                "reuniones": agrupar("ref", "AND origen IN ('reunion','sintesis')")]
     }
 
     public func close() { db.close() }

@@ -187,4 +187,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancelar")
         return a.runModal() == .alertFirstButtonReturn
     }
+
+    /// `<input type="file">`: sin este método WKWebView no abre ningún selector y el clic no hace nada
+    /// (en el navegador sí anda, por eso solo fallaba en la app). Se muestra como hoja sobre la ventana.
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.prompt = "Subir"
+        let r: NSApplication.ModalResponse
+        if let w = webView.window { r = await panel.beginSheetModal(for: w) } else { r = panel.runModal() }
+        return r == .OK ? panel.urls : nil
+    }
 }
