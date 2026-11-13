@@ -548,8 +548,10 @@ public actor ReunionesRouter: SubRouter {
             errSint = "No hubo opiniones para resumir."
         } else {
             do {
+                let caja = CajaCosto()
+                defer { let c = caja.valor; let st = store, car = a.carpeta; Task { await st.registrarCosto(oficina: car, origen: "sintesis", ref: id, costo: c) } }
                 let t = try await runner.correrSinAgente(prompt: ReunionTexto.promptSintesis(oficina: of, tema: f.tema, participantes: parts, turnos: turnos),
-                                                         timeout: timeoutSintesis, cwd: a.carpeta)
+                                                         timeout: timeoutSintesis, cwd: a.carpeta, obs: caja.observador())
                 if let s = ReunionTexto.parsearSintesis(t) { sintesis = s }
                 else { errSint = "La síntesis no vino en el formato esperado." }
             } catch let e as ClaudeError { errSint = e.mensaje }
@@ -628,8 +630,13 @@ public actor ReunionesRouter: SubRouter {
             do {
                 let runner = self.runner, cwd = carpeta, t = timeoutTurno
                 let dirs = Permisos.dirsVinculos(of, agente: ag)
+                let caja = CajaCosto(), agid = ag.id, st = store
+                defer { let c = caja.valor; Task { await st.registrarCosto(oficina: cwd, agente: agid, origen: "reunion", ref: id, costo: c) } }
                 texto = try await runner.conCarril(oficina: carpeta, agente: ag.id) {
-                    try await runner.turnoSoloLectura(agente: ag.id, prompt: prompt, cwd: cwd, timeout: t, dirsExtra: dirs)
+                    try await runner.actividad.seguir(oficina: cwd, agente: agid, origen: "reunion", tarea: "Reunión: " + f.tema,
+                                                      extra: caja.observador()) { obs, _ in
+                        try await runner.turnoSoloLectura(agente: agid, prompt: prompt, cwd: cwd, timeout: t, dirsExtra: dirs, obs: obs)
+                    }
                 }
                 texto = texto.trimmingCharacters(in: .whitespacesAndNewlines)
                 if texto.isEmpty { texto = "(sin respuesta)"; fallo = true }

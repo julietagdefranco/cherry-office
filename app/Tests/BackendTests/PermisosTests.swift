@@ -18,7 +18,7 @@ struct PermisosTests {
         let p = "\(Self.home)/Próspera"
         let a = Permisos.argumentos(c, agente: "betty", mensaje: "hola", sid: U.a, flag: "--session-id")
         let rutas = ["\(p)/_equipo/agentes/betty.md", "\(p)/_betty/estado-actual.md", "\(p)/_equipo/decisiones.md"]
-        var esperado = ["-p", "--agent", "betty", "--session-id", U.a, "--output-format", "json",
+        var esperado = ["-p", "--agent", "betty", "--session-id", U.a, "--output-format", "stream-json", "--verbose",
                         "--tools", "Read,Glob,Grep,Skill,Edit,Write",
                         "--add-dir", "\(Self.home)/.claude/betty", "--allowedTools"]
         for r in rutas { esperado += [regla("Edit", r), regla("Write", r)] }
@@ -32,7 +32,7 @@ struct PermisosTests {
         let c = cfg()
         let p = "\(Self.home)/Próspera/_equipo/agentes/marce.md"
         let a = Permisos.argumentos(c, agente: "marce", mensaje: "hola", sid: U.b, flag: "--resume")
-        let esperado = ["-p", "--agent", "marce", "--resume", U.b, "--output-format", "json",
+        let esperado = ["-p", "--agent", "marce", "--resume", U.b, "--output-format", "stream-json", "--verbose",
                         "--tools", "Read,Glob,Grep,Skill,Edit,Write",
                         "--add-dir", "\(Self.home)/.claude/betty",
                         "--allowedTools", regla("Edit", p), regla("Write", p),

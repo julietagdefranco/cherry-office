@@ -43,7 +43,7 @@ struct AgentesTests {
         let l = try #require(f.sb.llamadas.last)
         #expect(!l.contains("--agent"))
         #expect(Sandbox.valor(l, "--tools") == "")
-        #expect(Sandbox.valor(l, "--output-format") == "json")
+        #expect(Sandbox.valor(l, "--output-format") == "stream-json")
         #expect(l.prefix(1) == ["-p"])
         #expect(!l.contains("--allowedTools"))
         #expect(sinPrivate(try #require(f.sb.cwds.last)) == sinPrivate(f.carpeta))

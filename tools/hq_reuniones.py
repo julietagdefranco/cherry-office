@@ -19,6 +19,7 @@ import unicodedata
 import uuid
 
 import hq_core
+import hq_vivo
 from hq_core import ErrorAPI
 
 MAX_BODY = 200000
@@ -540,13 +541,16 @@ class Reuniones:
             if not any(not t["error"] for t in turnos):
                 err_sint = "No hubo opiniones para resumir."
             else:
+                caja = hq_vivo.CajaCosto()
                 try:
-                    t = self._sin_agente(prompt_sintesis(of, f["tema"], parts, turnos), carpeta, self.timeout_sintesis)
+                    t = self._sin_agente(prompt_sintesis(of, f["tema"], parts, turnos), carpeta, self.timeout_sintesis,
+                                         caja.observador())
                     sintesis = parsear_sintesis(t)
                     if sintesis is None:
                         err_sint = "La síntesis no vino en el formato esperado."
                 except ErrorAPI as e:
                     err_sint = e.mensaje
+                self.app.costos.registrar(carpeta, "sintesis", caja.valor, ref=id_)
             hoy = datetime.date.today()
             error_acta, rel = None, None
             try:
@@ -578,39 +582,35 @@ class Reuniones:
 
     # ---- claude
 
-    def _correr(self, cmd, carpeta, timeout):
-        """-> texto de `result`. ErrorAPI(502, mensaje) si falla (mensaje ya en español)."""
+    def _correr(self, cmd, carpeta, timeout, obs=None):
+        """-> texto de `result`. ErrorAPI(502, mensaje) si falla (mensaje ya en español). `obs`: eventos en vivo."""
         srv = self.srv
         if not self.app.claude:
             raise ErrorAPI(502, "No encontré Claude Code en esta compu.")
         if not os.path.isdir(carpeta):
             raise ErrorAPI(502, "No encuentro la carpeta del proyecto (%s)." % carpeta)
         try:
-            rc, so, se = srv.ejecutar(cmd, carpeta, timeout)
+            rc, so, se = srv.ejecutar(cmd, carpeta, timeout, al_linea=hq_vivo.lector(obs))
         except srv.TiempoAgotado:
             raise ErrorAPI(504, "Tardó demasiado en responder.")
         except (FileNotFoundError, PermissionError, OSError):
             raise ErrorAPI(502, "No pude ejecutar Claude Code en esta compu.")
-        try:
-            out = json.loads(so)
-            if not isinstance(out, dict):
-                out = None
-        except Exception:
-            out = None
+        out = hq_vivo.ultimo_json(so)
         e = srv.error_de(rc, so, se, out)
         if e:
             raise ErrorAPI(502, srv.clasificar_error(e)[1])
         return (out or {}).get("result") or (so.strip() if out is None else "")
 
-    def _sin_agente(self, prompt, carpeta, timeout):
-        return self._correr([self.app.claude, "-p", "--output-format", "json", "--tools", "", "--", prompt], carpeta, timeout)
+    def _sin_agente(self, prompt, carpeta, timeout, obs=None):
+        return self._correr([self.app.claude, "-p"] + hq_vivo.FORMATO_SALIDA + ["--tools", "", "--", prompt], carpeta, timeout,
+                            obs)
 
-    def _turno_solo_lectura(self, agente, prompt, carpeta, dirs_extra=()):
-        cmd = [self.app.claude, "-p", "--agent", agente, "--session-id", str(uuid.uuid4()), "--output-format", "json",
-               "--tools", "Read,Glob,Grep"]
+    def _turno_solo_lectura(self, agente, prompt, carpeta, dirs_extra=(), obs=None):
+        cmd = [self.app.claude, "-p", "--agent", agente, "--session-id", str(uuid.uuid4())] + hq_vivo.FORMATO_SALIDA + [
+            "--tools", "Read,Glob,Grep"]
         for d in list(self.app.cfg.get("oficina_dirs_extra", [])) + list(dirs_extra):
             cmd += ["--add-dir", d]
-        return self._correr(cmd + ["--", prompt], carpeta, self.timeout_turno)
+        return self._correr(cmd + ["--", prompt], carpeta, self.timeout_turno, obs)
 
     # ---- rondas
 
@@ -658,14 +658,20 @@ class Reuniones:
             prompt = prompt_turno(of, carpeta, f["tema"], parts, ag, self._turnos(id_), ronda,
                                   fichas(carpeta, f.get("documentos")))
             fallo = False
+            caja = hq_vivo.CajaCosto()
             try:
                 with self.app._lock(carpeta, ag["id"]):  # mismo carril que el chat 1 a 1 de ese agente
-                    texto = self._turno_solo_lectura(ag["id"], prompt, carpeta, hq_core.dirs_vinculos(of, ag)).strip()
+                    with self.app.actividad.seguir(carpeta, ag["id"], "reunion", "Reunión: " + f["tema"],
+                                                   extra=caja.observador()) as (obs, _t):
+                        texto = self._turno_solo_lectura(ag["id"], prompt, carpeta, hq_core.dirs_vinculos(of, ag),
+                                                         obs).strip()
                 if not texto:
                     texto, fallo = "(sin respuesta)", True
             except ErrorAPI as e:
                 texto, fallo = e.mensaje, True
                 self.srv.log.warning("reunion turno agente=%s status=%s", ag["id"], e.status)
+            finally:
+                self.app.costos.registrar(carpeta, "reunion", caja.valor, ag["id"], id_)
             if fallo:
                 ultimo = texto
             else:

@@ -62,11 +62,14 @@ final class LectorPipe: @unchecked Sendable {
     private let cola: DispatchQueue
     private var fuente: DispatchSourceRead?
     private var cerrado = false
+    private let cortador: CortadorLineas?
 
-    init(_ handle: FileHandle, into col: Collector) {
+    /// `alLinea`: además de juntar los bytes, entrega cada línea completa apenas llega (stream-json).
+    init(_ handle: FileHandle, into col: Collector, alLinea: (@Sendable (String) -> Void)? = nil) {
         self.handle = handle
         self.fd = handle.fileDescriptor
         self.col = col
+        self.cortador = alLinea.map { CortadorLineas($0) }
         self.cola = DispatchQueue(label: "hq.pipe.\(handle.fileDescriptor)")
     }
 
@@ -86,7 +89,7 @@ final class LectorPipe: @unchecked Sendable {
         var buf = [UInt8](repeating: 0, count: 65_536)
         while true {
             let n = buf.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
-            if n > 0 { col.append(Data(buf[0..<n])); continue }
+            if n > 0 { let d = Data(buf[0..<n]); col.append(d); cortador?.agregar(d); continue }
             if n < 0, errno == EINTR { continue }
             if n < 0, errno == EAGAIN || errno == EWOULDBLOCK { return }
             cerrar()  // EOF o error
@@ -102,7 +105,7 @@ final class LectorPipe: @unchecked Sendable {
 
     /// Última lectura (sin bloquear) y cierre. Un nieto que siga con el pipe abierto no nos retiene.
     func terminar() {
-        cola.sync { drenar(); cerrar() }
+        cola.sync { drenar(); cerrar(); cortador?.terminar() }
     }
 }
 
@@ -158,7 +161,8 @@ final class RunningProcess: @unchecked Sendable {
 
     /// Bloquea hasta que el proceso termina. Lanza si no pudo ejecutarse o se canceló antes de arrancar.
     func run(exe: String, args: [String], cwd: String?, env: [String: String], timeout: TimeInterval,
-             grace: TimeInterval = 3, onStart: () -> Void, onEnd: () -> Void) throws -> ProcResult {
+             grace: TimeInterval = 3, alLinea: (@Sendable (String) -> Void)? = nil,
+             onStart: () -> Void, onEnd: () -> Void) throws -> ProcResult {
         let out = Pipe(), err = Pipe()
         process.executableURL = URL(fileURLWithPath: exe)
         process.arguments = args
@@ -180,7 +184,7 @@ final class RunningProcess: @unchecked Sendable {
         try? out.fileHandleForWriting.close()
         try? err.fileHandleForWriting.close()
         let so = Collector(), se = Collector()
-        let lectores = [LectorPipe(out.fileHandleForReading, into: so), LectorPipe(err.fileHandleForReading, into: se)]
+        let lectores = [LectorPipe(out.fileHandleForReading, into: so, alLinea: alLinea), LectorPipe(err.fileHandleForReading, into: se)]
         for l in lectores { l.empezar() }
         let item = DispatchWorkItem { [self] in
             lock.lock(); timedOut = true; lock.unlock()
@@ -265,6 +269,8 @@ public final class ClaudeRunner: Sendable {
     private let lanes = LaneRegistry()
     private let registry = ProcessRegistry()
     private let limite: LimiteProcesos
+    /// Qué hace cada agente ahora (lo alimentan los eventos de stream-json de cada corrida).
+    public let actividad = ActividadRegistro()
     /// Tope por defecto de procesos claude simultáneos (`HQ_MAX_CLAUDE` lo cambia).
     public static let maxClaudePorDefecto = 8
     /// Gracia entre terminate y kill (segundos).
@@ -296,26 +302,39 @@ public final class ClaudeRunner: Sendable {
 
     /// Un `claude -p` SIN agente y SIN herramientas (`--tools ""`): para borradores y síntesis. Devuelve el
     /// texto de `result`. `cwd` = carpeta de la oficina. Lanza `ClaudeError` (timeout, login, etc.).
-    public func correrSinAgente(prompt: String, timeout: TimeInterval? = nil, cwd: String? = nil) async throws -> String {
+    /// `modelo`: `--model` (p. ej. "haiku" para resúmenes baratos); nil = el de la cuenta.
+    public func correrSinAgente(prompt: String, timeout: TimeInterval? = nil, cwd: String? = nil,
+                                modelo: String? = nil, obs: Observador? = nil) async throws -> String {
         try verificar(carpeta: cwd)
-        let args = ["-p", "--output-format", "json", "--tools", "", "--", prompt]
-        return try await resultado(args, timeout: timeout ?? config.timeout, cwd: cwd)
+        var args = ["-p"] + Self.formatoSalida + ["--tools", ""]
+        if let modelo { args += ["--model", modelo] }
+        return try await resultado(args + ["--", prompt], timeout: timeout ?? config.timeout, cwd: cwd, obs: obs)
+    }
+
+    /// `--output-format stream-json --verbose`: un evento JSON por línea (actividad en vivo) y el `result` al final.
+    public static let formatoSalida = ["--output-format", "stream-json", "--verbose"]
+
+    /// Convierte un observador de eventos en un lector de líneas para `lanzar`.
+    static func lector(_ obs: Observador?) -> (@Sendable (String) -> Void)? {
+        guard let obs else { return nil }
+        return { linea in for e in EventoClaude.parsear(linea) { obs(e) } }
     }
 
     /// Un turno de `agente` en una sesión nueva (UUID propio), solo con `Read,Glob,Grep` (nada de Edit/Write) y un
     /// prompt arbitrario. Para reuniones: los agentes opinan pero no escriben. Sin carril: usar `conCarril(oficina:agente:)`.
     /// `dirsExtra`: carpetas vinculadas a las que el agente tiene acceso (`Permisos.dirsVinculos`).
     public func turnoSoloLectura(agente: String, prompt: String, cwd: String, timeout: TimeInterval? = nil,
-                                 dirsExtra: [String] = []) async throws -> String {
+                                 dirsExtra: [String] = [], obs: Observador? = nil) async throws -> String {
         try verificar(carpeta: cwd)
-        var a = ["-p", "--agent", agente, "--session-id", UUID().uuidString.lowercased(), "--output-format", "json",
-                 "--tools", "Read,Glob,Grep"]
+        var a = ["-p", "--agent", agente, "--session-id", UUID().uuidString.lowercased()] + Self.formatoSalida
+            + ["--tools", "Read,Glob,Grep"]
         for d in config.oficinaDirsExtra + dirsExtra { a += ["--add-dir", d] }
-        return try await resultado(a + ["--", prompt], timeout: timeout ?? config.timeout, cwd: cwd)
+        return try await resultado(a + ["--", prompt], timeout: timeout ?? config.timeout, cwd: cwd, obs: obs)
     }
 
-    private func resultado(_ args: [String], timeout: TimeInterval, cwd: String?) async throws -> String {
-        let res = try await lanzar(args: args, timeout: timeout, cwd: cwd)
+    func resultado(_ args: [String], timeout: TimeInterval, cwd: String?, obs: Observador? = nil,
+                   envExtra: [String: String] = [:]) async throws -> String {
+        let res = try await lanzar(args: args, timeout: timeout, cwd: cwd, envExtra: envExtra, alLinea: Self.lector(obs))
         if res.timedOut { throw ClaudeError.timeout }
         if registry.estaCerrado { throw ClaudeError.cerrando }
         let c = Corrida(res: res, json: Self.parsearJSON(res.stdout))
@@ -352,16 +371,18 @@ public final class ClaudeRunner: Sendable {
 
     /// Igual que `enviar` pero sin tomar el carril (el llamador ya lo tiene, ver `conCarril`).
     /// Con `oficina` el agente corre dentro de esa carpeta y con sus permisos de escritura (ver `Permisos.argumentos(oficina:)`).
+    /// `obs` recibe los eventos en vivo (herramientas, costo). `envExtra`: variables extra para el proceso.
     public func ejecutarChat(agente: String, mensaje: String, sid: String, activa: Bool,
-                             oficina: ContextoOficina? = nil) async throws -> String {
+                             oficina: ContextoOficina? = nil, obs: Observador? = nil,
+                             envExtra: [String: String] = [:]) async throws -> String {
         try verificar(carpeta: oficina?.carpeta)
         let flag = activa ? "--resume" : "--session-id"
-        var r = try await correr(agente: agente, mensaje: mensaje, sid: sid, flag: flag, oficina: oficina)
+        var r = try await correr(agente: agente, mensaje: mensaje, sid: sid, flag: flag, oficina: oficina, obs: obs, envExtra: envExtra)
         // si la conversación ya existe (o no existe), probamos la otra forma
         if let e = r.error, e.contains("already in use") {
-            r = try await correr(agente: agente, mensaje: mensaje, sid: sid, flag: "--resume", oficina: oficina)
+            r = try await correr(agente: agente, mensaje: mensaje, sid: sid, flag: "--resume", oficina: oficina, obs: obs, envExtra: envExtra)
         } else if let e = r.error, flag == "--resume", e.contains("No conversation") || e.lowercased().contains("not found") {
-            r = try await correr(agente: agente, mensaje: mensaje, sid: sid, flag: "--session-id", oficina: oficina)
+            r = try await correr(agente: agente, mensaje: mensaje, sid: sid, flag: "--session-id", oficina: oficina, obs: obs, envExtra: envExtra)
         }
         if let e = r.error { throw ClaudeError.clasificar(e) }
         if let res = r.json?["result"] as? String, !res.isEmpty { return res }
@@ -386,10 +407,11 @@ public final class ClaudeRunner: Sendable {
     }
 
     private func correr(agente: String, mensaje: String, sid: String, flag: String,
-                        oficina: ContextoOficina? = nil) async throws -> Corrida {
+                        oficina: ContextoOficina? = nil, obs: Observador? = nil,
+                        envExtra: [String: String] = [:]) async throws -> Corrida {
         let args = oficina.map { Permisos.argumentos(config, oficina: $0, agente: agente, mensaje: mensaje, sid: sid, flag: flag) }
             ?? Permisos.argumentos(config, agente: agente, mensaje: mensaje, sid: sid, flag: flag)
-        let res = try await lanzar(args: args, timeout: config.timeout, cwd: oficina?.carpeta)
+        let res = try await lanzar(args: args, timeout: config.timeout, cwd: oficina?.carpeta, envExtra: envExtra, alLinea: Self.lector(obs))
         if res.timedOut { throw ClaudeError.timeout }
         if registry.estaCerrado { throw ClaudeError.cerrando }
         return Corrida(res: res, json: Self.parsearJSON(res.stdout))
@@ -421,13 +443,15 @@ public final class ClaudeRunner: Sendable {
     }
 
     /// Lanza claude con `args` y espera. Mapea fallos de arranque a `.noEjecuta`.
-    func lanzar(args: [String], timeout: TimeInterval, cwd cwdPedido: String? = nil) async throws -> ProcResult {
+    /// `envExtra` se suma al entorno del hijo (p. ej. el token del servidor MCP); `alLinea` recibe stdout línea a línea.
+    func lanzar(args: [String], timeout: TimeInterval, cwd cwdPedido: String? = nil, envExtra: [String: String] = [:],
+                alLinea: (@Sendable (String) -> Void)? = nil) async throws -> ProcResult {
         guard let exe = claudePath else { throw ClaudeError.noEncontrado }
         if registry.estaCerrado { throw ClaudeError.cerrando }
         var isDir: ObjCBool = false
         let base = cwdPedido ?? config.proyecto
         let cwd = FileManager.default.fileExists(atPath: base, isDirectory: &isDir) && isDir.boolValue ? base : nil
-        let env = ClaudeLocator.childEnvironment(claude: exe, home: config.home)
+        let env = ClaudeLocator.childEnvironment(claude: exe, home: config.home).merging(envExtra) { _, b in b }
         let rp = RunningProcess()
         let reg = registry
         let grace = self.grace
@@ -443,7 +467,7 @@ public final class ClaudeRunner: Sendable {
                         DispatchQueue.global().async {
                             do {
                                 let r = try rp.run(exe: exe, args: args, cwd: cwd, env: env, timeout: timeout, grace: grace,
-                                                   onStart: { reg.add(rp) }, onEnd: { reg.remove(rp) })
+                                                   alLinea: alLinea, onStart: { reg.add(rp) }, onEnd: { reg.remove(rp) })
                                 cont.resume(returning: r)
                             } catch is CancellationError {
                                 cont.resume(throwing: CancellationError())

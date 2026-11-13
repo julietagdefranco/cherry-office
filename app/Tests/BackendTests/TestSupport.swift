@@ -136,7 +136,7 @@ final class Sandbox: @unchecked Sendable {
         acta) echo '{"type":"result","result":"{\"resumen\":\"Se acordó avanzar con el plan.\",\"decisiones\":[\"Lanzar en diciembre\",\"Priorizar los reels\"],\"pendientes\":[{\"quien\":\"Marce\",\"que\":\"Armar el calendario\"}]}","is_error":false}';;
         ficha) echo '{"type":"result","result":"{\"titulo\":\"Ficha de prueba\",\"resumen\":\"Resumen de prueba del documento.\",\"datos_clave\":[\"dato uno\"],\"temas\":[\"pruebas\"],\"util_para\":[\"direccion\"],\"fechas\":[],\"contradicciones\":[]}","is_error":false}';;
         imagen) echo '{"type":"result","result":"Una imagen de prueba con el texto HOLA MUNDO.","is_error":false}';;
-        turno) echo "{\"type\":\"result\",\"result\":\"Opinión de $agent sobre el tema.\",\"is_error\":false}";;
+        turno) echo "{\"type\":\"result\",\"result\":\"Opinión de $agent sobre el tema.\",\"is_error\":false,\"total_cost_usd\":0.02}";;
         lectura) mkdir -p conocimiento/agentes; echo "- leyó el documento (prueba)" >> "conocimiento/agentes/$agent.md"; echo '{"type":"result","result":"listo","is_error":false}';;
       esac
       fin; exit 0
@@ -149,12 +149,23 @@ final class Sandbox: @unchecked Sendable {
         acta) echo '{"type":"result","result":"{\"resumen\":\"Se acordó avanzar con el plan.\",\"decisiones\":[\"Lanzar en diciembre\",\"Priorizar los reels\"],\"pendientes\":[{\"quien\":\"Marce\",\"que\":\"Armar el calendario\"}]}","is_error":false}';;
         ficha) echo '{"type":"result","result":"{\"titulo\":\"Ficha de prueba\",\"resumen\":\"Resumen de prueba del documento.\",\"datos_clave\":[\"dato uno\"],\"temas\":[\"pruebas\"],\"util_para\":[\"direccion\"],\"fechas\":[],\"contradicciones\":[]}","is_error":false}';;
         imagen) echo '{"type":"result","result":"Una imagen de prueba con el texto HOLA MUNDO.","is_error":false}';;
-        turno) echo "{\"type\":\"result\",\"result\":\"Opinión de $agent sobre el tema.\",\"is_error\":false}";;
+        turno) echo "{\"type\":\"result\",\"result\":\"Opinión de $agent sobre el tema.\",\"is_error\":false,\"total_cost_usd\":0.02}";;
         lectura) mkdir -p conocimiento/agentes; echo "- leyó el documento (prueba)" >> "conocimiento/agentes/$agent.md"; echo '{"type":"result","result":"listo","is_error":false}';;
       esac
       fin; exit 0
     fi
-    echo "{\"type\":\"result\",\"result\":\"hola $agent\",\"is_error\":false}"
+    if [[ "$msg" == *STREAM* ]]; then
+      echo '{"type":"system","subtype":"hook_started","hook_name":"x"}'
+      echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-$agent\"}"
+      echo '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":""}]}}'
+      echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/x/conocimiento/oficina.md"}}]}}'
+      if [[ "$msg" == *PAUSA* ]]; then n=0; while [[ ! -f "$D/go" && $n -lt 300 ]]; do sleep 0.05; n=$((n+1)); done; fi
+      echo '{"type":"user","message":{"content":[{"type":"tool_result","content":"secreto"}]}}'
+      echo '{"type":"assistant","message":{"content":[{"type":"text","text":"listo"}]}}'
+      echo "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"stream $agent\",\"is_error\":false,\"total_cost_usd\":0.25}"
+      fin; exit 0
+    fi
+    echo "{\"type\":\"result\",\"result\":\"hola $agent\",\"is_error\":false,\"total_cost_usd\":0.01}"
     fin
     exit 0
     """#

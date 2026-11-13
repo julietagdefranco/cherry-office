@@ -103,6 +103,15 @@ public final class Router: APIHandler {
                 return method == "GET" ? try await historial(query) : no
             case ("chat", 2):
                 return method == "POST" ? try await chat(body) : no
+            case ("actividad", 2):
+                guard method == "GET" else { return no }
+                guard let act = await oficinas.activa() else { return (200, ["agentes": [String: Any](), "version": 0]) }
+                return (200, runner.actividad.json(oficina: act.carpeta))
+            case ("costos", 2):
+                guard method == "GET" else { return no }
+                let act = try await oficinas.requerirActiva()
+                let desde = query["desde"].flatMap { Double($0) } ?? 0
+                return (200, await store.costos(oficina: act.carpeta, desde: desde))
             case ("oficinas", 2):
                 switch method {
                 case "GET": return (200, ["oficinas": await oficinas.listar(), "activa": await oficinas.activa().map { $0.carpeta as Any } ?? NSNull()])
@@ -285,11 +294,13 @@ public final class Router: APIHandler {
         let (a, prompt) = try await oficinas.prepararBorrador(
             descripcion: (d["descripcion"] as? String) ?? "", departamento: (d["departamento"] as? String) ?? "")
         let texto: String
-        do { texto = try await runner.correrSinAgente(prompt: prompt, cwd: a.carpeta) }
+        let caja = CajaCosto()
+        do { texto = try await runner.correrSinAgente(prompt: prompt, cwd: a.carpeta, obs: caja.observador()) }
         catch let e as ClaudeError {
             log.error("borrador tipo=\(e.tipo)")
             return (502, ["error": "No pude armar el borrador del agente: \(e.mensaje)"])
         }
+        await store.registrarCosto(oficina: a.carpeta, origen: "borrador", costo: caja.valor)
         // los ids ocupados se recalculan por si cambió la oficina mientras Claude pensaba
         let ocupados = Set((await oficinas.activa()?.oficina ?? a.oficina).agentes.map(\.id))
         guard let b = Borrador.parsear(texto, ocupados: ocupados) else {
@@ -351,12 +362,17 @@ public final class Router: APIHandler {
         let store = self.store, runner = self.runner
         let ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
         let carpeta = act.carpeta
+        let caja = CajaCosto()
+        defer { let c = caja.valor; Task { await store.registrarCosto(oficina: carpeta, agente: agente, origen: "chat", ref: sid, costo: c) } }
         let resultado: (Int, [String: String]) = await runner.conCarril(oficina: carpeta, agente: agente) {
             do {
                 try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
                 try await store.agregar(sid: sid, rol: "u", texto: msg)
                 let activa = await store.estaActiva(sid)
-                let texto = try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctx)
+                let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "chat", tarea: msg,
+                                                              extra: caja.observador()) { obs, _ in
+                    try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctx, obs: obs)
+                }
                 try await store.marcarActiva(sid)
                 try await store.agregar(sid: sid, rol: "a", texto: texto.isEmpty ? "(sin respuesta)" : texto)
                 return (200, ["reply": texto])

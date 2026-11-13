@@ -191,6 +191,7 @@
       });
     });
     marcarEstados();
+    if (App.Actividad) { App.Actividad.repintar(); App.Actividad.iniciar(); }
   }
   function marcarEstados() {
     if (!dom.equipo) return;
@@ -198,7 +199,7 @@
     dom.equipo.querySelectorAll('.persona[data-id]').forEach(function (el) {
       var id = el.getAttribute('data-id');
       el.classList.toggle('activa', App.Agente.actual() === id);
-      el.classList.toggle('ocupada', !!E.ocupados[id]);
+      el.classList.toggle('ocupada', !!E.ocupados[id] || !!(E.actividad || {})[id]);
       el.classList.toggle('reunida', enReu.indexOf(id) >= 0);
     });
   }
