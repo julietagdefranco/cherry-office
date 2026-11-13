@@ -5,3 +5,10 @@ _prueba/
 # tu estado real (se genera al instalar, no se sube)
 _betty/estado-actual.md
 _betty/estado-actual.respaldo.md
+
+# datos locales del servidor (SQLite, logs) y config propia
+.datos/
+oficina/config.json
+
+# configuración local de vistas previas (rutas de cada máquina)
+.claude/launch.json

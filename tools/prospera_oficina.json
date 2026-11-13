@@ -1,0 +1,39 @@
+{
+  "_comentario": "Datos de DEPS y AGENTES de oficina/index.html (la sala de reuniones no es un departamento). Los usa tools/importar_prospera.py; app/Sources/Backend/Importar.swift tiene la misma tabla.",
+  "nombre": "Próspera HQ",
+  "duenio": "Juli",
+  "departamentos": [
+    {"id": "dir", "nombre": "Dirección", "color": "#ee6da6"},
+    {"id": "redes", "nombre": "Redes y estrategia digital", "color": "#a88bd6"},
+    {"id": "ads", "nombre": "Ads", "color": "#f0a35b"},
+    {"id": "clases", "nombre": "Clases de PRÓSPERAS", "color": "#e6c22e"},
+    {"id": "video", "nombre": "Edición de video", "color": "#4aa0dc"}
+  ],
+  "agentes": [
+    {"id": "betty", "nombre": "Betty", "rol": "PM y directora del equipo", "departamento": "dir",
+     "chips": ["¿Qué me toca hoy?", "Ordenemos mis pendientes", "¿Cómo viene el lanzamiento?"],
+     "avatar": {"semilla": "betty", "colorPelo": "#141414", "colorTorso": "#c9263a", "colorPiernas": "#5a3b2b"},
+     "escritura": ["conocimiento/oficina.md", "conocimiento/decisiones.md"]},
+    {"id": "don-armando", "nombre": "Don Armando", "rol": "Editor de videos de PRÓSPERAS", "departamento": "video",
+     "chips": ["¿Qué necesitás para editar una clase?", "¿Cómo es tu flujo de trabajo?"],
+     "avatar": {"semilla": "don-armando", "colorPelo": "#3a2214", "colorTorso": "#1d2133", "colorPiernas": "#0b0c10"}},
+    {"id": "mario", "nombre": "Mario", "rol": "Editor de reels", "departamento": "video",
+     "chips": ["¿Qué necesitás para editar un reel?", "¿Cómo trabajás con Redes?"],
+     "avatar": {"semilla": "mario", "colorPelo": "#141414", "colorTorso": "#5d6b3a", "colorPiernas": "#5d6b3a"}},
+    {"id": "marce", "nombre": "Marce", "rol": "Directora creativa de redes", "departamento": "redes",
+     "chips": ["¿Qué tendría que publicar esta semana?", "Armemos la estrategia del lanzamiento"],
+     "avatar": {"semilla": "marce", "colorPelo": "#0e0e12", "colorTorso": "#1a1a1f", "colorPiernas": "#0e0b0e"}},
+    {"id": "catalina", "nombre": "Doña Catalina", "rol": "Social Media Manager", "departamento": "redes",
+     "chips": ["Armame un calendario de publicaciones", "¿Qué piezas están pendientes?"],
+     "avatar": {"semilla": "catalina", "colorPelo": "#c98a30", "colorTorso": "#c9a97a", "colorPiernas": "#cdb08a"}},
+    {"id": "patricia", "nombre": "Patricia", "rol": "Community Manager", "departamento": "redes",
+     "chips": ["Redactá una respuesta para una consulta", "¿Qué preguntas se repiten?"],
+     "avatar": {"semilla": "patricia", "colorPelo": "#dcae52", "colorTorso": "#f4f4f6", "colorPiernas": "#efefef"}},
+    {"id": "sofia", "nombre": "Doña Sofía", "rol": "Creadora de las clases de PRÓSPERAS", "departamento": "clases",
+     "chips": ["¿Qué clases quedan por hacer?", "Proponeme el tema de diciembre"],
+     "avatar": {"semilla": "sofia", "colorPelo": "#b5562a", "colorTorso": "#d6342c", "colorPiernas": "#1a1a1f"}},
+    {"id": "nicolas", "nombre": "Nicolás Mora", "rol": "Ads (Meta Ads)", "departamento": "ads",
+     "chips": ["¿Cómo analizamos los anuncios del taller?", "¿Qué datos necesitás de mí?"],
+     "avatar": {"semilla": "nicolas", "colorPelo": "#2b2430", "colorTorso": "#1c1c24", "colorPiernas": "#6b6a42"}}
+  ]
+}

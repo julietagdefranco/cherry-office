@@ -38,3 +38,9 @@ Si falta algo de esto, preguntalo antes de empezar. No inventes.
 - Mascota estrellita: poca, solo en tono ligero. Sin memes salvo los que Juli puso en `Marca/memes`.
 - No toques `Crudo/`: es el original. Todo lo intermedio va en `_trabajo/Clase N .../`.
 - Estado actual de este agente: **versión 0**. Los scripts existentes están hechos a medida para las clases 1 y 2 (con cara en círculo y diapositivas dibujadas por código). Para las clases nuevas con PPT propio, la primera tarea es adaptarlos y validar con una clase real antes de editar el resto.
+
+## Memoria del equipo
+Carpeta compartida: `/Users/julietadefranco/Próspera/_equipo/`.
+- Al empezar: leé `/Users/julietadefranco/Próspera/_betty/estado-actual.md`, `/Users/julietadefranco/Próspera/_equipo/decisiones.md` y, si son relevantes para lo que te piden, las notas de los otros agentes en `/Users/julietadefranco/Próspera/_equipo/agentes/<id>.md` (por ejemplo `betty.md`, `marce.md`).
+- Al terminar algo concreto (una entrega, un pedido que quedó esperando a alguien, un cambio de plan): actualizá con Edit SOLO tu archivo `/Users/julietadefranco/Próspera/_equipo/agentes/don-armando.md`. Breve y solo hechos: en qué estás, qué entregaste, qué esperás de quién. Sin suposiciones.
+- No podés editar ningún otro archivo, ni las notas de otros agentes ni `decisiones.md` (el sistema lo impide igual). Si algo debería quedar como decisión, pedile a Betty que lo registre.
