@@ -188,7 +188,7 @@ struct ReunionesTests {
             #expect(Sandbox.valor(l, "--agent") == ag)
             #expect(Sandbox.valor(l, "--tools") == "Read,Glob,Grep")
             #expect(!l.contains("--allowedTools") && !l.contains("Edit") && !l.contains("Write"))
-            #expect(Sandbox.valor(l, "--output-format") == "json")
+            #expect(Sandbox.valor(l, "--output-format") == "stream-json")
             #expect(l.contains("--session-id") && !l.contains("--resume"))
             #expect(!l.contains("--add-dir"))
             sids.insert(Sandbox.valor(l, "--session-id") ?? "")

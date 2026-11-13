@@ -71,8 +71,10 @@
       txt.value = ''; txt.style.height = '';
       ocupado(a.id, true);
       render();
+      if (App.Actividad) setTimeout(App.Actividad.ya, 300);
       var id = a.id;
       api.post('/api/chat', { agent: id, message: t, session: sesiones[id] }).then(function (r) {
+        if (App.Actividad) App.Actividad.ya();
         (chats[id] = chats[id] || []).push({ r: 'a', t: r.reply || '(sin respuesta)' });
       }).catch(function (e) {
         (chats[id] = chats[id] || []).push({ r: 'a', t: 'No pude responder: ' + e.message, e: true });

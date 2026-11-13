@@ -12,8 +12,9 @@ App.Oficina3D = (function () {
   var lugares = [];                 // [{tipo:'reunion'|'biblioteca', caja}]
   var etiquetas = [];               // [{el, p:Vector3}]
   var plano = null;                 // datos del armado (salas, pasillos, asientos de reunión)
-  var animando = {};                // id -> true mientras camina o habla
-  var pendiente = false, sombrasSucias = true, ultimo = 0, construyendo = 0;
+  var animando = {};                // id -> true mientras camina, habla o trabaja en su escritorio
+  var trabajo = {};                 // id -> {estado, herramienta, objetivo, tarea} (de /api/actividad; sobrevive a reconstruir)
+  var pendiente = false, sombrasSucias = true, ultimo = 0, construyendo = 0, sombraAnim = false, soloLento = true;
   var hover = null, elegido = null, hablando = null;
   var orb = { az: 0.42, el: 0.78, d: 60, tx: 0, tz: 0, minD: 10, maxD: 200 };
   var cbAgente = function () {}, cbLugar = function () {};
@@ -136,12 +137,46 @@ App.Oficina3D = (function () {
     pendiente = false;
     var dt = ultimo ? Math.min(0.05, (t - ultimo) / 1000) : 0.016; ultimo = t;
     var hayAnim = false;
+    sombraAnim = false; soloLento = true;
     for (var id in animando) { if (animar(id, dt)) hayAnim = true; else delete animando[id]; }
+    if (camara(dt)) { hayAnim = true; soloLento = false; }
     posCam();
-    if (sombrasSucias || hayAnim) { renderer.shadowMap.needsUpdate = true; sombrasSucias = false; }
+    /* las sombras solo se recalculan si algo se mueve de lugar (caminar), no por gestos sentados ni pantallas */
+    if (sombrasSucias || sombraAnim) { renderer.shadowMap.needsUpdate = true; sombrasSucias = false; }
     renderer.render(escena, cam);
     for (var i = 0; i < etiquetas.length; i++) proyectar(etiquetas[i]);
-    if (hayAnim) pedir(); else ultimo = 0;
+    if (!hayAnim) { ultimo = 0; return; }
+    /* gestos de trabajo a ~16 fps (no hace falta más y ahorra batería); caminatas y cámara a pleno */
+    if (soloLento) setTimeout(pedir, 60); else pedir();
+  }
+
+  /* ---------------- cámara animada (enfocar) ---------------- */
+  var vuelo = null;
+  function camara(dt) {
+    if (!vuelo) return false;
+    vuelo.t = Math.min(1, vuelo.t + dt / vuelo.dur);
+    var k = vuelo.t < 0.5 ? 2 * vuelo.t * vuelo.t : 1 - Math.pow(-2 * vuelo.t + 2, 2) / 2;
+    orb.tx = vuelo.a.tx + (vuelo.b.tx - vuelo.a.tx) * k;
+    orb.tz = vuelo.a.tz + (vuelo.b.tz - vuelo.a.tz) * k;
+    orb.d = vuelo.a.d + (vuelo.b.d - vuelo.a.d) * k;
+    if (vuelo.t >= 1) vuelo = null;
+    return true;
+  }
+  function enfocar(x, z, d) {
+    vuelo = { t: 0, dur: 0.7, a: { tx: orb.tx, tz: orb.tz, d: orb.d }, b: { tx: x, tz: z, d: lim(d || orb.minD * 1.6, orb.minD, orb.maxD) } };
+    pedir();
+  }
+  function enfocarAgente(id) {
+    var f = figuras[id]; if (!f) return false;
+    enfocar(f.obj.position.x, f.obj.position.z + 1, orb.minD * 1.5);
+    return true;
+  }
+  function enfocarLugar(tipo) {
+    var l = lugares.filter(function (x) { return x.tipo === tipo; })[0];
+    if (!l) return false;
+    var c = l.caja.getCenter(new T.Vector3());
+    enfocar(c.x, c.z + 1, orb.minD * 2);
+    return true;
   }
   function posCam() {
     var ce = Math.cos(orb.el);
@@ -229,7 +264,7 @@ App.Oficina3D = (function () {
   }
   function actualizarEtiquetasHover() {
     for (var id in figuras) {
-      var f = figuras[id], ver = hover === 'agente:' + id || elegido === id || f.ocupado || hablando === id;
+      var f = figuras[id], ver = hover === 'agente:' + id || elegido === id || f.ocupado || hablando === id || !!trabajo[id];
       f.etiqueta.oculta = !ver;
       f.etiqueta.el.classList.toggle('activa', elegido === id);
       f.etiqueta.el.classList.toggle('hablando', hablando === id);
@@ -366,7 +401,11 @@ App.Oficina3D = (function () {
       if (mundo) { escena.remove(mundo); liberar(mundo); }
       mundo = grupo; escena.add(mundo);
       var viejas = figuras; figuras = {};
-      Object.keys(viejas).forEach(function (id) { viejas[id].etiqueta.el.remove(); });
+      Object.keys(viejas).forEach(function (id) {
+        viejas[id].etiqueta.el.remove();
+        if (viejas[id].etqTarea) viejas[id].etqTarea.el.remove();
+        if (viejas[id].pantalla) { viejas[id].pantalla.tex.dispose(); viejas[id].pantalla.mat.dispose(); }
+      });
       animando = {};
       var cambioTam = !plano || plano.W !== nuevo.W || plano.D !== nuevo.D;
       plano = nuevo;
@@ -376,8 +415,11 @@ App.Oficina3D = (function () {
         mundo.add(x.fig);
         f.etiqueta = etiqueta('agente', x.a.nombre, null);
         f.etiqueta.obj = x.fig; f.etiqueta.off = new T.Vector3(0, 4.6, 0); f.etiqueta.oculta = true;
+        f.etqTarea = etiquetaTarea(x.fig);
         figuras[x.a.id] = f;
+        crearPantalla(f);
       });
+      actividad(trabajo);
       encuadrar(cambioTam);
       actualizarEtiquetasHover();
       sombrasSucias = true;
@@ -407,6 +449,17 @@ App.Oficina3D = (function () {
     etiquetas.push(e);
     return e;
   }
+
+  /* cartel de tarea sobre la cabeza: título (qué pidieron) y detalle (qué está haciendo ahora) */
+  function etiquetaTarea(obj) {
+    var e = etiqueta('tarea', '', null);
+    vaciarNodo(e.el.firstChild);
+    var t = document.createElement('b'), d = document.createElement('small');
+    e.el.firstChild.appendChild(t); e.el.firstChild.appendChild(d);
+    e.titulo = t; e.detalle = d; e.obj = obj; e.off = new T.Vector3(0, 5.9, 0); e.oculta = true;
+    return e;
+  }
+  function vaciarNodo(n) { while (n.firstChild) n.removeChild(n.firstChild); }
 
   function pisoBaldosas(L, x, z, w, d, hex) {
     for (var a = 0; a < w; a += 2) for (var b = 0; b < d; b += 2) ladrillo(L, Math.min(2, w - a), Math.min(2, d - b), PLACA, x + a, 0, z + b, hex, false);
@@ -599,15 +652,110 @@ App.Oficina3D = (function () {
       }
       f.fase += dt * 11;
       P.pose(obj, 'caminar', f.fase);
+      sombraAnim = true; soloLento = false;
       return true;
     }
     if (f.estado === 'hablando') {
       f.fase += dt * 6;
       P.pose(f.obj, 'sentado');
       P.pose(f.obj, 'hablar', f.fase);
+      soloLento = false;
+      return true;
+    }
+    if (f.estado === 'escritorio' && trabajo[id]) {
+      f.fase += dt * 9;
+      P.pose(f.obj, 'sentado');
+      P.pose(f.obj, POSE[trabajo[id].estado] || 'tipear', f.fase);
+      f.tPant = (f.tPant || 0) + dt;
+      if (f.pantalla && f.tPant > 0.12) { f.tPant = 0; f.cuadroPant = (f.cuadroPant || 0) + 1; dibujarPantalla(f); }
       return true;
     }
     return false;
+  }
+
+  /* ---------------- trabajo en vivo: pose, pantalla y cartel ---------------- */
+  var POSE = { pensando: 'pensar', leyendo: 'leer', escribiendo: 'tipear', buscando: 'mirar', consultando: 'pensar', trabajando: 'tipear' };
+  var VERBO = { pensando: 'pensando', leyendo: 'leyendo', escribiendo: 'escribiendo', buscando: 'buscando',
+    consultando: 'consultando a', trabajando: 'trabajando' };
+
+  /* pantalla del escritorio: una textura de canvas en las dos caras (hacia el agente y hacia la cámara) */
+  function crearPantalla(f) {
+    if (!f.asiento) return;
+    var c = document.createElement('canvas'); c.width = 128; c.height = 80;
+    var tex = new T.CanvasTexture(c);
+    if (T.sRGBEncoding) tex.encoding = T.sRGBEncoding;
+    var mat = new T.MeshBasicMaterial({ map: tex, toneMapped: false });
+    var geo = geoCache.pantallaPlana || (geoCache.pantallaPlana = new T.PlaneGeometry(1.46, 0.92));
+    var cx = f.asiento.x, cz = f.asiento.z - 0.2, tope = PLACA + LADRILLO * 2 + PLACA, y = tope + 0.05 + 0.525;
+    var g = new T.Group();
+    var adelante = new T.Mesh(geo, mat); adelante.position.set(cx + 1.1, y, cz + 2.45 - 0.045); adelante.rotation.y = Math.PI;
+    var atras = new T.Mesh(geo, mat); atras.position.set(cx + 1.1, y, cz + 2.45 + 0.045);
+    g.add(adelante, atras);
+    mundo.add(g);
+    f.pantalla = { canvas: c, ctx: c.getContext('2d'), tex: tex, mat: mat, grupo: g };
+    dibujarPantalla(f);
+  }
+
+  function dibujarPantalla(f) {
+    var P2 = f.pantalla; if (!P2) return;
+    var x = P2.ctx, w = 128, h = 80, t = trabajo[f.a.id], n = f.cuadroPant || 0, i;
+    var est = t ? t.estado : null;
+    x.fillStyle = est === 'leyendo' ? '#f1efe9' : est ? '#1f2227' : '#2a2b2e';
+    x.fillRect(0, 0, w, h);
+    if (!est) { P2.tex.needsUpdate = true; return; }
+    if (est === 'pensando' || est === 'consultando') {
+      /* destello giratorio (ocho rayos, uno resaltado que avanza) */
+      for (i = 0; i < 8; i++) {
+        var a = i / 8 * Math.PI * 2, on = (i === n % 8);
+        x.strokeStyle = on ? '#e8875b' : 'rgba(232,135,91,.32)'; x.lineWidth = 7; x.lineCap = 'round';
+        x.beginPath(); x.moveTo(64 + Math.cos(a) * 11, 40 + Math.sin(a) * 11); x.lineTo(64 + Math.cos(a) * 24, 40 + Math.sin(a) * 24); x.stroke();
+      }
+      if (est === 'consultando') { x.fillStyle = '#9ad1ff'; x.beginPath(); x.arc(104, 18, 9, 0, Math.PI * 2); x.fill(); }
+    } else if (est === 'leyendo') {
+      /* página con renglones que se desplazan */
+      var off = (n * 3) % 12;
+      x.fillStyle = '#bdb8ae';
+      for (i = -1; i < 8; i++) { var yy = 10 + i * 12 - off; if (yy > 4 && yy < 74) x.fillRect(16, yy, 60 + ((i * 37) % 36), 5); }
+      x.fillStyle = '#e8875b'; x.fillRect(8, 8, 3, 64);
+    } else if (est === 'escribiendo' || est === 'trabajando') {
+      /* editor: renglones de colores que van apareciendo y cursor */
+      var cols = ['#c792ea', '#82aaff', '#c3e88d', '#f78c6c', '#89ddff'], lineas = 1 + (n % 9);
+      for (i = 0; i < lineas && i < 8; i++) {
+        x.fillStyle = cols[(i * 3) % cols.length]; x.fillRect(10 + (i % 3) * 8, 8 + i * 8, 20 + ((i * 29) % 60), 4);
+      }
+      if (n % 2) { x.fillStyle = '#ffffff'; x.fillRect(12 + ((lineas % 3) * 8) + 40, 8 + Math.min(lineas, 8) * 8, 4, 6); }
+    } else if (est === 'buscando') {
+      x.fillStyle = '#3a3f47'; for (i = 0; i < 5; i++) x.fillRect(12, 10 + i * 13, 70, 5);
+      var mx = 70 + Math.sin(n * 0.5) * 22, my = 40 + Math.cos(n * 0.7) * 12;
+      x.strokeStyle = '#9ad1ff'; x.lineWidth = 5; x.beginPath(); x.arc(mx, my, 12, 0, Math.PI * 2); x.stroke();
+      x.beginPath(); x.moveTo(mx + 9, my + 9); x.lineTo(mx + 20, my + 20); x.stroke();
+    }
+    P2.tex.needsUpdate = true;
+  }
+
+  function pintarTarea(f) {
+    var t = trabajo[f.a.id], e = f.etqTarea; if (!e) return;
+    e.oculta = !t || f.estado !== 'escritorio' && f.estado !== 'caminando';
+    if (!t) return;
+    var linea2 = VERBO[t.estado] || t.estado;
+    if (t.objetivo) linea2 += ' ' + t.objetivo;
+    e.titulo.textContent = t.tarea || (t.origen === 'reunion' ? 'En reunión' : 'Trabajando');
+    e.detalle.textContent = linea2;
+    e.el.dataset.estado = t.estado;
+  }
+
+  /* mapa: {id: {estado, herramienta, objetivo, tarea, origen}} de /api/actividad */
+  function actividad(mapa) {
+    trabajo = mapa || {};
+    for (var id in figuras) {
+      var f = figuras[id];
+      if (trabajo[id]) { if (f.estado === 'escritorio') animando[id] = true; }
+      else if (f.estado === 'escritorio') { sentar(f, f.asiento); f.cuadroPant = 0; }
+      dibujarPantalla(f);
+      pintarTarea(f);
+    }
+    actualizarEtiquetasHover();
+    pedir();
   }
 
   /* Ruta escritorio -> silla de la sala de reuniones, siempre por pasillos:
@@ -665,7 +813,11 @@ App.Oficina3D = (function () {
     var ida = rutaHaciaReunion(f, f.enSilla || plano.reunion.asientos[0]).reverse();
     ida.shift();
     ida.push({ x: f.asiento.x, z: f.asiento.z });
-    caminar(id, ida, function () { f.estado = 'escritorio'; sentar(f, f.asiento); f.enSilla = null; sombrasSucias = true; });
+    caminar(id, ida, function () {
+      f.estado = 'escritorio'; sentar(f, f.asiento); f.enSilla = null; sombrasSucias = true;
+      if (trabajo[id]) animando[id] = true;
+      pintarTarea(f);
+    });
   }
 
   /* ---------------- API ---------------- */
@@ -679,6 +831,10 @@ App.Oficina3D = (function () {
     reunion: reunion,
     finReunion: function () { reunion([], null); },
     encuadrar: function () { encuadrar(true); pedir(); },
+    actividad: actividad,
+    enfocar: enfocar,
+    enfocarAgente: enfocarAgente,
+    enfocarLugar: enfocarLugar,
     pedir: pedir,
     _estado: function () { return { figuras: Object.keys(figuras).length, animando: Object.keys(animando), orb: orb, plano: plano && { w: plano.x1, d: plano.z1 }, info: renderer.info.render }; }
   };

@@ -31,7 +31,7 @@ public enum Permisos {
 
     /// Argumentos (sin el binario). `--` evita que el mensaje se lea como opción. `flag`: --session-id | --resume.
     public static func argumentos(_ cfg: Config, agente: String, mensaje: String, sid: String, flag: String) -> [String] {
-        var a = ["-p", "--agent", agente, flag, sid, "--output-format", "json", "--tools", herramientas(cfg, agente: agente)]
+        var a = ["-p", "--agent", agente, flag, sid] + ClaudeRunner.formatoSalida + ["--tools", herramientas(cfg, agente: agente)]
         for d in cfg.dirsExtra { a += ["--add-dir", d] }
         let escribibles = rutasEscritura(cfg, agente: agente)
         if !escribibles.isEmpty {
@@ -82,7 +82,7 @@ public enum Permisos {
     /// Como `argumentos` pero para un agente de oficina: escritura solo en `oficina.escritura`.
     public static func argumentos(_ cfg: Config, oficina: ContextoOficina, agente: String, mensaje: String,
                                   sid: String, flag: String) -> [String] {
-        var a = ["-p", "--agent", agente, flag, sid, "--output-format", "json", "--tools",
+        var a = ["-p", "--agent", agente, flag, sid] + ClaudeRunner.formatoSalida + ["--tools",
                  herramientas(cfg, oficina: oficina, agente: agente)]
         for d in oficina.dirsExtra { a += ["--add-dir", d] }
         if !oficina.escritura.isEmpty {

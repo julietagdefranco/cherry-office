@@ -24,6 +24,7 @@ import unicodedata
 import uuid
 
 import hq_core
+import hq_vivo
 import hq_reuniones
 from hq_core import ErrorAPI
 
@@ -1012,15 +1013,17 @@ class Biblioteca:
             p = ("Describí la imagen que está en «%s» (usá la herramienta Read para verla). Incluí todo el texto visible tal "
                  "cual, números, objetos, personas (sin identificarlas), colores y contexto. Respondé en español, en texto "
                  "plano, sin inventar lo que no se ve." % ruta)
+            caja = hq_vivo.CajaCosto()
             try:
-                t = self._correr([self.app.claude, "-p", "--output-format", "json", "--tools", "Read", "--add-dir",
-                                  os.path.dirname(ruta), "--", p], carpeta, self.timeout_imagen).strip()
+                t = self._correr([self.app.claude, "-p"] + hq_vivo.FORMATO_SALIDA + ["--tools", "Read", "--add-dir",
+                                  os.path.dirname(ruta), "--", p], carpeta, self.timeout_imagen, caja.observador()).strip()
                 if t:
                     texto = t
                 else:
                     aviso = "Claude no devolvió una descripción de la imagen."
             except ErrorAPI as e:
                 aviso = "No pude describir la imagen: %s" % e.mensaje
+            self.app.costos.registrar(carpeta, "biblioteca", caja.valor, ref=slug)
         if not self._sigue(f):
             return
         texto = texto or ""
@@ -1037,10 +1040,11 @@ class Biblioteca:
             self._catalogo(carpeta, of)
             return
         ficha, contradicciones, error_ficha = None, [], None
+        caja = hq_vivo.CajaCosto()
         try:
             p = prompt_ficha(of, carpeta, f["nombre"], f["tipo"], f["departamento"], texto)
-            t = self._correr([self.app.claude, "-p", "--output-format", "json", "--tools", "", "--", p], carpeta,
-                             self.timeout_ficha)
+            t = self._correr([self.app.claude, "-p"] + hq_vivo.FORMATO_SALIDA + ["--tools", "", "--", p], carpeta,
+                             self.timeout_ficha, caja.observador())
             r = parsear_ficha(t, f["nombre"], of)
             if r:
                 ficha, contradicciones = r
@@ -1048,6 +1052,7 @@ class Biblioteca:
                 error_ficha = "El bibliotecario no devolvió la ficha en el formato esperado."
         except ErrorAPI as e:
             error_ficha = e.mensaje
+        self.app.costos.registrar(carpeta, "biblioteca", caja.valor, ref=slug)
         if not self._sigue(f):
             return
         if ficha:
@@ -1097,17 +1102,22 @@ class Biblioteca:
                 prompt = prompt_lectura(titulo, f["nombre"], slug, ag, f["tipo"] in IMAGENES, self._ruta_abs(f, carpeta))
                 herr = (cfg["herramientas_agente"].get(id_) or cfg["herramientas"]) + ",Edit,Write"
                 notas = os.path.join(carpeta, "conocimiento", "agentes", id_ + ".md")
-                cmd = [self.app.claude, "-p", "--agent", id_, "--session-id", str(uuid.uuid4()), "--output-format", "json",
-                       "--tools", herr]
+                cmd = [self.app.claude, "-p", "--agent", id_, "--session-id", str(uuid.uuid4())] + hq_vivo.FORMATO_SALIDA + [
+                    "--tools", herr]
                 for d in hq_core.dirs_vinculos(of, ag):
                     cmd += ["--add-dir", d]
                 cmd += ["--allowedTools"] + [srv.regla_permiso(h, notas) for h in ("Edit", "Write")] + ["--", prompt]
+                caja = hq_vivo.CajaCosto()
                 try:
                     with self.app._lock(carpeta, id_):
-                        self._correr(cmd, carpeta, cfg["timeout"])
+                        with self.app.actividad.seguir(carpeta, id_, "biblioteca", "Leyendo " + f["nombre"],
+                                                       extra=caja.observador()) as (obs, _t):
+                            self._correr(cmd, carpeta, cfg["timeout"], obs)
                     resultados[id_] = "ok"
                 except ErrorAPI as e:
                     resultados[id_] = "error: " + e.mensaje
+                finally:
+                    self.app.costos.registrar(carpeta, "biblioteca", caja.valor, id_, slug)
                 self._sql("UPDATE archivos SET leer=?, lectura=?, actualizado=? WHERE oficina=? AND slug=? AND papelera=0",
                           (json.dumps(ids[i + 1:]) if ids[i + 1:] else None, json.dumps(resultados), time.time(), carpeta, slug),
                           escribir=True)
@@ -1118,25 +1128,20 @@ class Biblioteca:
             with self.mut:
                 self.leyendo_ahora.difference_update(ids)
 
-    def _correr(self, cmd, carpeta, timeout):
-        """-> texto de `result`. ErrorAPI(502, mensaje en español) si falla."""
+    def _correr(self, cmd, carpeta, timeout, obs=None):
+        """-> texto de `result`. ErrorAPI(502, mensaje en español) si falla. `obs`: eventos en vivo."""
         srv = self.srv
         if not self.app.claude:
             raise ErrorAPI(502, "No encontré Claude Code en esta compu.")
         if not os.path.isdir(carpeta):
             raise ErrorAPI(502, "No encuentro la carpeta del proyecto (%s)." % carpeta)
         try:
-            rc, so, se = srv.ejecutar(cmd, carpeta, timeout)
+            rc, so, se = srv.ejecutar(cmd, carpeta, timeout, al_linea=hq_vivo.lector(obs))
         except srv.TiempoAgotado:
             raise ErrorAPI(504, "Tardó demasiado en responder.")
         except (FileNotFoundError, PermissionError, OSError):
             raise ErrorAPI(502, "No pude ejecutar Claude Code en esta compu.")
-        try:
-            out = json.loads(so)
-            if not isinstance(out, dict):
-                out = None
-        except Exception:
-            out = None
+        out = hq_vivo.ultimo_json(so)
         e = srv.error_de(rc, so, se, out)
         if e:
             raise ErrorAPI(502, srv.clasificar_error(e)[1])
