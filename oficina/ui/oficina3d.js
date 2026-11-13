@@ -285,17 +285,32 @@ App.Oficina3D = (function () {
      Movimiento chico y continuo, a ~30 cuadros por segundo. No actualiza sombras (los autos llevan una sombra propia
      y los brazos que se mueven no cambian la sombra de forma visible). Se apaga con "reducir movimiento". */
   var AMBIENTE = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  var timerAmb = null;
+  var timerAmb = null, timerAuto = null;
   function pedirLuego() {
     if (timerAmb) return;
     timerAmb = setTimeout(function () { timerAmb = null; pedir(); }, 33);
   }
   function ambiente(dt) {
-    var algo = false;
+    var algo = false, ahora = performance.now(), proximo = Infinity;
     for (var i = 0; i < autos.length; i++) {
-      var a = autos[i], x = a.g.position.x + a.dir * a.vel * dt;
-      if (x > a.x1) x = a.x0; else if (x < a.x0) x = a.x1;
+      var a = autos[i];
+      /* entre pasada y pasada el auto espera fuera de la base (con hora de reloj: el bucle puede dormirse mientras tanto) */
+      if (a.vuelve) {
+        if (ahora < a.vuelve) { proximo = Math.min(proximo, a.vuelve); continue; }
+        a.vuelve = 0; a.g.visible = true;
+      }
+      var x = a.g.position.x + a.dir * a.vel * dt;
+      if (x > a.x1 || x < a.x0) {
+        x = a.dir > 0 ? a.x0 : a.x1;
+        a.vuelve = ahora + 1000 * (ESPERA_AUTO[0] + Math.random() * (ESPERA_AUTO[1] - ESPERA_AUTO[0]));
+        a.g.visible = false;
+      }
       a.g.position.x = x; algo = true;
+    }
+    /* si no queda ningún auto en la calle, se despierta solo cuando vuelve el próximo */
+    if (proximo < Infinity) {
+      clearTimeout(timerAuto);
+      timerAuto = setTimeout(function () { timerAuto = null; pedir(); }, proximo - ahora + 20);
     }
     for (var id in figuras) {
       var f = figuras[id];
@@ -1212,12 +1227,13 @@ App.Oficina3D = (function () {
     })).then(function () { return g; });
   }
   var autos = [];
+  var ESPERA_AUTO = [12, 30];   // segundos que un auto tarda en volver a aparecer después de salir de la base
   function armarAutos(grupo, pl) {
     return Promise.all((pl.autos || []).map(function (a) {
       return autoLego(a.col).then(function (g) {
         g.position.set(a.x, 0.2, a.z); g.rotation.y = a.dir * Math.PI / 2;
         grupo.add(g);
-        return { g: g, dir: a.dir, vel: a.vel, x0: pl.x0 - 5, x1: pl.x1 + 5 };     // dan la vuelta en el borde de la base
+        return { g: g, dir: a.dir, vel: a.vel, x0: pl.x0 - 5, x1: pl.x1 + 5, vuelve: 0 };     // salen por el borde de la base y vuelven después de un rato
       });
     })).catch(function (e) { console.warn('Autos:', e && e.message); return []; });
   }
@@ -1238,7 +1254,6 @@ App.Oficina3D = (function () {
       { x: entradaX + 15, z: zC + 2, dir: -1, col: C.azul, vel: 6 },
       { x: Math.max(bx0 + 5, entradaX - 10), z: zC + CALLE - 2, dir: 1, col: C.amarillo, vel: 7.5 }
     ];
-    if (pl.W > 40) pl.autos.push({ x: pl.W - 10, z: zC + CALLE - 2, dir: 1, col: C.rojo, vel: 7.5 });
     /* faroles en las esquinas de la vereda (son altos: delante del edificio taparían la vista) */
     farol(L, bx0 + 2, zV + 1.5);
     farol(L, bx1 - 2, zV + 1.5);
