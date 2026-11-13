@@ -71,6 +71,8 @@ public struct TareasRouter: SubRouter {
         o["proxima"] = (sigue ? Programacion.proxima(t, desde: ahora, sistema: sistema) : nil).map { Programacion.iso($0) as Any } ?? NSNull()
         o["ultima"] = ult.map { $0.json as Any } ?? NSNull()
         o["corriendo"] = await programador.estaCorriendo(oficina: a.carpeta, tarea: t.id)
+        // única: el instante en que le toca (aunque ya haya pasado), para mostrarlo en la zona que sea
+        if t.unica { o["cuando"] = Programacion.instanteUnica(t, sistema: sistema).map { Programacion.iso($0) as Any } ?? NSNull() }
         return o
     }
 
@@ -126,6 +128,28 @@ public struct TareasRouter: SubRouter {
         return z
     }
 
+    /// «tipo»: "repetida" | "unica" (nil si no vino).
+    private static func tipo(_ v: Any?) throws -> Bool? {
+        guard let v, !(v is NSNull) else { return nil }
+        switch v as? String {
+        case "unica": return true
+        case "repetida": return false
+        default: throw ErrorAPI(400, "«tipo» tiene que ser \"repetida\" o \"unica\".")
+        }
+    }
+
+    private static func fecha(_ v: Any?) throws -> String {
+        let f = try Validar.texto(v, "fecha", max: 10)!
+        guard Programacion.diaCalendario(f) != nil else { throw ErrorAPI(400, "La fecha tiene que ser AAAA-MM-DD (por ejemplo 2026-11-20).") }
+        return f
+    }
+
+    private static func booleano(_ v: Any?, _ campo: String) throws -> Bool? {
+        guard let v, !(v is NSNull) else { return nil }
+        guard CFGetTypeID(v as CFTypeRef) == CFBooleanGetTypeID(), let b = v as? Bool else { throw ErrorAPI(400, "«\(campo)» tiene que ser verdadero o falso.") }
+        return b
+    }
+
     /// `{reunion, pendiente}` opcional («Convertir en tarea» desde el acta).
     private static func origen(_ v: Any?) throws -> OrigenTarea? {
         guard let v, !(v is NSNull) else { return nil }
@@ -138,11 +162,7 @@ public struct TareasRouter: SubRouter {
         return o
     }
 
-    private static func activa(_ v: Any?) throws -> Bool? {
-        guard let v, !(v is NSNull) else { return nil }
-        guard CFGetTypeID(v as CFTypeRef) == CFBooleanGetTypeID(), let b = v as? Bool else { throw ErrorAPI(400, "«activa» tiene que ser verdadero o falso.") }
-        return b
-    }
+    private static func activa(_ v: Any?) throws -> Bool? { try booleano(v, "activa") }
 
     // MARK: altas, cambios y bajas
 
@@ -151,8 +171,21 @@ public struct TareasRouter: SubRouter {
         let agente = try Validar.texto(d["agente"], "agente", max: 41)!
         let nombre = try Validar.texto(d["nombre"], "nombre", max: ValidarTareas.maxNombre)!
         let consigna = try Validar.texto(d["consigna"], "consigna", max: ValidarTareas.maxConsigna)!
-        let dias = try TareasRouter.dias(d["dias"]), hora = try TareasRouter.hora(d["hora"])
+        // única: {tipo: "unica", fecha, hora} o {tipo: "unica", ahora: true}; repetida (por defecto): {dias, hora}
+        if d["fecha"] != nil, d["dias"] != nil { throw ErrorAPI(400, "Elegí días (si se repite) o una fecha (si es una sola vez), no las dos cosas.") }
+        let ahoraPedido = try TareasRouter.booleano(d["ahora"], "ahora") ?? false
+        let unica = try TareasRouter.tipo(d["tipo"]) ?? (d["fecha"] != nil || ahoraPedido)
+        if ahoraPedido, !unica { throw ErrorAPI(400, "«ahora» es solo para tareas de una sola vez.") }
         let zona = try TareasRouter.zona(d["zona"]) ?? sistema.identifier
+        let tz = TimeZone(identifier: zona) ?? sistema
+        let dias: [Int], hora: String, fecha: String?
+        if unica {
+            dias = []
+            if ahoraPedido { fecha = Programacion.textoDia(reloj(), zona: tz); hora = Programacion.textoHora(reloj(), zona: tz) }
+            else { fecha = try TareasRouter.fecha(d["fecha"]); hora = try TareasRouter.hora(d["hora"]) }
+        } else {
+            dias = try TareasRouter.dias(d["dias"]); hora = try TareasRouter.hora(d["hora"]); fecha = nil
+        }
         let activa = try TareasRouter.activa(d["activa"]) ?? true
         let origen = try TareasRouter.origen(d["origen"])
         let pedidoId = try Validar.texto(d["id"], "id", max: 41, obligatorio: false)
@@ -166,10 +199,14 @@ public struct TareasRouter: SubRouter {
             if let p = pedidoId, usados.contains(p) { throw ErrorAPI(409, "Ya hay una tarea con ese id.") }
             let id = pedidoId ?? Slug.unico(nombre, usados: usados, respaldo: "tarea")
             let t = TareaProgramada(id: id, agente: agente, nombre: nombre, consigna: consigna, dias: dias, hora: hora, zona: zona,
-                                    activa: activa, creada: ahora, desde: ahora, origen: origen)
+                                    activa: activa, creada: ahora, desde: ahora, origen: origen, fecha: fecha)
             ts.append(t)
             o.tareas = ts
             return t
+        }
+        // una única cuya hora ya llegó («ahora» o una hora pasada) arranca enseguida, sin esperar la vuelta del programador
+        if t.unica, t.activa, let i = Programacion.instanteUnica(t, sistema: sistema), i <= reloj(), let def = a.oficina.agente(t.agente) {
+            _ = try? await programador.correrUnica(a, t, def)
         }
         return (200, ["tarea": await vista(t, a, ahora: reloj())])
     }
@@ -182,6 +219,9 @@ public struct TareasRouter: SubRouter {
         let hora = d["hora"] == nil ? nil : try TareasRouter.hora(d["hora"])
         let zona = try TareasRouter.zona(d["zona"])
         let activa = try TareasRouter.activa(d["activa"])
+        let tipo = try TareasRouter.tipo(d["tipo"])
+        if d["fecha"] != nil, d["dias"] != nil { throw ErrorAPI(400, "Elegí días (si se repite) o una fecha (si es una sola vez), no las dos cosas.") }
+        let fecha = d["fecha"] == nil ? nil : try TareasRouter.fecha(d["fecha"])
         let ahora = Programacion.iso(reloj())
         let (t, a) = try await oficinas.modificar { o -> TareaProgramada in
             guard let i = o.tareas?.firstIndex(where: { $0.id == id }) else { throw ErrorAPI(404, "No existe esa tarea.") }
@@ -189,15 +229,37 @@ public struct TareasRouter: SubRouter {
             var cambioHorario = false
             if let nombre { t.nombre = nombre }
             if let consigna { t.consigna = consigna }
-            if let dias, dias != t.dias { t.dias = dias; cambioHorario = true }
+            // pasar de un tipo al otro
+            let unica = tipo ?? (fecha != nil ? true : (dias != nil ? false : t.unica))
+            if unica, !t.unica {
+                guard let fecha else { throw ErrorAPI(400, "Para que se haga una sola vez, elegí la fecha.") }
+                t.fecha = fecha; t.dias = []; cambioHorario = true
+            } else if !unica, t.unica {
+                guard let dias else { throw ErrorAPI(400, "Para que se repita, elegí los días.") }
+                t.fecha = nil; t.hecha = nil; t.dias = dias; cambioHorario = true
+            } else if unica {
+                if dias != nil { throw ErrorAPI(400, "Una tarea de una sola vez no lleva días: cambiale la fecha.") }
+                if let fecha, fecha != t.fecha { t.fecha = fecha; cambioHorario = true }
+            } else {
+                if fecha != nil { throw ErrorAPI(400, "Una tarea que se repite no lleva fecha: cambiale los días.") }
+                if let dias, dias != t.dias { t.dias = dias; cambioHorario = true }
+            }
             if let hora, hora != t.hora { t.hora = hora; cambioHorario = true }
             if let zona, zona != t.zona { t.zona = zona; cambioHorario = true }
+            // una única hecha a la que le cambian el horario vuelve a estar pendiente (y activa, salvo que la pausen)
+            if t.unica, t.hecha != nil, cambioHorario { t.hecha = nil; if activa == nil { t.activa = true } }
             if let activa {
                 if activa, !t.activa {
                     guard o.agente(t.agente) != nil else { throw ErrorAPI(409, "El agente de esta tarea ya no está en la oficina.") }
+                    if t.unica, t.hecha != nil {
+                        throw ErrorAPI(409, "Esta tarea ya se hizo. Cambiale la fecha o la hora para que se haga de nuevo, o usá «Hacer ahora».")
+                    }
                     cambioHorario = true
                 }
                 t.activa = activa
+            }
+            if t.unica, t.activa, o.agente(t.agente) == nil {
+                throw ErrorAPI(409, "El agente de esta tarea ya no está en la oficina.")
             }
             // una tarea movida o reactivada no se pone al día con el horario que ya pasó hoy
             if cambioHorario { t.desde = ahora }

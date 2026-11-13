@@ -142,6 +142,36 @@ struct ProgramacionTests {
         }
     }
 
+    @Test("una sola vez: corre una vez cuando llega su fecha y hora, aunque sea tarde; no si está hecha, en pausa o ya corrió")
+    func unica() throws {
+        var t = tarea(dias: [], hora: "10:30")
+        t.fecha = "2026-11-20"
+        #expect(t.unica)
+        let i = try #require(Programacion.instanteUnica(t, sistema: sistemaUTC))
+        #expect(i == f("2026-11-20T10:30:00-03:00"), "en la zona de la tarea")
+        #expect(Programacion.proxima(t, desde: f("2026-11-13T09:00:00-03:00"), sistema: sistemaUTC) == i)
+        #expect(Programacion.proxima(t, desde: i, sistema: sistemaUTC) == nil, "después de su hora no hay próxima")
+        #expect(Programacion.debeCorrer(t, ahora: f("2026-11-20T10:29:00-03:00"), ultimaProgramada: nil, sistema: sistemaUTC) == nil)
+        #expect(Programacion.debeCorrer(t, ahora: f("2026-11-20T10:30:05-03:00"), ultimaProgramada: nil, sistema: sistemaUTC) == i)
+        // tres días tarde (app cerrada): se hace igual
+        #expect(Programacion.debeCorrer(t, ahora: f("2026-11-23T10:30:00-03:00"), ultimaProgramada: nil, sistema: sistemaUTC) == i)
+        // creada después de su hora: se hace enseguida
+        t.creada = "2026-11-21T00:00:00Z"
+        #expect(Programacion.debeCorrer(t, ahora: f("2026-11-21T09:00:00-03:00"), ultimaProgramada: nil, sistema: sistemaUTC) == i)
+        #expect(Programacion.debeCorrer(t, ahora: f("2026-11-21T09:00:00-03:00"), ultimaProgramada: i, sistema: sistemaUTC) == nil, "ya tuvo su corrida")
+        var hecha = t; hecha.hecha = "2026-11-20T13:31:00Z"
+        #expect(Programacion.debeCorrer(hecha, ahora: f("2026-11-21T09:00:00-03:00"), ultimaProgramada: nil, sistema: sistemaUTC) == nil)
+        #expect(Programacion.proxima(hecha, desde: f("2026-11-13T09:00:00-03:00"), sistema: sistemaUTC) == nil)
+        var pausa = t; pausa.activa = false
+        #expect(Programacion.debeCorrer(pausa, ahora: f("2026-11-21T09:00:00-03:00"), ultimaProgramada: nil, sistema: sistemaUTC) == nil)
+        // fechas
+        #expect(Programacion.diaCalendario("2026-02-28")! == (2026, 2, 28))
+        #expect(Programacion.diaCalendario("2028-02-29") != nil)
+        for malo in ["2026-02-29", "2026-13-01", "2026-1-01", "26-01-01", "2026/01/01", "2026-01-32", "abcd-ef-gh", ""] {
+            #expect(Programacion.diaCalendario(malo) == nil, "\(malo)")
+        }
+    }
+
     @Test("validación del modelo: hora, días, zona, consigna, id, agente y máximo")
     func validacion() throws {
         func of(_ ts: [TareaProgramada]) -> Oficina {
@@ -173,6 +203,14 @@ struct ProgramacionTests {
         let muchas = (0..<51).map { i -> TareaProgramada in var x = tarea(); x.id = "t\(i)"; return x }
         #expect(throws: ErrorAPI.self) { try Validar.oficina(of(muchas)) }
         try Validar.oficina(of(Array(muchas.prefix(50))))
+        // una sola vez: sin días y con fecha válida; «hecha» solo en las únicas
+        var u = tarea(dias: []); u.fecha = "2026-11-20"
+        try Validar.oficina(of([u]))
+        u.hecha = "2026-11-20T11:00:00Z"
+        try Validar.oficina(of([u]))
+        u.hecha = "ayer"; malo(u, "hecha inválida")
+        u.hecha = nil; u.fecha = "2026-02-30"; malo(u, "fecha inexistente")
+        var r = tarea(); r.hecha = "2026-11-20T11:00:00Z"; malo(r, "repetida hecha")
     }
 
     @Test("oficina.json sin `tareas` se lee igual y no la escribe; con `tareas` va y vuelve")
@@ -484,6 +522,112 @@ struct TareasAPITests {
         try await f.b.store.terminarEjecucion(id, estado: "ok", resultado: largo, error: nil, costo: nil)
         let e = try #require(await f.b.store.ejecucion(id))
         #expect(e.resultado.count == 2000)
+    }
+
+    // MARK: una sola vez
+
+    func nuevaUnica(_ f: Fix, _ extra: [String: Any] = [:]) async -> Resp {
+        var d: [String: Any] = ["agente": "marce", "nombre": "Propuesta", "consigna": "Armá la propuesta", "tipo": "unica",
+                                "fecha": "2099-03-10", "hora": "09:00", "zona": ba]
+        for (k, v) in extra { d[k] = v }
+        return await f.post("/api/tareas", d)
+    }
+
+    @Test("una sola vez: se crea con fecha (sin días), tiene próxima y «cuando»; valida fecha y tipo")
+    func unicaCrear() async throws {
+        let f = try await fix()
+        let r = await nuevaUnica(f)
+        #expect(r.status == 200, "\(r.obj)")
+        let t = dict(r.obj["tarea"])
+        #expect(str(t["tipo"]) == "unica" && str(t["fecha"]) == "2099-03-10")
+        #expect(t["dias"] as? [Int] == [] && t["hecha"] is NSNull)
+        #expect(Programacion.fecha(str(t["proxima"])) == Programacion.fecha(str(t["cuando"])))
+        #expect(Programacion.fecha(str(t["cuando"])) == Programacion.fecha("2099-03-10T09:00:00-03:00"))
+        #expect(str(lista(f.oficinaJSON()["tareas"])[0]["fecha"]) == "2099-03-10")
+        // las repetidas siguen igual y dicen su tipo
+        #expect(str(dict((await nueva(f)).obj["tarea"])["tipo"]) == "repetida")
+        for malo: [String: Any] in [["fecha": "2099-02-30"], ["fecha": "mañana"], ["fecha": NSNull()], ["tipo": "a veces"],
+                                    ["hora": "9"], ["ahora": "si"], ["tipo": "repetida", "ahora": true, "dias": [1]]] {
+            let m = await nuevaUnica(f, malo)
+            #expect(m.status == 400, "\(malo) -> \(m.status) \(m.obj)")
+        }
+        // sin «tipo», la fecha alcanza
+        let sinTipo = await f.post("/api/tareas", ["agente": "marce", "nombre": "X", "consigna": "c", "fecha": "2099-01-01", "hora": "10:00"])
+        #expect(str(dict(sinTipo.obj["tarea"])["tipo"]) == "unica")
+    }
+
+    @Test("una sola vez «ahora»: arranca enseguida como su corrida programada, deja una entrega y queda hecha y en pausa")
+    func unicaAhora() async throws {
+        let f = try await fix()
+        let r = await f.post("/api/tareas", ["agente": "marce", "nombre": "Propuesta", "consigna": "Armá la propuesta", "tipo": "unica", "ahora": true])
+        #expect(r.status == 200, "\(r.obj)")
+        let id = str(dict(r.obj["tarea"])["id"])
+        let fin = await terminada(f, id)
+        #expect(str(fin["estado"]) == "ok" && fin["manual"] as? Bool == false)
+        let hecha = await esperarAsync { dict(await f.get("/api/tareas/\(id)").obj["tarea"])["hecha"] is String }
+        #expect(hecha)
+        let t = dict(await f.get("/api/tareas/\(id)").obj["tarea"])
+        #expect(t["activa"] as? Bool == false && t["proxima"] is NSNull)
+        let es = lista(await f.get("/api/entregas").obj["entregas"]).filter { str($0["ref"]) == id }
+        #expect(es.count == 1 && str(es[0]["origen"]) == "tarea")
+        // el programador no la vuelve a correr
+        await f.b.programador.revisar()
+        #expect(await ejecuciones(f, id).count == 1)
+        // reactivarla sin cambiar la fecha: 409; cambiando la hora vuelve a estar pendiente
+        #expect((await f.patch("/api/tareas/\(id)", ["activa": true])).status == 409)
+        let mov = await f.patch("/api/tareas/\(id)", ["fecha": "2099-05-01", "hora": "10:00"])
+        #expect(mov.status == 200, "\(mov.obj)")
+        let m = dict(mov.obj["tarea"])
+        #expect(m["hecha"] is NSNull && m["activa"] as? Bool == true && Programacion.fecha(str(m["proxima"])) != nil)
+    }
+
+    @Test("una sola vez: el programador la corre al llegar su hora (o días después) una sola vez; si falla no se reintenta sola")
+    func unicaProgramador() async throws {
+        let f = try await fix()
+        let id = str(dict((await nuevaUnica(f)).obj["tarea"])["id"])
+        let i = Programacion.fecha("2099-03-10T09:00:00-03:00")!
+        let reloj = Reloj(i.addingTimeInterval(-60))
+        await f.b.programador.fijarReloj { reloj.ahora }
+        await f.b.programador.revisar()
+        #expect(await ejecuciones(f, id).isEmpty)
+        reloj.poner(i.addingTimeInterval(3 * 86400))
+        await f.b.programador.revisar()
+        let fin = await terminada(f, id)
+        #expect(str(fin["estado"]) == "ok" && Programacion.fecha(str(fin["programada"])) == i)
+        _ = await esperarAsync { dict(await f.get("/api/tareas/\(id)").obj["tarea"])["hecha"] is String }
+        await f.b.programador.revisar()
+        #expect(await ejecuciones(f, id).count == 1)
+
+        // una que falla: queda pendiente (no hecha) pero no se vuelve a lanzar sola
+        let mala = str(dict((await nuevaUnica(f, ["nombre": "Mala", "consigna": "ISERR"])).obj["tarea"])["id"])
+        await f.b.programador.revisar()
+        #expect(str((await terminada(f, mala))["estado"]) == "error")
+        await f.b.programador.revisar()
+        #expect(await ejecuciones(f, mala).count == 1)
+        let tm = dict(await f.get("/api/tareas/\(mala)").obj["tarea"])
+        #expect(tm["hecha"] is NSNull && tm["activa"] as? Bool == true)
+        // cambiarle la hora le da otra oportunidad («desde» va en segundos: que no caiga en el mismo segundo que la corrida)
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        _ = await f.patch("/api/tareas/\(mala)", ["hora": "09:05", "consigna": "ahora sí"])
+        reloj.poner(i.addingTimeInterval(3 * 86400 + 60))
+        await f.b.programador.revisar()
+        #expect(str((await terminada(f, mala, cuantas: 2))["estado"]) == "ok")
+    }
+
+    @Test("editar: pasar de repetida a una sola vez y al revés pide fecha o días")
+    func unicaCambiarTipo() async throws {
+        let f = try await fix()
+        _ = await nueva(f)
+        #expect((await f.patch("/api/tareas/informe-diario", ["tipo": "unica"])).status == 400)
+        #expect((await f.patch("/api/tareas/informe-diario", ["fecha": "2099-01-01", "dias": [1]])).status == 400)
+        let u = await f.patch("/api/tareas/informe-diario", ["tipo": "unica", "fecha": "2099-01-01"])
+        #expect(u.status == 200 && str(dict(u.obj["tarea"])["tipo"]) == "unica")
+        #expect(dict(u.obj["tarea"])["dias"] as? [Int] == [])
+        #expect((await f.patch("/api/tareas/informe-diario", ["dias": [1, 2]])).status == 200, "con días vuelve a repetirse")
+        let r = dict(await f.get("/api/tareas/informe-diario").obj["tarea"])
+        #expect(str(r["tipo"]) == "repetida" && r["fecha"] == nil && r["dias"] as? [Int] == [1, 2])
+        #expect((await f.patch("/api/tareas/informe-diario", ["tipo": "repetida"])).status == 200, "ya era repetida")
+        #expect((await f.patch("/api/tareas/informe-diario", ["tipo": "repetida", "fecha": "2099-01-01"])).status == 400)
     }
 
     // MARK: programador

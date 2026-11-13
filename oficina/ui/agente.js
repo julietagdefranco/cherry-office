@@ -242,16 +242,19 @@
     function listar(ts) {
       App.vaciar(cont);
       if (!ts.length) {
-        cont.appendChild(h('div.vacio', 'Todavía no hay tareas. Programá algo que ' + a.nombre + ' haga solo, por ejemplo un informe cada mañana.'));
+        cont.appendChild(h('div.vacio', 'Todavía no hay tareas. Programá algo que ' + a.nombre + ' haga solo: algo que se repite, como un informe cada mañana, o un encargo de una sola vez con una entrega.'));
       }
-      ts.forEach(function (t) { cont.appendChild(tarjeta(t)); });
-      cont.appendChild(h('div.ayuda', 'Las tareas corren mientras Oficina está abierta (aunque cierres la ventana). Si la app estuvo cerrada, una tarea de hoy se pone al día al abrirla, hasta 12 horas después de su hora.'));
+      // las de una sola vez ya hechas van al final
+      ts.slice().sort(function (x, y) { return (x.hecha ? 1 : 0) - (y.hecha ? 1 : 0); }).forEach(function (t) { cont.appendChild(tarjeta(t)); });
+      cont.appendChild(h('div.ayuda', 'Las tareas corren mientras Oficina está abierta (aunque cierres la ventana). Si la app estuvo cerrada, una tarea que se repite se pone al día al abrirla, hasta 12 horas después de su hora; una de una sola vez se hace igual, aunque sea tarde.'));
     }
     function recargarDespues() { cargar(); if (App.Actividad) setTimeout(App.Actividad.ya, 300); }
 
     function tarjeta(t) {
       var sis = zonaSistema();
       var activa = t.activa !== false;
+      var unica = t.tipo === 'unica', hecha = unica && !!t.hecha;
+      var zonaTxt = t.zona && t.zona !== sis ? ' (' + t.zona + ')' : '';
       var historial = h('div', { style: { display: 'none', marginTop: '8px' } });
       var btnHist = h('button.btn.chico.fantasma', { onclick: function () {
         var abierto = historial.style.display !== 'none';
@@ -265,11 +268,11 @@
           App.aviso('Probando «' + t.nombre + '»…');
           recargarDespues();
         }).catch(function (e) { App.fallo(e); probar.disabled = false; });
-      } }, 'Probar ahora');
+      } }, unica ? (hecha ? 'Hacer de nuevo' : 'Hacer ahora') : 'Probar ahora');
       var botones = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' } },
         probar,
         h('button.btn.chico', { onclick: function () { hojaTarea(a, t, cargar); } }, 'Editar'),
-        h('button.btn.chico', { onclick: function () {
+        hecha ? null : h('button.btn.chico', { onclick: function () {
           api.patch('/api/tareas/' + encodeURIComponent(t.id), { activa: !activa }).then(function () {
             App.aviso(activa ? 'Tarea en pausa.' : 'Tarea reanudada.');
             cargar();
@@ -285,13 +288,27 @@
       return h('div', { style: { border: '1px solid var(--linea)', borderRadius: 'var(--radio-chico)', padding: '10px 12px', marginBottom: '10px', background: 'var(--panel)', opacity: activa ? 1 : 0.8 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
           h('div', { style: { fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, t.nombre),
-          activa ? null : h('span.insignia', 'En pausa'),
-          estadoEjecucion(t.ultima)),
-        h('div.ayuda', textoDias(t.dias) + ' · ' + t.hora + (t.zona && t.zona !== sis ? ' (' + t.zona + ')' : '')),
-        h('div.ayuda', activa && t.proxima ? 'Próxima: ' + fechaCorta(t.proxima, t.zona, true)
-          : (activa ? 'Sin próxima corrida' : 'No corre mientras esté en pausa')),
-        t.ultima ? h('div.ayuda', 'Última: ' + fechaCorta(t.ultima.inicio, t.zona, false) + (t.ultima.manual ? ' (prueba)' : '')) : null,
+          activa || hecha ? null : h('span.insignia', 'En pausa'),
+          hecha && !t.corriendo ? h('span.insignia.ok', 'Hecha') : estadoEjecucion(t.ultima)),
+        unica ? lineasUnica(t, activa, hecha, zonaTxt) : [
+          h('div.ayuda', textoDias(t.dias) + ' · ' + t.hora + zonaTxt),
+          h('div.ayuda', activa && t.proxima ? 'Próxima: ' + fechaCorta(t.proxima, t.zona, true)
+            : (activa ? 'Sin próxima corrida' : 'No corre mientras esté en pausa'))],
+        t.ultima && !hecha ? h('div.ayuda', 'Última: ' + fechaCorta(t.ultima.inicio, t.zona, false) + (t.ultima.manual ? (unica ? ' (a mano)' : ' (prueba)') : '')) : null,
         botones, historial);
+    }
+
+    /* una sola vez: cuándo le toca y en qué quedó */
+    function lineasUnica(t, activa, hecha, zonaTxt) {
+      var cuando = t.cuando ? fechaCorta(t.cuando, t.zona, true) : (t.fecha + ' ' + t.hora);
+      var estado;
+      if (hecha) estado = 'Hecha el ' + fechaCorta(t.hecha, t.zona, false) + '. Su entrega está en Entregables.';
+      else if (t.corriendo) estado = 'Haciéndola ahora…';
+      else if (!activa) estado = 'No se hace mientras esté en pausa';
+      else if (t.proxima) estado = 'Pendiente: se hace ese día a esa hora';
+      else if (t.ultima && t.ultima.estado === 'error' && !t.ultima.manual) estado = 'Falló. Usá «Hacer ahora» para reintentar, o cambiale la fecha.';
+      else estado = 'Ya es la hora: se hace en cuanto se pueda';
+      return [h('div.ayuda', 'Una sola vez · ' + cuando + zonaTxt), h('div.ayuda', estado)];
     }
 
     function cargarHistorial(t, caja) {
@@ -300,11 +317,11 @@
         App.vaciar(caja);
         var es = r.ejecuciones || [];
         if (!es.length) { caja.appendChild(h('div.ayuda', 'Todavía no se ejecutó.')); return; }
-        es.forEach(function (e) { caja.appendChild(filaEjecucion(e)); });
+        es.forEach(function (e) { caja.appendChild(filaEjecucion(e, t)); });
       }).catch(function (e) { App.vaciar(caja).appendChild(h('div.ayuda', e.message)); });
     }
 
-    function filaEjecucion(e) {
+    function filaEjecucion(e, t) {
       var texto = h('div', { style: { display: 'none', marginTop: '6px' } });
       var detalle = e.estado === 'error' ? (e.error || 'Falló.') : (e.resultado || (e.estado === 'corriendo' ? 'Todavía está corriendo…' : '(sin respuesta)'));
       App.add(texto, e.estado === 'error' ? h('div.error-txt', detalle) : App.htmlSeguro(h('div.msg.a', { style: { maxWidth: 'none' } }), App.markdown(detalle)));
@@ -318,7 +335,7 @@
       return h('div', { style: { borderTop: '1px solid var(--linea)', padding: '7px 0' } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
           estadoEjecucion(e),
-          h('span.ayuda', { style: { margin: 0, flex: 1 } }, fechaCorta(e.inicio, null, false) + (e.manual ? ' · prueba' : '') + costo),
+          h('span.ayuda', { style: { margin: 0, flex: 1 } }, fechaCorta(e.inicio, null, false) + (e.manual ? (t && t.tipo === 'unica' ? ' · a mano' : ' · prueba') : '') + costo),
           ver, chatBtn),
         texto);
     }
@@ -339,13 +356,33 @@
   }
 
   /* hoja para crear (t = null) o editar una tarea */
-  /* `pre` (solo al crear): {nombre, consigna, origen} precargados, p. ej. desde un pendiente de reunión */
+  /* `pre` (solo al crear): {nombre, consigna, origen, unica} precargados, p. ej. desde un pendiente de reunión */
   function hojaTarea(a, t, alGuardar, pre) {
     pre = pre || {};
     var hj = App.hoja({ titulo: t ? 'Editar tarea' : 'Nueva tarea de ' + a.nombre, ancho: 540 });
     var nombre = h('input.campo', { value: t ? t.nombre : (pre.nombre || ''), maxlength: 80, placeholder: 'Por ejemplo: Informe de la mañana', autofocus: true });
-    var consigna = h('textarea.campo', { rows: 6, maxlength: 4000, placeholder: 'Lo que ' + a.nombre + ' tiene que hacer cada vez, como si se lo escribieras en el chat.' });
+    var consigna = h('textarea.campo', { rows: 6, maxlength: 4000 });
     consigna.value = t ? t.consigna : (pre.consigna || '');
+    var unica = t ? t.tipo === 'unica' : !!pre.unica;
+    var hecha = !!(t && t.hecha);
+    var ahora = !t;   // al crear una de una sola vez, por defecto «Ahora»
+
+    /* chips de una sola elección: [[valor, texto]], elegido, alCambiar */
+    function grupo(opciones, elegido, alCambiar) {
+      var bs = opciones.map(function (op) {
+        return h('button.chip', { type: 'button', onclick: function () { elegido = op[0]; pintarGrupo(); alCambiar(elegido); } }, op[1]);
+      });
+      function pintarGrupo() {
+        bs.forEach(function (b, i) {
+          var si = opciones[i][0] === elegido;
+          b.style.background = si ? 'var(--acento)' : ''; b.style.color = si ? 'var(--sobre-acento)' : '';
+          b.style.borderColor = si ? 'var(--acento)' : ''; b.setAttribute('aria-pressed', si ? 'true' : 'false');
+        });
+      }
+      pintarGrupo();
+      return h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } }, bs);
+    }
+    function hoyISO() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
     var dias = {};
     (t ? t.dias : [1, 2, 3, 4, 5]).forEach(function (n) { dias[n] = true; });
     var chips = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } }, DIAS.map(function (d) {
@@ -362,38 +399,75 @@
       return b;
     }));
     var hora = h('input.campo', { type: 'time', value: t ? t.hora : '08:00', step: 60, style: { width: '130px' } });
+    var fecha = h('input.campo', { type: 'date', value: t && t.fecha ? t.fecha : hoyISO(), style: { width: '170px' } });
     var zona = h('input.campo', { value: t ? t.zona : zonaSistema(), placeholder: 'America/Argentina/Buenos_Aires', list: 'hq-zonas', autocomplete: 'off', spellcheck: 'false' });
     var lista = h('datalist', { id: 'hq-zonas' });
     try { (Intl.supportedValuesOf('timeZone') || []).forEach(function (z) { lista.appendChild(h('option', { value: z })); }); } catch (e) { /* sin lista: se escribe a mano */ }
     var activa = h('input', { type: 'checkbox', checked: t ? t.activa !== false : true });
     var err = h('div.error-txt');
+    var ayudaConsigna = h('div.ayuda');
+
+    var filaDias = h('div.fila-campo', h('label.etiqueta-campo', 'Días'), chips);
+    var filaCuando = t ? null : h('div.fila-campo', h('label.etiqueta-campo', 'Cuándo'),
+      grupo([[true, 'Ahora'], [false, 'En una fecha']], ahora, function (v) { ahora = v; pintarTipo(); }));
+    var filaFecha = h('div.fila-campo', h('label.etiqueta-campo', 'Fecha'), fecha);
+    var filaHora = h('div.fila-campo', h('label.etiqueta-campo', 'Hora'), hora);
+    var filaZona = h('div.fila-campo', { style: { flex: 1 } }, h('label.etiqueta-campo', 'Zona horaria'), zona, lista);
+    var filaActiva = h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', cursor: 'pointer' } }, activa, 'Activa');
+    var notaHecha = h('div.ayuda', 'Esta tarea ya se hizo. Si le cambiás la fecha o la hora, se vuelve a hacer (y deja otra entrega).');
+    function ver(el, si) { if (el) el.style.display = si ? '' : 'none'; }
+    function pintarTipo() {
+      var unaYa = unica && !t && ahora;
+      ver(filaDias, !unica); ver(filaCuando, unica); ver(filaFecha, unica && !unaYa);
+      ver(filaHora, !unaYa); ver(filaZona, !unaYa); ver(filaActiva, !unaYa && !hecha); ver(notaHecha, unica && hecha);
+      consigna.placeholder = unica ? 'Lo que ' + a.nombre + ' tiene que hacer y entregar, como si se lo escribieras en el chat.'
+        : 'Lo que ' + a.nombre + ' tiene que hacer cada vez, como si se lo escribieras en el chat.';
+      ayudaConsigna.textContent = unica
+        ? 'Se hace una sola vez, en una conversación nueva y con sus permisos de siempre. Deja una entrega para revisar y la tarea queda hecha.'
+        : 'Se le pide al agente en una conversación nueva cada vez, con sus permisos de siempre. Cada vez deja una entrega.';
+      guardar.textContent = t ? 'Guardar cambios' : (unaYa ? 'Encargar ahora' : 'Crear tarea');
+    }
+
     App.add(hj.cuerpo,
       h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), nombre),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Consigna'), consigna,
-        h('div.ayuda', 'Se le pide al agente en una conversación nueva cada vez, con sus permisos de siempre.')),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Días'), chips),
-      h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start' } },
-        h('div.fila-campo', h('label.etiqueta-campo', 'Hora'), hora),
-        h('div.fila-campo', { style: { flex: 1 } }, h('label.etiqueta-campo', 'Zona horaria'), zona, lista)),
-      h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', cursor: 'pointer' } }, activa, 'Activa'),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Consigna'), consigna, ayudaConsigna),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Tipo'),
+        grupo([[false, 'Se repite'], [true, 'Una sola vez']], unica, function (v) { unica = v; pintarTipo(); })),
+      filaDias, filaCuando,
+      h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' } }, filaFecha, filaHora, filaZona),
+      filaActiva, notaHecha,
       err);
     var guardar = h('button.btn.primario', { onclick: function () {
       var d = Object.keys(dias).filter(function (k) { return dias[k]; }).map(Number).sort();
-      var cuerpo = { nombre: nombre.value.trim(), consigna: consigna.value.trim(), dias: d, hora: hora.value, zona: zona.value.trim() || zonaSistema(), activa: activa.checked };
+      var cuerpo = { nombre: nombre.value.trim(), consigna: consigna.value.trim(), zona: zona.value.trim() || zonaSistema() };
       if (!cuerpo.nombre) { err.textContent = 'Poné un nombre.'; return; }
       if (!cuerpo.consigna) { err.textContent = 'Escribí la consigna.'; return; }
-      if (!d.length) { err.textContent = 'Elegí al menos un día.'; return; }
-      if (!/^\d\d:\d\d$/.test(cuerpo.hora)) { err.textContent = 'Elegí la hora.'; return; }
+      if (unica && !t && ahora) {
+        cuerpo.tipo = 'unica'; cuerpo.ahora = true;
+      } else {
+        cuerpo.hora = hora.value;
+        if (!/^\d\d:\d\d$/.test(cuerpo.hora)) { err.textContent = 'Elegí la hora.'; return; }
+        if (!hecha) cuerpo.activa = activa.checked;
+        if (unica) {
+          cuerpo.tipo = 'unica'; cuerpo.fecha = fecha.value;
+          if (!/^\d{4}-\d\d-\d\d$/.test(cuerpo.fecha)) { err.textContent = 'Elegí la fecha.'; return; }
+        } else {
+          cuerpo.tipo = 'repetida'; cuerpo.dias = d;
+          if (!d.length) { err.textContent = 'Elegí al menos un día.'; return; }
+        }
+      }
       guardar.disabled = true; err.textContent = '';
       var p = t ? api.patch('/api/tareas/' + encodeURIComponent(t.id), cuerpo)
         : api.post('/api/tareas', Object.assign({ agente: a.id }, pre.origen ? { origen: pre.origen } : {}, cuerpo));
       p.then(function () {
         hj.cerrar();
-        App.aviso(t ? 'Cambios guardados.' : 'Tarea creada.');
+        App.aviso(t ? 'Cambios guardados.' : (cuerpo.ahora ? a.nombre + ' se puso a trabajar en eso.' : 'Tarea creada.'));
+        if (cuerpo.ahora && App.Actividad) setTimeout(App.Actividad.ya, 300);
         if (alGuardar) alGuardar();
       }).catch(function (e) { err.textContent = e.message; guardar.disabled = false; });
     } }, t ? 'Guardar cambios' : 'Crear tarea');
     App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), guardar);
+    pintarTipo();
   }
 
   function cerrar() { if (App.modoDerecho() === 'agente') App.cerrarDerecho(); else alCerrar(); }
