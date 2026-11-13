@@ -37,6 +37,7 @@ import hq_core  # noqa: E402  (lógica de oficinas compartida con tools/importar
 import hq_reuniones  # noqa: E402  (/api/reuniones*, misma lógica que app/Sources/Backend/Reuniones.swift)
 import hq_explorador  # noqa: E402  (/api/fs/carpetas, /api/oficina/archivo*; app/Sources/Backend/Explorador.swift)
 import hq_biblioteca  # noqa: E402  (/api/archivos*, /api/vinculos*, /api/biblioteca*; app/Sources/Backend/Biblioteca.swift)
+import hq_tareas  # noqa: E402  (/api/tareas* y el programador; app/Sources/Backend/{Tareas,Programador,TareasRouter}.swift)
 import hq_vivo  # noqa: E402  (stream-json, /api/actividad, /api/costos; app/Sources/Backend/{Stream,Actividad}.swift)
 from hq_core import ErrorAPI  # noqa: E402
 
@@ -547,6 +548,7 @@ class App:
         self.reuniones = None  # hook para /api/reuniones*: callable(metodo, path, query, body) -> (code, obj) | None
         self.biblioteca = None  # hook para /api/archivos*, /api/vinculos*, /api/biblioteca*: igual que reuniones
         self.explorador = None  # hook para /api/fs/carpetas y /api/oficina/archivo*: igual que reuniones
+        self.tareas = None  # hook para /api/tareas* (tareas programadas): igual que reuniones
         self._cargar_estado()
 
     # ---- estado de la app: oficina activa y recientes (<datos_dir>/config.json)
@@ -1092,6 +1094,9 @@ def crear_handler(app):
             if u.path == "/api/reuniones" or u.path.startswith("/api/reuniones/"):
                 r = app.reuniones(metodo, u.path, q, body) if app.reuniones else None
                 return self._json(*(r or (404, {"error": "no"})))
+            if hq_tareas.es_ruta(u.path):
+                r = app.tareas(metodo, u.path, q, body) if app.tareas else None
+                return self._json(*(r or (404, {"error": "no"})))
             if hq_explorador.es_ruta(u.path):
                 r = app.explorador(metodo, u.path, q, body) if app.explorador else None
                 return self._json(*(r or (404, {"error": "no"})))
@@ -1119,6 +1124,7 @@ def crear_servidor(cfg, sesiones_json=None):
     hq_reuniones.instalar(app, sys.modules[__name__])
     hq_biblioteca.instalar(app, sys.modules[__name__])
     hq_explorador.instalar(app, sys.modules[__name__])
+    hq_tareas.instalar(app, sys.modules[__name__])
     srv = ThreadingHTTPServer(("127.0.0.1", cfg["puerto"]), crear_handler(app))
     srv.daemon_threads = True
     srv.app = app
@@ -1131,6 +1137,7 @@ def main():
     srv = crear_servidor(cfg)
     log.info("arranque puerto=%d oficinas_dir=%s migradas=%d", cfg["puerto"], cfg["oficinas_dir"], srv.app.migrados)
     threading.Thread(target=srv.app.verificar_claude, daemon=True).start()
+    srv.app.tareas.iniciar()  # hilo programador: revisa las tareas cada 30 s
     print("Próspera HQ en http://localhost:%d  (claude: %s)" % (cfg["puerto"], cfg["claude_bin"]), flush=True)
     try:
         srv.serve_forever()

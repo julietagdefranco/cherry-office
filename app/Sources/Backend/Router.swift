@@ -16,6 +16,7 @@ final class SubRouterBox: @unchecked Sendable {
     private var valor: SubRouter?
     private var valorBiblioteca: SubRouter?
     private var valorExplorador: SubRouter?
+    private var valorTareas: SubRouter?
     var reuniones: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valor }
         set { lock.lock(); valor = newValue; lock.unlock() }
@@ -27,6 +28,10 @@ final class SubRouterBox: @unchecked Sendable {
     var biblioteca: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valorBiblioteca }
         set { lock.lock(); valorBiblioteca = newValue; lock.unlock() }
+    }
+    var tareas: SubRouter? {
+        get { lock.lock(); defer { lock.unlock() }; return valorTareas }
+        set { lock.lock(); valorTareas = newValue; lock.unlock() }
     }
 }
 
@@ -77,6 +82,10 @@ public final class Router: APIHandler {
             if let r = subrouters.biblioteca, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) {
                 return res
             }
+            return (404, Router.codificar(["error": "no"]))
+        }
+        if TareasRouter.esRuta(p) { // /api/tareas*
+            if let r = subrouters.tareas, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
             return (404, Router.codificar(["error": "no"]))
         }
         if ExploradorRouter.esRuta(p) { // /api/fs/carpetas, /api/oficina/archivos, /api/oficina/archivo
