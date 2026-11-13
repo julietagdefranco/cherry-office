@@ -203,6 +203,7 @@
 
   function pintarPanel(r) {
     if (visto !== r.id || App.modoDerecho() !== 'reunion') return;
+    if (r.estado === 'esperando' && App.Avisos) App.Avisos.vistoReunion(r.id);   // abierta = vista: se apaga «Reunión esperándote»
     var der = App.dom.derecho;
     var scrollAbajo = true;
     var viejo = der.querySelector('.der-cuerpo');
@@ -335,6 +336,7 @@
 
   App.Reunion = {
     abrir: abrir, nueva: nueva, retomar: retomar, ver: panel,
+    abierta: function () { return App.modoDerecho && App.modoDerecho() === 'reunion' ? visto : null; },
     alCerrarPanel: function () { visto = null; sincronizar(); }
   };
 })();

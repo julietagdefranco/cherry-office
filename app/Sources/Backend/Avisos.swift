@@ -47,10 +47,16 @@ extension Store {
         return Aviso(id: "a\(id)", tipo: tipo, agente: agente, texto: texto, ref: ref, creado: ahora)
     }
 
-    /// Marca como vistos: un aviso guardado (`id` "a<n>"), todos los de un agente, o todos los de la oficina.
+    /// Marca como vistos: un aviso guardado (`id` "a<n>"), una reunión que espera (`id` "reunion:<id>"),
+    /// todos los de un agente, o todos los de la oficina.
     @discardableResult
     public func avisosVistos(oficina: String, id: String? = nil, agente: String? = nil) -> Int {
         try? prepararAvisos()
+        if let id, id.hasPrefix("reunion:") {
+            try? prepararVistaReuniones()
+            return (try? db.run("UPDATE reuniones SET vista=1 WHERE oficina=? AND id=? AND estado='esperando'",
+                                [.text(oficina), .text(String(id.dropFirst("reunion:".count)))])) ?? 0
+        }
         if let id {
             guard id.hasPrefix("a"), let n = Int64(id.dropFirst()) else { return 0 }
             return (try? db.run("UPDATE avisos SET visto=1 WHERE oficina=? AND id=?", [.text(oficina), .int(n)])) ?? 0
@@ -68,8 +74,9 @@ extension Store {
                                  [.text(oficina)]) {
             Aviso(id: "a\($0.int(0))", tipo: $0.text(1), agente: $0.text(2), texto: $0.text(3), ref: $0.text(4), creado: $0.double(5))
         }) ?? []
-        // reuniones que esperan al usuario (la tabla existe si las reuniones están instaladas)
-        let reus = (try? db.query("SELECT id,tema,creada FROM reuniones WHERE oficina=? AND estado='esperando' ORDER BY creada",
+        // reuniones que esperan al usuario y que todavía no abrió (la tabla existe si las reuniones están instaladas)
+        try? prepararVistaReuniones()
+        let reus = (try? db.query("SELECT id,tema,creada FROM reuniones WHERE oficina=? AND estado='esperando' AND vista IS NULL ORDER BY creada",
                                   [.text(oficina)]) { ($0.text(0), $0.text(1), $0.double(2)) }) ?? []
         for (id, tema, creada) in reus {
             out.append(Aviso(id: "reunion:\(id)", tipo: "reunion", agente: "", texto: "La reunión «\(tema)» te espera",

@@ -97,7 +97,15 @@ extension Store {
         for (c, tipo) in [("patron", "TEXT"), ("lider", "TEXT"), ("bandos", "TEXT"), ("salida", "TEXT")] where !cols.contains(c) {
             try db.exec("ALTER TABLE reuniones ADD COLUMN \(c) \(tipo)")
         }
-        try db.run("UPDATE reuniones SET estado='esperando' WHERE estado='en_curso'")
+        try prepararVistaReuniones()
+        try db.run("UPDATE reuniones SET estado='esperando', vista=NULL WHERE estado='en_curso'")
+    }
+
+    /// Columna `vista`: 1 cuando el usuario abrió la reunión mientras esperaba (el aviso «te espera» se apaga).
+    /// Se vuelve a NULL cada vez que la reunión pasa a `esperando`. Sin tabla no hace nada (los avisos la consultan igual).
+    func prepararVistaReuniones() throws {
+        let cols = try db.query("PRAGMA table_info(reuniones)") { $0.text(1) }
+        if !cols.isEmpty, !cols.contains("vista") { try db.exec("ALTER TABLE reuniones ADD COLUMN vista INTEGER") }
     }
 
     private static func fila(_ r: SQLRow) -> ReunionFila {
@@ -139,7 +147,9 @@ extension Store {
     }
 
     func reunionEstado(_ id: String, _ estado: String, error: String? = nil) throws {
-        try db.run("UPDATE reuniones SET estado=?, error=? WHERE id=?", [.text(estado), error.map { .text($0) } ?? .null, .text(id)])
+        // volver a «esperando» (terminó una ronda, se reinició la app) vuelve a avisar aunque ya la hubieras visto
+        let vista = estado == "esperando" ? ", vista=NULL" : ""
+        try db.run("UPDATE reuniones SET estado=?, error=?\(vista) WHERE id=?", [.text(estado), error.map { .text($0) } ?? .null, .text(id)])
     }
 
     func reunionCerrar(_ id: String, sintesis: String?, errorSintesis: String?, acta: String?, error: String?) throws {
