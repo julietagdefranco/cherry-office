@@ -121,6 +121,7 @@
       dom.marca = h('div.marca', { onclick: function () { menuOficina(dom.marca); }, title: 'Oficina' }, App.logo(), h('div.marca-txt', dom.nombre, dom.sub));
       dom.navReu = h('span.insignia.ok.oculto', 'En curso');
       dom.navBib = h('span.insignia.oculto');
+      dom.navEnt = h('span.insignia.aviso.oculto');
       dom.lienzo = h('div.lienzo');
       dom.carga = h('div.carga3d', h('span.giro'), 'Armando la oficina…');
       dom.avisoReu = h('div.aviso-reunion.oculto');
@@ -129,6 +130,7 @@
         h('aside.lateral', dom.marca, dom.equipo, h('nav.nav',
           h('button.nav-item', { onclick: function () { App.Reunion.abrir(); } }, App.icono('reunion'), 'Reuniones', dom.navReu),
           h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib),
+          h('button.nav-item', { onclick: function () { App.Entregables.abrir(); } }, App.icono('chispa'), 'Entregables', dom.navEnt),
           h('button.nav-item', { onclick: function () { App.Deptos.abrir(); } }, App.icono('capas'), 'Departamentos'))),
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu,
           h('div.herramientas',
@@ -140,10 +142,16 @@
       App.dom = dom;
       if (!App.Oficina3D.iniciar(dom.lienzo)) dom.carga.textContent = 'Esta compu no puede mostrar la oficina en 3D. El resto funciona igual.';
       App.Oficina3D.alElegirAgente(function (id) { App.Agente.abrir(id); });
-      App.Oficina3D.alElegirLugar(function (t) { if (t === 'reunion') App.Reunion.abrir(); else if (t === 'biblioteca') App.Biblioteca.abrir(); });
+      App.Oficina3D.alElegirLugar(function (t, id) {
+        if (t === 'reunion') App.Reunion.abrir();
+        else if (t === 'biblioteca') App.Biblioteca.abrir();
+        else if (t === 'entregables') App.Entregables.abrir();
+        else if (t === 'entrega') App.Entregables.abrir(id);
+      });
       if (App.Oficina3D.alPasar && App.Paleta) App.Oficina3D.alPasar(App.Paleta.pista);
     }
     pintarTodo();
+    if (App.Entregables) App.Entregables.refrescar();
     App.Reunion.retomar();
     App.Biblioteca.vigilarEstado();
   }
@@ -242,6 +250,7 @@
     var m = dom.derecho.getAttribute('data-modo');
     dom.derecho.removeAttribute('data-modo');
     if (m === 'agente') App.Agente.alCerrar(); else if (m === 'reunion') App.Reunion.alCerrarPanel();
+    else if (m === 'entregables' && App.Entregables) App.Entregables.alCerrarPanel();
   };
   App.modoDerecho = function () { return dom.derecho && dom.derecho.classList.contains('abierto') ? dom.derecho.getAttribute('data-modo') : null; };
   App.volverAlInicio = inicio;

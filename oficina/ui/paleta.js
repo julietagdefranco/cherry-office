@@ -33,6 +33,9 @@ App.Paleta = (function () {
       hacer: function () { App.Oficina3D.enfocarLugar('reunion'); App.Reunion.abrir(); } });
     out.push({ tipo: 'Sala', icono: 'libro', txt: 'Biblioteca', buscar: 'biblioteca archivos documentos',
       hacer: function () { App.Oficina3D.enfocarLugar('biblioteca'); App.Biblioteca.abrir(); } });
+    out.push({ tipo: 'Sala', icono: 'chispa', txt: 'Entregables', sub: App.Entregables && App.Entregables.sinRevisar() ? App.Entregables.sinRevisar() + ' sin revisar' : '',
+      buscar: 'entregables entregas muro revisar',
+      hacer: function () { App.Oficina3D.enfocarLugar('entregables'); App.Entregables.abrir(); } });
     o.departamentos.forEach(function (d) {
       out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Deptos.abrir(); } });
     });
@@ -40,6 +43,7 @@ App.Paleta = (function () {
      ['Llamar a reunión', 'reunion', function () { App.Reunion.nueva(); }],
      ['Departamentos', 'capas', function () { App.Deptos.abrir(); }],
      ['Siguiente aviso pendiente', 'chispa', function () { if (App.Avisos) App.Avisos.siguiente(); }],
+     ['Revisar la próxima entrega', 'chispa', function () { if (!App.Entregables.siguiente()) App.aviso('No tenés entregas sin revisar.'); }],
      ['Ver toda la oficina', 'edificio', function () { App.Oficina3D.encuadrar(); }]].forEach(function (x) {
       out.push({ tipo: 'Acción', icono: x[1], txt: x[0], buscar: x[0], hacer: x[2] });
     });
@@ -114,6 +118,7 @@ App.Paleta = (function () {
       if (act) t += ' · ' + (VERBO[act.estado] || act.estado) + (act.objetivo ? ' ' + act.objetivo : '');
     } else if (hov.tipo === 'reunion') t = 'Clic: abrir la sala de reuniones';
     else if (hov.tipo === 'biblioteca') t = 'Clic: abrir la biblioteca';
+    else if (hov.texto) t = hov.texto;   // muro de entregables: el 3D ya arma el texto
     el.textContent = t || BASE;
     el.classList.toggle('viva', !!t);
   }

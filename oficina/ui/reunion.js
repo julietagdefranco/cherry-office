@@ -262,9 +262,66 @@
     return h('div.sintesis',
       h('h4', 'Resumen'), h('p', s.resumen || '—'),
       s.decisiones && s.decisiones.length ? [h('h4', 'Decisiones'), h('ul', s.decisiones.map(function (d) { return h('li', d); }))] : null,
-      s.pendientes && s.pendientes.length ? [h('h4', 'Pendientes'), h('ul', s.pendientes.map(function (p) { return h('li', h('b', p.quien + ': '), p.que); }))] : null,
+      s.pendientes && s.pendientes.length ? [h('h4', 'Pendientes'), h('ul.pendientes', s.pendientes.map(function (p, i) {
+        return h('li', h('div', h('b', p.quien + ': '), p.que), accionesPendiente(r, p, i, (r.pendientesEstado || [])[i]));
+      }))] : null,
       r.acta ? h('div.ayuda', { style: { marginTop: '10px' } }, 'Acta guardada en ' + r.acta + '. Las decisiones se sumaron a la memoria de la oficina.') : null,
       r.salidaRuta ? h('div.ayuda', 'Archivo de salida: ' + r.salida) : null);
+  }
+
+  /* ---------------- pendientes que se ejecutan ---------------- */
+  /* debajo de cada pendiente del acta: «Hacelo ahora» / «Convertir en tarea», o en qué quedó (trabajando, entregado, revisado) */
+  function accionesPendiente(r, p, i, est) {
+    if (!est) return null;
+    var fila = h('div.acciones-pendiente');
+    var enc = est.encargo;
+    if (enc && enc.estado === 'corriendo') {
+      fila.appendChild(h('span.insignia.aviso', h('span.giro'), ' Trabajando en esto…'));
+      vigilarPendientes(r.id);
+    } else if (enc && enc.entrega) {
+      var revisada = enc.entregaEstado === 'revisada';
+      fila.appendChild(h('span.insignia' + (revisada ? '.ok' : '.aviso'), revisada ? 'Entregado y revisado' : 'Entregado · sin revisar'));
+      fila.appendChild(h('button.btn.chico', { onclick: function () { if (App.Entregables) App.Entregables.abrir(enc.entrega); } }, 'Ver entrega'));
+    } else if (enc && enc.estado === 'error') {
+      fila.appendChild(h('span.insignia.error', { title: enc.error || '' }, 'Falló'));
+    }
+    if (est.encargable && !(enc && enc.estado === 'corriendo')) {
+      fila.appendChild(h('button.btn.chico' + (enc ? '.fantasma' : ''), { onclick: function (ev) {
+        ev.currentTarget.disabled = true;
+        api.post('/api/reuniones/' + r.id + '/pendientes/' + i + '/encargar').then(function (d) {
+          r.pendientesEstado = d.pendientesEstado; pintarPanel(r); vigilarPendientes(r.id);
+          App.aviso((App.agente(est.agente) || {}).nombre ? App.agente(est.agente).nombre + ' se puso a trabajar en eso.' : 'Encargado.');
+        }).catch(function (e) { App.fallo(e); pintarPanel(r); });
+      } }, enc ? 'Hacerlo de nuevo' : 'Hacelo ahora'));
+      fila.appendChild(h('button.btn.chico.fantasma', { onclick: function () {
+        if (!App.Agente || !App.Agente.nuevaTarea) return;
+        App.Agente.nuevaTarea(est.agente, { nombre: p.que.length > 80 ? p.que.slice(0, 79) + '…' : p.que,
+          consigna: 'Pendiente de la reunión «' + r.tema + '»' + (r.acta ? ' (acta: ' + r.acta + ')' : '') + ': ' + p.que,
+          origen: { reunion: r.id, pendiente: i } }, function () { refrescar(r.id); });
+      } }, 'Convertir en tarea'));
+    } else if (!est.agente) {
+      fila.appendChild(h('span.ayuda', { style: { margin: 0 } }, 'Te toca a vos.'));
+    } else if (!est.encargable && !enc) {
+      fila.appendChild(h('span.ayuda', { style: { margin: 0 } }, 'Necesita tu parte: ' + ((App.agente(est.agente) || {}).nombre || 'el agente') + ' no lo puede hacer solo.'));
+    }
+    (est.tareas || []).forEach(function (t) { fila.appendChild(h('span.insignia', { title: 'Tarea programada que salió de este pendiente' }, 'Tarea: ' + t.nombre)); });
+    return fila.childNodes.length ? fila : null;
+  }
+
+  function refrescar(id) {
+    return api.get('/api/reuniones/' + id).then(function (d) { if (visto === id) pintarPanel(d); return d; });
+  }
+
+  /* mientras haya un encargo corriendo y el panel muestre esta reunión, se vuelve a leer cada 3 s */
+  var relojPend = null;
+  function vigilarPendientes(id) {
+    clearTimeout(relojPend);
+    relojPend = setTimeout(function () {
+      if (visto !== id) return;
+      refrescar(id).then(function (d) {
+        if ((d.pendientesEstado || []).some(function (e) { return e.encargo && e.encargo.estado === 'corriendo'; })) vigilarPendientes(id);
+      }).catch(function () { /* se reintenta al volver a abrir */ });
+    }, 3000);
   }
 
   function cerrar(r) {

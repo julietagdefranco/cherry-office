@@ -40,6 +40,7 @@ if [[ "$msg" == *"en 3 a 6 palabras"* ]]; then
 fi
 
 
+if [[ "$msg" == *"secretario de actas"* && -f "$D/resp.acta.json" ]]; then cat "$D/resp.acta.json"; exit 0; fi
 if [[ "$msg" == *ISERR* ]]; then echo '{"type":"result","result":"fallo raro","is_error":true}'; exit 0; fi
 
 
@@ -393,6 +394,97 @@ class ReunionesPatrones(unittest.TestCase):
         self.assertEqual(len(es), 1)
         self.assertEqual((es[0]["agente"], es[0]["ref"], es[0]["titulo"]), ("", r["id"], "Acta: plan de lanzamiento"))
         self.assertEqual(es[0]["archivos"][0], c["acta"])
+
+class PendientesAcciones(unittest.TestCase):
+    """E1: «Hacelo ahora» y «Convertir en tarea» desde los pendientes del acta (paridad con PendientesAccionesTests.swift).
+    Usa la armazón de ReunionesPatrones sin heredar sus tests."""
+    tearDown, reu, esperar, prompts, crear = (ReunionesPatrones.tearDown, ReunionesPatrones.reu, ReunionesPatrones.esperar,
+                                              ReunionesPatrones.prompts, ReunionesPatrones.crear)
+    ACTA = {"resumen": "r", "decisiones": [], "pendientes": [{"quien": "Marce", "que": "Armar el calendario"},
+                                                            {"quien": "Marce", "que": "Mandar el mail", "necesita_usuario": True},
+                                                            {"quien": "Ana", "que": "Firmar"}]}
+
+    def setUp(self):
+        ReunionesPatrones.setUp(self)
+        with open(os.path.join(self.bin, "resp.acta.json"), "w") as fh:
+            fh.write(json.dumps({"type": "result", "result": json.dumps(self.ACTA), "is_error": False}))
+        self.app.tareas = hq_tareas.Tareas(self.app, self.server, env={"HQ_PROGRAMADOR": "0"}, sistema="UTC")
+
+    def cerrada(self):
+        st, r = self.crear(agentes=["marce", "nico"])
+        self.esperar(r["id"])
+        st, c = self.reu("POST", "/api/reuniones/%s/cerrar" % r["id"])
+        self.assertEqual(st, 200, c)
+        return r["id"]
+
+    def estado(self, id_):
+        return self.reu("GET", "/api/reuniones/" + id_)[1].get("pendientesEstado")
+
+    def test_encargar_entrega_y_tilde(self):
+        id_ = self.cerrada()
+        est = self.estado(id_)
+        self.assertEqual([(e["agente"], e["encargable"]) for e in est], [("marce", True), ("marce", False), (None, False)])
+        carpeta = self.app.requerir_activa()[0]
+        nota = os.path.join(carpeta, "conocimiento", "agentes", "marce.md")
+        st, r = self.reu("POST", "/api/reuniones/%s/pendientes/0/encargar" % id_)
+        self.assertEqual(st, 202, r)
+        fin = time.time() + 15
+        while time.time() < fin and not (self.estado(id_)[0].get("encargo") or {}).get("entrega"):
+            time.sleep(0.05)
+        enc = self.estado(id_)[0]["encargo"]
+        self.assertEqual((enc["estado"], enc["entregaEstado"]), ("ok", "sin_revisar"))
+        consigna = self.prompts("Pendiente de la reunión")[-1]
+        self.assertIn("«plan de lanzamiento»", consigna)
+        self.assertIn("Armar el calendario", consigna)
+        es = self.app.entregas("GET", "/api/entregas", {"origen": ["encargo"]}, carpeta)[1]["entregas"]
+        self.assertEqual((len(es), es[0]["ref"], es[0]["titulo"]), (1, hq_tareas.id_encargo(id_, 0), "Armar el calendario"))
+        self.app.entregas("POST", "/api/entregas/%d/revisada" % es[0]["id"], {}, carpeta)
+        with open(nota, encoding="utf-8") as fh:
+            t = fh.read()
+        self.assertIn("- [x] ", t)
+        self.assertIn("Armar el calendario", t.split("- [x] ")[1].split("\n")[0])
+        self.assertIn("- [ ] ", t)   # el que necesita a la persona sigue abierto
+        self.assertEqual(self.estado(id_)[0]["encargo"]["entregaEstado"], "revisada")
+
+    def test_errores(self):
+        id_ = self.cerrada()
+        self.assertEqual(self.reu("POST", "/api/reuniones/%s/pendientes/1/encargar" % id_)[0], 409)
+        self.assertEqual(self.reu("POST", "/api/reuniones/%s/pendientes/2/encargar" % id_)[0], 409)
+        self.assertEqual(self.reu("POST", "/api/reuniones/%s/pendientes/9/encargar" % id_)[0], 404)
+        self.assertEqual(self.reu("POST", "/api/reuniones/%s/pendientes/x/encargar" % id_)[0], 404)
+        self.assertEqual(self.reu("GET", "/api/reuniones/%s/pendientes/0/encargar" % id_)[0], 405)
+        st, r = self.crear(agentes=["marce"])
+        self.esperar(r["id"])
+        self.assertEqual(self.reu("POST", "/api/reuniones/%s/pendientes/0/encargar" % r["id"])[0], 409)
+
+    def test_convertir_en_tarea(self):
+        id_ = self.cerrada()
+        t = lambda b: self.app.tareas("POST", "/api/tareas", {}, json.dumps(b).encode())
+        base = {"agente": "marce", "nombre": "Calendario semanal", "consigna": "Armar el calendario", "dias": [1], "hora": "09:00",
+                "zona": BA}
+        st, r = t(dict(base, origen={"reunion": id_, "pendiente": 0}))
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["tarea"]["origen"], {"reunion": id_, "pendiente": 0})
+        self.assertEqual(self.estado(id_)[0]["tareas"], [{"id": "calendario-semanal", "nombre": "Calendario semanal"}])
+        for malo in ({"reunion": "x", "pendiente": 0}, {"reunion": id_, "pendiente": -1}, {"reunion": id_}, "texto",
+                     {"reunion": id_, "pendiente": True}):
+            self.assertEqual(t(dict(base, nombre="Otra", origen=malo))[0], 400, malo)
+
+    def test_tildar_y_encargo_ids(self):
+        import hq_reuniones
+        self.assertEqual(hq_tareas.de_encargo(hq_tareas.id_encargo("abc", 3)), ("abc", 3))
+        self.assertIsNone(hq_tareas.de_encargo("informe-diario"))
+        d = os.path.join(self.d, "t")
+        os.makedirs(os.path.join(d, "conocimiento", "agentes"))
+        l = "- [ ] 2026-11-13 · reunión «plan»: Armar el calendario"
+        with open(os.path.join(d, "conocimiento", "agentes", "marce.md"), "w") as fh:
+            fh.write("# Marce\n\n%s\n- [ ] otra cosa\n" % l)
+        self.assertTrue(hq_reuniones.tildar(d, "marce", l))
+        with open(os.path.join(d, "conocimiento", "agentes", "marce.md")) as fh:
+            self.assertEqual(fh.read(), "# Marce\n\n- [x] 2026-11-13 · reunión «plan»: Armar el calendario\n- [ ] otra cosa\n")
+        self.assertFalse(hq_reuniones.tildar(d, "marce", l))
+        self.assertFalse(hq_reuniones.tildar(d, "nadie", l))
+
 
 BA = "America/Argentina/Buenos_Aires"
 NY = "America/New_York"
@@ -1156,6 +1248,29 @@ class EntregasAPI(BaseAPI):
         self.assertEqual(self.ent("GET", "/api/entregas", agente="otro")[1]["entregas"], [])
         self.assertEqual(len(self.ent("GET", "/api/entregas", origen="chat")[1]["entregas"]), 2)
         self.assertEqual(self.app.entregas("GET", "/api/entregas", {}, None)[0], 409)
+
+    def test_pedir_cambios(self):
+        self.llamar("POST", "/api/chat", {"agent": "marce", "message": "Informe ENTREGA:archivos/entregables/informe.md", "session": self.SIDS[0]})
+        vieja = self.ent("GET", "/api/entregas")[1]["entregas"][0]["id"]
+        c = lambda id_, b: self.app.entregas("POST", "/api/entregas/%d/cambios" % id_, {}, self.app.activa_carpeta,
+                                             json.dumps(b).encode() if b is not None else None)
+        self.assertEqual(c(vieja, {"texto": " "})[0], 400)
+        self.assertEqual(c(vieja, None)[0], 400)
+        st, r = c(vieja, {"texto": "Hacelo más corto"})
+        self.assertEqual(st, 202, r)
+        fin = time.time() + 15
+        while time.time() < fin and len(self.ent("GET", "/api/entregas")[1]["entregas"]) < 2:
+            time.sleep(0.05)
+        es = self.ent("GET", "/api/entregas")[1]["entregas"]
+        self.assertEqual((es[0]["origen"], es[0]["padre"], es[0]["sid"], es[0]["estado"]), ("cambios", vieja, self.SIDS[0], "sin_revisar"))
+        self.assertEqual(es[0]["archivos"], ["archivos/entregables/informe.md"])
+        self.assertEqual(es[1]["estado"], "cambios")
+        args = [x for x in self.args_de_llamadas() if "--agent" in x][-1]
+        self.assertIn("--resume", args)
+        self.assertIn("Hacelo más corto", args[-1])
+        self.assertEqual(c(vieja, {"texto": "otra"})[0], 409)
+        self.assertEqual(self.ent("POST", "/api/entregas/%d/sin-revisar" % vieja)[0], 409)
+        self.assertFalse(self.ent("GET", "/api/entregas/%d" % vieja)[1]["entrega"]["enCambios"])
 
     def test_tarea_deja_entrega_y_no_aviso(self):
         self.app.tareas = hq_tareas.Tareas(self.app, self.server, env={"HQ_PROGRAMADOR": "0"}, sistema="UTC")

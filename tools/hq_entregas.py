@@ -5,15 +5,18 @@ cuando la persona toca «Listo». La generan: una ejecución de tarea que termin
 el acta de una reunión y un chat que escribió archivos en `archivos/entregables/`.
 
 Rutas: GET /api/entregas?estado=&agente=&origen=&limite= · GET /api/entregas/:id · POST /api/entregas/:id/revisada |
-/sin-revisar
+/sin-revisar | /cambios {texto} (retoma la conversación con el pedido; la versión nueva queda con `padre`)
 """
 import json
+import logging
 import os
 import sqlite3
 import threading
 import time
 
 ESTADOS = ("sin_revisar", "revisada", "cambios")
+MAX_CAMBIOS = 4000
+log = logging.getLogger("hq")
 MAX_TEXTO = 100_000
 CARPETA_ENTREGABLES = "archivos/entregables/"
 IGNORADOS = (".claude/", "conocimiento/agentes/")
@@ -123,6 +126,9 @@ class Entregas:
         self.path = path
         self._tx(lambda c: c.executescript(SCHEMA))
         self.al_revisar = lambda entrega, carpeta: None  # E1: tilda el pendiente de reunión que la originó
+        self.app = None          # el App del servidor (lo setea App al crearse): «pedir cambios» corre un chat
+        self._lock = threading.Lock()
+        self.cambiando = set()   # (carpeta, id) de las entregas con cambios en curso
 
     def _tx(self, fn):
         c = sqlite3.connect(self.path, timeout=30)
@@ -171,7 +177,53 @@ class Entregas:
 
     # ---- rutas
 
-    def __call__(self, metodo, path, query, carpeta):
+    # ---- pedir cambios (E4; paridad con Programador.pedirCambios)
+
+    def pedir_cambios(self, carpeta, definicion, f, texto):
+        app = self.app
+        clave = (carpeta, f[0])
+        with self._lock:
+            if clave in self.cambiando:
+                raise _Error(409, "Ya le estás pidiendo cambios a esta entrega.")
+            self.cambiando.add(clave)
+        threading.Thread(target=self._correr_cambios, args=(app, carpeta, definicion, f, texto), daemon=True).start()
+
+    def _correr_cambios(self, app, carpeta, definicion, f, texto):
+        import hq_vivo
+        agente, sid, titulo_ = definicion["id"], f[7], f[5]
+        caja, escritos = hq_vivo.CajaCosto(), CajaArchivos()
+        try:
+            try:
+                import hq_core
+                ofi = hq_core.leer_oficina(carpeta)
+            except Exception:
+                ofi = None
+            duenio = (ofi or {}).get("duenio") or "la persona"
+            pedido = "Cambios que te pide %s sobre lo que entregaste («%s»):\n\n%s" % (duenio, titulo_, texto)
+            with app._lock(carpeta, agente):
+                app.db.asegurar_sesion(sid, agente, carpeta)
+                app.db.agregar(sid, agente, "u", pedido)
+                with app.actividad.seguir(carpeta, agente, "cambios", "Cambios: " + titulo_,
+                                          extra=caja.observador(escritos.observador())) as (obs, _tok):
+                    code, obj = app._chat_correr(carpeta, definicion, pedido, sid, ofi, obs, time.time())
+            app.costos.registrar(carpeta, "cambios", caja.valor, agente, str(f[0]))
+            if code == 200:
+                nuevos = relativos(escritos.valor, carpeta)
+                viejos = json.loads(f[8] or "[]")
+                arch = viejos if not nuevos else nuevos + [x for x in viejos if x not in nuevos]
+                self.crear(carpeta, agente, "cambios", sid, titulo_, obj.get("reply") or "(sin respuesta)", sid, arch, padre=f[0],
+                           costo=caja.valor)
+                self.marcar(carpeta, f[0], "cambios")
+            else:
+                app.avisos.crear(carpeta, "error", "No pudo hacer los cambios de «%s»: %s" % (titulo_, obj.get("error") or "error"),
+                                 agente, sid)
+        except Exception:
+            log.exception("cambios entrega=%s: falló", f[0])
+        finally:
+            with self._lock:
+                self.cambiando.discard((carpeta, f[0]))
+
+    def __call__(self, metodo, path, query, carpeta, body=None):
         """`/api/entregas*` -> (status, dict). `query` como lo da parse_qs."""
         no = (405, {"error": "método no permitido"})
         partes = path.split("/")[1:]
@@ -202,7 +254,12 @@ class Entregas:
         if f is None:
             return 404, {"error": "No existe esa entrega."}
         if len(partes) == 3:
-            return (200, {"entrega": entrega_json(f, True)}) if metodo == "GET" else no
+            if metodo != "GET":
+                return no
+            o = entrega_json(f, True)
+            with self._lock:
+                o["enCambios"] = (carpeta, id_) in self.cambiando
+            return 200, {"entrega": o}
         if metodo != "POST":
             return no
         if partes[3] == "revisada":
@@ -217,7 +274,46 @@ class Entregas:
                 return 409, {"error": "Esa entrega ya tiene una versión nueva."}
             n = self.marcar(carpeta, id_, "sin_revisar")
             return 200, {"entrega": entrega_json(n), "sinRevisar": self.sin_revisar(carpeta)}
+        if partes[3] == "cambios":
+            if self.app is None:
+                return 404, {"error": "no"}
+            if f[10] == "cambios":
+                return 409, {"error": "Esa entrega ya tiene una versión nueva."}
+            try:
+                import hq_core
+                of = hq_core.leer_oficina(carpeta)
+            except Exception:
+                of = {"agentes": []}
+            definicion = next((a for a in of.get("agentes") or [] if a["id"] == f[2]), None)
+            if not f[7] or definicion is None:
+                return 409, {"error": "Esta entrega no tiene una conversación para retomar."}
+            try:
+                d = json.loads(body or b"")
+            except ValueError:
+                d = None
+            if not isinstance(d, dict) or len(body or b"") > 200_000:
+                return 400, {"error": "pedido inválido"}
+            texto = d.get("texto")
+            if not isinstance(texto, str) or not texto.strip():
+                return 400, {"error": "Falta «texto»."}
+            if len(texto.strip()) > MAX_CAMBIOS:
+                return 400, {"error": "«texto» es demasiado largo (máximo %d caracteres)." % MAX_CAMBIOS}
+            if not getattr(self.app, "claude", None):
+                return 500, {"error": "No encontré Claude Code en esta compu."}
+            try:
+                self.pedir_cambios(carpeta, definicion, f, texto.strip())
+            except _Error as e:
+                return e.status, {"error": e.mensaje}
+            o = entrega_json(f)
+            o["enCambios"] = True
+            return 202, {"entrega": o}
         return 404, {"error": "no"}
+
+
+class _Error(Exception):
+    def __init__(self, status, mensaje):
+        Exception.__init__(self, mensaje)
+        self.status, self.mensaje = status, mensaje
 
 
 def es_ruta(path):

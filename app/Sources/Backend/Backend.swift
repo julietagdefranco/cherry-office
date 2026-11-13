@@ -64,11 +64,14 @@ public final class Backend: Sendable {
         let mcp = MCPServidor(store: store, runner: runner, log: log, env: env)
         self.mcp = mcp
         apiRouter = Router(config: cfg, store: store, runner: runner, log: log, oficinas: oficinas, mcp: mcp, listo: { _ = await mig.value })
-        registrarReuniones(ReunionesRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env))
+        registrarReuniones(ReunionesRouter(store: store, runner: runner, oficinas: oficinas, log: log, programador: programador, env: env))
         registrarBiblioteca(BibliotecaRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env))
         registrarExplorador(ExploradorRouter(config: cfg, oficinas: oficinas, log: log))
         registrarTareas(TareasRouter(oficinas: oficinas, store: store, programador: programador))
-        registrarEntregas(EntregasRouter(oficinas: oficinas, store: store))
+        // revisar la entrega de un encargo tilda su pendiente en las notas del agente
+        registrarEntregas(EntregasRouter(oficinas: oficinas, store: store, programador: programador, alRevisar: { e, act in
+            await PendientesReunion.tildarEncargo(e, act, store: store)
+        }))
         let canal = runner.canalAvisos
         Task {
             // una tarea que falla deja un aviso «te necesita» (y la notificación de macOS, vía el canal). Las que terminan bien
@@ -76,7 +79,8 @@ public final class Backend: Sendable {
             await programador.alTerminar { e in
                 guard e.estado != "ok" else { return }
                 let of = await oficinas.activa()?.oficina
-                let tarea = of?.tareas?.first { $0.id == e.tarea }?.nombre ?? e.tarea
+                let tarea = of?.tareas?.first { $0.id == e.tarea }?.nombre
+                    ?? (Programador.deEncargo(e.tarea) != nil ? "Pendiente de reunión" : e.tarea)
                 let texto = "«\(tarea)» falló: " + (e.error ?? "error")
                 if let av = await store.avisoCrear(oficina: e.oficina, tipo: "error", agente: e.agente, texto: texto, ref: e.sid) {
                     canal.emitir(av, nombre: of?.agente(e.agente)?.nombre ?? e.agente)

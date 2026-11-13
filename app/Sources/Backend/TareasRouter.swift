@@ -126,6 +126,18 @@ public struct TareasRouter: SubRouter {
         return z
     }
 
+    /// `{reunion, pendiente}` opcional («Convertir en tarea» desde el acta).
+    private static func origen(_ v: Any?) throws -> OrigenTarea? {
+        guard let v, !(v is NSNull) else { return nil }
+        guard let d = v as? [String: Any], let r = d["reunion"] as? String, let n = d["pendiente"] as? Int,
+              CFGetTypeID(d["pendiente"] as CFTypeRef) != CFBooleanGetTypeID() else {
+            throw ErrorAPI(400, "«origen» tiene que ser {reunion, pendiente}.")
+        }
+        let o = OrigenTarea(reunion: r.lowercased(), pendiente: n)
+        guard ValidarTareas.origenValido(o) else { throw ErrorAPI(400, "«origen» tiene que ser {reunion, pendiente}.") }
+        return o
+    }
+
     private static func activa(_ v: Any?) throws -> Bool? {
         guard let v, !(v is NSNull) else { return nil }
         guard CFGetTypeID(v as CFTypeRef) == CFBooleanGetTypeID(), let b = v as? Bool else { throw ErrorAPI(400, "«activa» tiene que ser verdadero o falso.") }
@@ -142,6 +154,7 @@ public struct TareasRouter: SubRouter {
         let dias = try TareasRouter.dias(d["dias"]), hora = try TareasRouter.hora(d["hora"])
         let zona = try TareasRouter.zona(d["zona"]) ?? sistema.identifier
         let activa = try TareasRouter.activa(d["activa"]) ?? true
+        let origen = try TareasRouter.origen(d["origen"])
         let pedidoId = try Validar.texto(d["id"], "id", max: 41, obligatorio: false)
         if let pedidoId, !Slug.valido(pedidoId) { throw ErrorAPI(400, "Id de tarea inválido (usá minúsculas, números y guiones).") }
         let ahora = Programacion.iso(reloj())
@@ -153,7 +166,7 @@ public struct TareasRouter: SubRouter {
             if let p = pedidoId, usados.contains(p) { throw ErrorAPI(409, "Ya hay una tarea con ese id.") }
             let id = pedidoId ?? Slug.unico(nombre, usados: usados, respaldo: "tarea")
             let t = TareaProgramada(id: id, agente: agente, nombre: nombre, consigna: consigna, dias: dias, hora: hora, zona: zona,
-                                    activa: activa, creada: ahora, desde: ahora)
+                                    activa: activa, creada: ahora, desde: ahora, origen: origen)
             ts.append(t)
             o.tareas = ts
             return t

@@ -152,7 +152,33 @@ def vista_tarea(t, sistema=None):
          "hora": t["hora"], "zona": t.get("zona") or sistema or zona_sistema(), "activa": t.get("activa", True)}
     if t.get("creada"):
         o["creada"] = t["creada"]
+    if t.get("origen"):
+        o["origen"] = t["origen"]
     return o
+
+
+def id_encargo(reunion, pendiente):
+    return "%s%s:%d" % (PREFIJO_ENCARGO, reunion, pendiente)
+
+
+def de_encargo(id_):
+    """(reunión, pendiente) de un id de encargo; None si no lo es."""
+    if not isinstance(id_, str) or not id_.startswith(PREFIJO_ENCARGO):
+        return None
+    p = id_[len(PREFIJO_ENCARGO):].split(":")
+    if len(p) != 2 or not p[1].lstrip("-").isdigit():
+        return None
+    return p[0], int(p[1])
+
+
+def _origen(v):
+    if v is None:
+        return None
+    if isinstance(v, dict) and isinstance(v.get("reunion"), str):
+        v = {"reunion": v["reunion"].lower(), "pendiente": v.get("pendiente")}
+    if not hq_core.origen_tarea_valido(v):
+        raise ErrorAPI(400, "«origen» tiene que ser {reunion, pendiente}.")
+    return v
 
 
 def _dias(v):
@@ -400,6 +426,12 @@ class Tareas:
         except Exception:
             log.exception("tarea %s: falló al_terminar", t["id"])
 
+    def encargar(self, carpeta, o, definicion, reunion, pendiente, nombre, consigna):
+        """«Hacelo ahora» de un pendiente de reunión: corrida única (no queda en oficina.json), id `encargo:<reunión>:<n>`."""
+        t = {"id": id_encargo(reunion, pendiente), "agente": definicion["id"], "nombre": nombre, "consigna": consigna,
+             "dias": [1], "hora": "00:00", "activa": False}
+        return self.correr_ahora(carpeta, o, t)
+
     def correr_ahora(self, carpeta, o, t):
         definicion = next((x for x in o["agentes"] if x["id"] == t["agente"]), None)
         if definicion is None:
@@ -494,6 +526,7 @@ class Tareas:
         zona = _zona(d.get("zona")) or self.sistema
         activa = _activa(d.get("activa"))
         activa = True if activa is None else activa
+        origen = _origen(d.get("origen"))
         pedido = hq_core.texto(d.get("id"), "id", 41, False)
         if pedido is not None and not hq_core.slug_valido(pedido):
             raise ErrorAPI(400, "Id de tarea inválido (usá minúsculas, números y guiones).")
@@ -511,6 +544,8 @@ class Tareas:
             id_ = pedido or hq_core.slug_unico(nombre, usados, "tarea")
             t = {"id": id_, "agente": agente, "nombre": nombre, "consigna": consigna, "dias": dias, "hora": hora, "zona": zona,
                  "activa": activa, "creada": ahora, "desde": ahora}
+            if origen:
+                t["origen"] = origen
             o["tareas"] = ts + [t]
             self._guardar(carpeta, o)
         return 200, {"tarea": self._vista(carpeta, o, t, self.reloj())}

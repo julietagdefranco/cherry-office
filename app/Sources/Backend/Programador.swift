@@ -227,6 +227,89 @@ public actor Programador {
         return try await lanzar(act, t, def, programada: Date(), manual: true)
     }
 
+    /// «Hacelo ahora» de un pendiente de reunión: una corrida única (no queda en `oficina.json`) con id de tarea
+    /// `encargo:<reunión>:<n>`. Misma maquinaria que una tarea (carril, permisos, actividad, costo, ejecución y entrega).
+    func encargar(_ act: OficinaActiva, _ def: AgenteDef, reunion: String, pendiente: Int, nombre: String, consigna: String) async throws -> Ejecucion {
+        let t = TareaProgramada(id: Programador.idEncargo(reunion, pendiente), agente: def.id, nombre: nombre, consigna: consigna,
+                                dias: [1], hora: "00:00", activa: false)
+        return try await correrAhora(act, t, def)
+    }
+
+    // MARK: pedir cambios (E4)
+
+    static func claveCambios(_ entrega: Int64) -> String { "cambios:\(entrega)" }
+
+    /// «Pedir cambios» sobre una entrega: retoma su conversación (`--resume`) en el carril del agente con el pedido de la
+    /// persona. Al terminar bien crea la entrega nueva (`padre` = la anterior, origen `cambios`) y la anterior pasa a
+    /// `cambios`. Si falla, la anterior queda como estaba y se deja un aviso de error. Devuelve enseguida.
+    func pedirCambios(_ act: OficinaActiva, _ def: AgenteDef, entrega e: Entrega, texto: String) async throws {
+        guard !cerrado else { throw ErrorAPI(409, "La app se está cerrando.") }
+        do { try runner.verificar(carpeta: act.carpeta) } catch let err as ClaudeError { throw ErrorAPI(500, err.mensaje) }
+        let clave = Programador.clave(act.carpeta, Programador.claveCambios(e.id))
+        guard reservadas.insert(clave).inserted else { throw ErrorAPI(409, "Ya le estás pidiendo cambios a esta entrega.") }
+        let id = -e.id   // las corridas de cambios se guardan con id negativo (no chocan con las ejecuciones)
+        corridas[id] = Task { [self] in
+            await correrCambios(act, def, e, texto)
+            termino(id, clave)
+        }
+    }
+
+    func cambiandoEntrega(oficina: String, id: Int64) -> Bool { reservadas.contains(Programador.clave(oficina, Programador.claveCambios(id))) }
+
+    private func correrCambios(_ act: OficinaActiva, _ def: AgenteDef, _ e: Entrega, _ texto: String) async {
+        let store = self.store, runner = self.runner
+        let ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
+        let carpeta = act.carpeta, agente = def.id, sid = e.sid
+        let caja = CajaCosto(), escritos = CajaArchivos()
+        let pedido = "Cambios que te pide \(act.oficina.duenio.isEmpty ? "la persona" : act.oficina.duenio) sobre lo que entregaste («\(e.titulo)»):\n\n\(texto)"
+        struct Fin: Sendable { var texto: String?; var error: String? }
+        let r: Fin = await runner.conCarril(oficina: carpeta, agente: agente) {
+            do {
+                try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
+                try await store.agregar(sid: sid, rol: "u", texto: pedido)
+                let activa = await store.estaActiva(sid)
+                let t = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "cambios", tarea: "Cambios: " + e.titulo,
+                                                          extra: caja.observador(escritos.observador())) { obs, _ in
+                    try await runner.ejecutarChat(agente: agente, mensaje: pedido, sid: sid, activa: activa, oficina: ctx, obs: obs)
+                }
+                try await store.marcarActiva(sid)
+                try await store.agregar(sid: sid, rol: "a", texto: t.isEmpty ? "(sin respuesta)" : t)
+                return Fin(texto: t.isEmpty ? "(sin respuesta)" : t, error: nil)
+            } catch let err as ClaudeError {
+                try? await store.agregar(sid: sid, rol: "a", texto: "No pude responder: " + err.mensaje, error: true)
+                return Fin(texto: nil, error: err.mensaje)
+            } catch {
+                return Fin(texto: nil, error: "No pude guardar la conversación.")
+            }
+        }
+        await store.registrarCosto(oficina: carpeta, agente: agente, origen: "cambios", ref: String(e.id), costo: caja.valor)
+        if let t = r.texto {
+            let nuevos = ArchivosEntrega.relativos(escritos.valor, carpeta: carpeta)
+            let arch = nuevos.isEmpty ? e.archivos : nuevos + e.archivos.filter { !nuevos.contains($0) }
+            if await RegistroEntregas.registrar(store, runner.canalAvisos, oficina: carpeta, agente: agente, nombre: def.nombre, origen: "cambios",
+                                                ref: sid, titulo: e.titulo, texto: t, sid: sid, archivos: arch, padre: e.id, costo: caja.valor) != nil {
+                await store.entregaMarcar(oficina: carpeta, id: e.id, estado: "cambios")
+            }
+            log.info("cambios entrega=\(e.id) agente=\(agente) estado=ok")
+        } else {
+            if let av = await store.avisoCrear(oficina: carpeta, tipo: "error", agente: agente,
+                                               texto: "No pudo hacer los cambios de «\(e.titulo)»: " + (r.error ?? "error"), ref: sid) {
+                runner.canalAvisos.emitir(av, nombre: def.nombre)
+            }
+            log.info("cambios entrega=\(e.id) agente=\(agente) estado=error")
+        }
+    }
+
+    static func idEncargo(_ reunion: String, _ pendiente: Int) -> String { "\(prefijoEncargo)\(reunion):\(pendiente)" }
+
+    /// (reunión, pendiente) de un id de encargo; nil si no lo es.
+    static func deEncargo(_ id: String) -> (String, Int)? {
+        guard id.hasPrefix(prefijoEncargo) else { return nil }
+        let p = id.dropFirst(prefijoEncargo.count).split(separator: ":")
+        guard p.count == 2, let n = Int(p[1]) else { return nil }
+        return (String(p[0]), n)
+    }
+
     // MARK: corrida
 
     private func lanzar(_ act: OficinaActiva, _ t: TareaProgramada, _ def: AgenteDef, programada: Date, manual: Bool) async throws -> Ejecucion {

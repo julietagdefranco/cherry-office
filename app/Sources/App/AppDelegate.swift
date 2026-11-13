@@ -20,7 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         buildWindow()
         notificador = Notificador(webView: webView) { [weak self] in self?.mostrarVentana() }
         notificador?.escuchar(runtime.avisos)
-        if env["HQ_SPIKE"] != "1" { barraMenu = BarraMenu(router: runtime.router, abrir: { [weak self] in self?.mostrarVentana() }) }
+        if env["HQ_SPIKE"] != "1" {
+            barraMenu = BarraMenu(router: runtime.router, abrir: { [weak self] in self?.mostrarVentana() }, abrirEntregas: { [weak self] in
+                self?.mostrarVentana()
+                self?.webView.evaluateJavaScript("window.App && App.Entregables && App.Entregables.abrir()")
+            })
+        }
         NSApp.activate(ignoringOtherApps: true)
         Task { await boot() }
     }

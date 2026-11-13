@@ -43,9 +43,15 @@ App.Avisos = (function () {
     var faros = {};
     lista.forEach(function (a) { if (a.agente) faros[a.agente] = a.tipo; });
     if (App.Oficina3D && App.Oficina3D.faros) App.Oficina3D.faros(faros);
-    if (App.nativo && App.nativo.insignia) App.nativo.insignia(lista.length);
+    insignia();
     marcarLateral(faros);
     pintarBanner();
+  }
+
+  /* Dock: avisos «te necesita» + entregas sin revisar (las tareas terminadas ya no dejan aviso: no se cuenta dos veces) */
+  function insignia() {
+    var n = lista.length + (App.Entregables ? App.Entregables.sinRevisar() : 0);
+    if (App.nativo && App.nativo.insignia) App.nativo.insignia(n);
   }
 
   function marcarLateral(faros) {
@@ -75,6 +81,7 @@ App.Avisos = (function () {
   }
 
   function abrir(id) {
+    if (/^e\d+$/.test(id || '')) { if (App.Entregables) App.Entregables.abrir(+id.slice(1)); return; }   // notificación «te entregó»
     var a = lista.filter(function (x) { return x.id === id; })[0];
     if (!a) {  // desde una notificación: puede no estar en la lista todavía
       return App.api.get('/api/avisos').then(function (r) { lista = r.avisos || []; var b = lista.filter(function (x) { return x.id === id; })[0]; if (b) abrir(id); });
@@ -90,7 +97,10 @@ App.Avisos = (function () {
   }
 
   function siguiente() {
-    if (!lista.length) { App.aviso('No hay nada pendiente.'); return; }
+    if (!lista.length) {
+      if (App.Entregables && App.Entregables.siguiente()) return;
+      App.aviso('No hay nada pendiente.'); return;
+    }
     indice = (indice + 1) % lista.length;
     var a = lista[indice];
     if (a.agente && App.Oficina3D.enfocarAgente) App.Oficina3D.enfocarAgente(a.agente);
@@ -112,5 +122,5 @@ App.Avisos = (function () {
   if (App.on) App.on('actividad', function (r) { aplicar(r.avisos || []); });
   setInterval(function () { if (lista.length) pintarBanner(); }, 30000);
 
-  return { abrir: abrir, siguiente: siguiente, vistoAgente: function (id) { return visto({ agente: id }); }, lista: function () { return lista; } };
+  return { abrir: abrir, siguiente: siguiente, insignia: insignia, vistoAgente: function (id) { return visto({ agente: id }); }, lista: function () { return lista; } };
 })();

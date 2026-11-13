@@ -187,6 +187,18 @@ def validar_tareas(o):
         z = t.get("zona")
         if z is not None and not zona_valida(z):
             raise ErrorAPI(400, "La zona horaria de la tarea %s no existe: %s." % (tid, z))
+        if t.get("origen") is not None and not origen_tarea_valido(t["origen"]):
+            raise ErrorAPI(400, "El origen de la tarea %s no es válido." % tid)
+
+
+MAX_PENDIENTES = 200
+_UUID_MIN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def origen_tarea_valido(o):
+    """`{reunion, pendiente}` de una tarea que salió de un pendiente de reunión («Convertir en tarea»)."""
+    return (isinstance(o, dict) and isinstance(o.get("reunion"), str) and bool(_UUID_MIN.match(o["reunion"]))
+            and type(o.get("pendiente")) is int and 0 <= o["pendiente"] < MAX_PENDIENTES)
 
 
 # ----------------------------------------------------------------------------- oficina.json

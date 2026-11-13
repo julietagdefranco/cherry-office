@@ -119,6 +119,47 @@ struct EntregasTests {
         #expect(primero.hasPrefix("reuniones/"))
     }
 
+    @Test("pedir cambios: retoma la conversación, crea la versión nueva (padre) y la anterior queda reemplazada")
+    func cambios() async throws {
+        let f = try await Fix.crear(agentes: [("marce", "direccion", nil)])
+        _ = await chat(f.b, agent: "marce", message: "Informe ENTREGA:archivos/entregables/informe.md", session: U.a)
+        let vieja = await entregas(f).first?["id"] as? Int ?? 0
+        #expect((await f.post("/api/entregas/\(vieja)/cambios", ["texto": ""])).status == 400)
+        #expect((await llamar(f.b, "POST", "/api/entregas/\(vieja)/cambios")).status == 400)
+        let r = await f.post("/api/entregas/\(vieja)/cambios", ["texto": "Hacelo más corto"])
+        #expect(r.status == 202, "\(r.obj)")
+        let ok = await esperarAsync(hasta: 15) { await entregas(f).count == 2 }
+        #expect(ok)
+        let es = await entregas(f)
+        #expect(str(es[0]["origen"]) == "cambios")
+        #expect(es[0]["padre"] as? Int == vieja)
+        #expect(str(es[0]["sid"]) == U.a)
+        #expect(str(es[0]["estado"]) == "sin_revisar")
+        #expect(es[0]["archivos"] as? [String] == ["archivos/entregables/informe.md"])
+        #expect(str(es[1]["estado"]) == "cambios")
+        #expect((await f.get("/api/entregas")).obj["sinRevisar"] as? Int == 1)
+        // retomó la misma conversación, con el pedido
+        let ult = f.sb.llamadas.last { $0.contains("--agent") } ?? []
+        #expect(ult.contains("--resume") && ult.contains(U.a))
+        #expect((ult.last ?? "").contains("Hacelo más corto"))
+        // la reemplazada no se puede volver a cambiar ni marcar sin revisar
+        #expect((await f.post("/api/entregas/\(vieja)/cambios", ["texto": "otra"])).status == 409)
+        #expect((await f.post("/api/entregas/\(vieja)/sin-revisar")).status == 409)
+        let det = await f.get("/api/entregas/\(vieja)")
+        #expect((det.obj["entrega"] as? [String: Any])?["enCambios"] as? Bool == false)
+    }
+
+    @Test("pedir cambios a un acta (sin conversación) da 409")
+    func cambiosActa() async throws {
+        let f = try await Fix.crear(agentes: [("marce", "direccion", nil), ("pato", "direccion", nil)])
+        let r = await f.post("/api/reuniones", ["tema": "lanzamiento", "agentes": ["marce", "pato"]])
+        let id = str(r.obj["id"])
+        _ = await esperarAsync(hasta: 15) { str((await f.get("/api/reuniones/\(id)")).obj["estado"]) == "esperando" }
+        _ = await f.post("/api/reuniones/\(id)/cerrar")
+        let acta = await entregas(f, ["origen": "reunion"]).first?["id"] as? Int ?? 0
+        #expect((await f.post("/api/entregas/\(acta)/cambios", ["texto": "x"])).status == 409)
+    }
+
     @Test("sin oficina: /api/entregas 409 y /api/actividad trae el contador en 0")
     func sinOficina() async throws {
         let sb = Sandbox()

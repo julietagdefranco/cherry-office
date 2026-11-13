@@ -550,6 +550,7 @@ class App:
         self.costos = hq_vivo.Costos(os.path.join(cfg["datos_dir"], "hq.db"))
         self.avisos = hq_vivo.Avisos(os.path.join(cfg["datos_dir"], "hq.db"))
         self.entregas = hq_entregas.Entregas(os.path.join(cfg["datos_dir"], "hq.db"))
+        self.entregas.app = self
         self.migrados = self.db.migrar_json(sesiones_json or os.path.join(ROOT, ".sesiones.json"))
         self.auth_ok = None
         self.home = _home()
@@ -1192,7 +1193,7 @@ def crear_handler(app):
                 r = app.tareas(metodo, u.path, q, body) if app.tareas else None
                 return self._json(*(r or (404, {"error": "no"})))
             if hq_entregas.es_ruta(u.path):  # fuera de app.mut, como /api/actividad
-                return self._json(*app.entregas(metodo, u.path, q, app.activa_carpeta))
+                return self._json(*app.entregas(metodo, u.path, q, app.activa_carpeta, body))
             if hq_explorador.es_ruta(u.path):
                 r = app.explorador(metodo, u.path, q, body) if app.explorador else None
                 return self._json(*(r or (404, {"error": "no"})))
@@ -1225,7 +1226,8 @@ def _aviso_de_tarea(app, e):
         o = hq_core.leer_oficina(carpeta)
     except ErrorAPI:
         o = {}
-    nombre = next((t.get("nombre") for t in (o.get("tareas") or []) if t.get("id") == e.get("tarea")), e.get("tarea"))
+    nombre = next((t.get("nombre") for t in (o.get("tareas") or []) if t.get("id") == e.get("tarea")),
+                  "Pendiente de reunión" if hq_tareas.de_encargo(e.get("tarea")) else e.get("tarea"))
     app.avisos.crear(carpeta, "error", "«%s» falló: %s" % (nombre, e.get("error") or "error"), e.get("agente"), e.get("sid"))
 
 

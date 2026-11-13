@@ -14,6 +14,8 @@ App.Oficina3D = (function () {
   var plano = null;                 // datos del armado (salas, pasillos, asientos de reunión)
   var animando = {};                // id -> true mientras camina, habla o trabaja en su escritorio
   var trabajo = {};                 // id -> {estado, herramienta, objetivo, tarea} (de /api/actividad; sobrevive a reconstruir)
+  var muroObj = null;               // muro de entregables (muro3d.js), se rearma en cada construir
+  var muroDatos = { entregas: [], n: 0 }, muroAgentes = {};   // último estado del muro (sobrevive a reconstruir)
   var pendiente = false, sombrasSucias = true, ultimo = 0, construyendo = 0, sombraAnim = false, soloLento = true;
   var hover = null, elegido = null, hablando = null;
   var orb = { az: 0.42, el: 0.78, d: 60, tx: 0, tz: 0, minD: 10, maxD: 200 };
@@ -275,7 +277,7 @@ App.Oficina3D = (function () {
     var l = lugares.filter(function (x) { return x.tipo === tipo; })[0];
     if (!l) return false;
     var c = l.caja.getCenter(new T.Vector3());
-    enfocar(c.x, c.z + 1, orb.minD * 2);
+    enfocar(c.x, c.z + 1, orb.minD * (tipo === 'entregables' ? 1.1 : 2));   // el muro es chico: más cerca
     return true;
   }
 
@@ -378,7 +380,9 @@ App.Oficina3D = (function () {
       if (ray.ray.intersectBox(f.caja, p)) { var d = p.distanceTo(ray.ray.origin); if (d < dm) { dm = d; mejor = { tipo: 'agente', id: id }; } }
     }
     if (mejor) return mejor;
+    if (muroObj) { var hm = muroObj.pick(ray); if (hm && hm.dist < dm) { dm = hm.dist; mejor = { tipo: hm.tipo, id: hm.id }; } }
     for (var i = 0; i < lugares.length; i++) {
+      if (lugares[i].tipo === 'entregables') continue;      // el muro se resuelve arriba (hoja por hoja)
       if (ray.ray.intersectBox(lugares[i].caja, p)) { var d2 = p.distanceTo(ray.ray.origin); if (d2 < dm) { dm = d2; mejor = { tipo: lugares[i].tipo }; } }
     }
     return mejor;
@@ -391,13 +395,14 @@ App.Oficina3D = (function () {
       var ev = hoverPend; hoverPend = null;
       var h = rayo(ev), clave = h ? (h.tipo + ':' + (h.id || '')) : null;
       cv.style.cursor = h ? 'pointer' : '';
+      if (h && muroObj && (h.tipo === 'entrega' || h.tipo === 'entregables')) h.texto = muroObj.texto(h);
       if (clave !== hover) { hover = clave; actualizarEtiquetasHover(); pedir(); cbHover(h); }
     });
   }
   function elegir(e) {
     var h = rayo(e);
     if (!h) return;
-    if (h.tipo === 'agente') cbAgente(h.id); else cbLugar(h.tipo);
+    if (h.tipo === 'agente') cbAgente(h.id); else cbLugar(h.tipo, h.id);   // 'entrega' lleva el id de la entrega
   }
   function actualizarEtiquetasHover() {
     for (var id in figuras) {
@@ -473,6 +478,10 @@ App.Oficina3D = (function () {
       .concat(deps.map(function (d) { return { tipo: 'depto', dep: d, nombre: d.nombre, agentes: porDep[d.id] || [] }; }));
     var nuevo = planificar(salas);
     nuevo.nombre = oficina.nombre || '';
+    var colorDep = {};
+    deps.forEach(function (d) { colorDep[d.id] = d.color; });
+    var agentesMuro = {};
+    ags.forEach(function (a) { agentesMuro[a.id] = { nombre: a.nombre || a.id, color: colorDep[a.departamento] || '#6b7078' }; });
 
     var L = lote(), LV = lote(), grupo = new T.Group();
     LP = lote(); LD = {};
@@ -565,6 +574,8 @@ App.Oficina3D = (function () {
         figuras[x.a.id] = f;
         crearPantalla(f);
       });
+      muroAgentes = agentesMuro;
+      armarMuro();
       actividad(trabajo);
       faros(faroDe);
       encuadrar(cambioTam);
@@ -573,6 +584,21 @@ App.Oficina3D = (function () {
       pedir();
       if (reunionActual) reunion(reunionActual.agentes, reunionActual.hablando, true);
     });
+  }
+
+  /* muro de entregables: lo arma muro3d.js (cargado después) sobre el plano recién construido */
+  function armarMuro() {
+    muroObj = null;
+    if (!App.Muro3D || !plano || !mundo) return;
+    muroObj = App.Muro3D.construir({ T: T, P: P, plano: plano, geoBloque: geoBloque, PLACA: PLACA, LADRILLO: LADRILLO,
+                                     MADERA: MADERA, NEGRO: NEGRO, GRIS_OSCURO: GRIS_OSCURO });
+    mundo.add(muroObj.grupo);
+    lugares.push({ tipo: 'entregables', caja: muroObj.caja });
+    muroObj.actualizar(muroDatos.entregas, muroDatos.n, muroAgentes);
+  }
+  function muro(entregas, sinRevisar) {
+    muroDatos = { entregas: (entregas || []).slice(), n: sinRevisar || 0 };
+    if (muroObj) { muroObj.actualizar(muroDatos.entregas, muroDatos.n, muroAgentes); pedir(); }
   }
 
   var matVidrio = null;
@@ -1591,6 +1617,7 @@ App.Oficina3D = (function () {
     enfocar: enfocar,
     enfocarAgente: enfocarAgente,
     enfocarLugar: enfocarLugar,
+    muro: muro,
     pedir: pedir,
     _estado: function () { return { figuras: Object.keys(figuras).length, animando: Object.keys(animando), orb: orb, plano: plano && { w: plano.x1, d: plano.z1 }, autos: autos.map(function (a) { return Math.round(a.g.position.x * 10) / 10; }), post: !!post, info: renderer.info.render }; }
   };

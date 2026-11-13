@@ -20,6 +20,8 @@ import uuid
 
 import hq_core
 import hq_vivo
+import hq_entregas
+import hq_tareas
 from hq_core import ErrorAPI
 
 MAX_BODY = 200000
@@ -349,6 +351,38 @@ def agente_de_pendiente(quien, oficina):
     return cand[0] if len(cand) == 1 else None
 
 
+def linea_pendiente(p, tema, dia):
+    que = " ".join(p["que"].split("\n"))
+    return "- [ ] %s · reunión «%s»: %s%s" % (dia, tema, que,
+                                              " (necesita a la persona: avisale qué hace falta)" if p.get("necesita_usuario") else "")
+
+
+def consigna_encargo(tema, acta, p):
+    """Consigna del encargo («Hacelo ahora»): el pendiente con su contexto y dónde dejar lo que produzca."""
+    s = "Pendiente de la reunión «%s»" % tema
+    if acta:
+        s += " (acta: `%s`)" % acta
+    return s + (":\n\n%s\n\nHacelo ahora. Si producís un documento, guardalo en `archivos/entregables/` y decí al final qué "
+                "archivo dejaste." % p["que"])
+
+
+def tildar(carpeta, agente, linea):
+    """Marca `- [x]` la primera línea exacta del pendiente en las notas del agente. -> si la encontró."""
+    ruta = os.path.join(carpeta, "conocimiento", "agentes", agente + ".md")
+    if not linea.startswith("- [ ] "):
+        return False
+    try:
+        with open(ruta, encoding="utf-8") as fh:
+            lineas = fh.read().split("\n")
+    except OSError:
+        return False
+    if linea not in lineas:
+        return False
+    lineas[lineas.index(linea)] = "- [x] " + linea[6:]
+    hq_core.escribir_atomico(ruta, "\n".join(lineas))
+    return True
+
+
 def linea_md(p):
     base = ("- **%s:** %s" % (p["quien"], p["que"])) if p["quien"] else "- " + p["que"]
     return base + (" _(necesita a la persona)_" if p.get("necesita_usuario") else "")
@@ -370,9 +404,7 @@ def repartir_pendientes(carpeta, oficina, tema, pendientes, fecha):
     for p in pendientes:
         a = agente_de_pendiente(p["quien"], oficina)
         if a:
-            que = " ".join(p["que"].split("\n"))
-            por.setdefault(a["id"], []).append("- [ ] %s · reunión «%s»: %s%s" % (
-                dia, tema, que, " (necesita a la persona: avisale qué hace falta)" if p.get("necesita_usuario") else ""))
+            por.setdefault(a["id"], []).append(linea_pendiente(p, tema, dia))
     for id_, lineas in por.items():
         ruta = os.path.join(carpeta, "conocimiento", "agentes", id_ + ".md")
         try:
@@ -582,7 +614,7 @@ class Reuniones:
 
     def __call__(self, metodo, path, query, body):
         partes = path.split("/")[1:]
-        if len(partes) < 2 or len(partes) > 4 or partes[0] != "api" or partes[1] != "reuniones" or "" in partes:
+        if len(partes) < 2 or len(partes) > 6 or partes[0] != "api" or partes[1] != "reuniones" or "" in partes:
             return None
         try:
             return self._despachar(metodo, partes, body)
@@ -604,6 +636,13 @@ class Reuniones:
         id_ = partes[2].lower()
         if n == 3:
             return (200, self._detalle(id_)) if m == "GET" else no
+        if n == 5:
+            return 404, {"error": "no"}
+        if n == 6:
+            # POST /api/reuniones/:id/pendientes/:n/encargar
+            if partes[3] != "pendientes" or not partes[4].isdigit() or partes[5] != "encargar":
+                return 404, {"error": "no"}
+            return (202, self._encargar(id_, int(partes[4]))) if m == "POST" else no
         if m != "POST":
             return no
         if partes[3] == "intervencion":
@@ -684,7 +723,73 @@ class Reuniones:
     def _respuesta(self, id_, carpeta):
         vh = self._vivo(id_)
         f = self._fila(id_, carpeta)
-        return self._vista(f, self._turnos(id_), vivo_hablando=vh)
+        o = self._vista(f, self._turnos(id_), vivo_hablando=vh)
+        e = self._estado_pendientes(f, carpeta)
+        if e is not None:
+            o["pendientesEstado"] = e
+        return o
+
+    # ---- pendientes que se ejecutan (E1; paridad con PendientesAcciones.swift)
+
+    @staticmethod
+    def _pendientes(f):
+        if f["estado"] != "cerrada" or not f["sintesis"]:
+            return None
+        s = parsear_sintesis(f["sintesis"])
+        return (s or {}).get("pendientes") or None
+
+    def _estado_pendientes(self, f, carpeta):
+        ps = self._pendientes(f)
+        if ps is None:
+            return None
+        try:
+            of = hq_core.leer_oficina(carpeta)
+        except ErrorAPI:
+            return None
+        tareas_app = getattr(self.app, "tareas", None)
+        entregas = getattr(self.app, "entregas", None)
+        out = []
+        for i, p in enumerate(ps):
+            ag = agente_de_pendiente(p["quien"], of)
+            o = {"pendiente": i, "agente": ag["id"] if ag else None,
+                 "encargable": bool(ag) and not p.get("necesita_usuario") and tareas_app is not None}
+            id_enc = hq_tareas.id_encargo(f["id"], i)
+            ult = tareas_app._ejecuciones(carpeta, id_enc, 1) if tareas_app is not None else []
+            if ult:
+                ej = hq_tareas.ejecucion_json(ult[0])
+                enc = {"estado": ej["estado"], "ejecucion": ej["id"]}
+                if ej["estado"] == "error":
+                    enc["error"] = ej.get("error") or "Falló."
+                if entregas is not None:
+                    e = next((x for x in entregas.lista(carpeta, origen="encargo", limite=500) if x[4] == id_enc), None)
+                    if e is not None:
+                        enc["entrega"], enc["entregaEstado"] = e[0], e[10]
+                o["encargo"] = enc
+            o["tareas"] = [{"id": t["id"], "nombre": t["nombre"]} for t in of.get("tareas") or []
+                           if t.get("origen") == {"reunion": f["id"], "pendiente": i}]
+            out.append(o)
+        return out
+
+    def _encargar(self, id_, n):
+        tareas_app = getattr(self.app, "tareas", None)
+        if tareas_app is None:
+            raise ErrorAPI(404, "no")
+        carpeta, of = self.app.requerir_activa()
+        f = self._fila(id_, carpeta)
+        ps = self._pendientes(f)
+        if ps is None:
+            raise ErrorAPI(409, "La reunión todavía no tiene pendientes (se cierran con el acta).")
+        if n >= len(ps):
+            raise ErrorAPI(404, "No existe ese pendiente.")
+        p = ps[n]
+        if p.get("necesita_usuario"):
+            raise ErrorAPI(409, "Ese pendiente necesita tu parte: el agente no lo puede hacer solo.")
+        definicion = agente_de_pendiente(p["quien"], of)
+        if definicion is None:
+            raise ErrorAPI(409, "Ese pendiente no es de un agente de la oficina.")
+        tareas_app.encargar(carpeta, of, definicion, id_, n, hq_entregas.titulo(p["que"]),
+                            consigna_encargo(f["tema"], f["acta"], p))
+        return {"id": id_, "pendientesEstado": self._estado_pendientes(self._fila(id_, carpeta), carpeta) or []}
 
     # ---- endpoints
 
@@ -1040,4 +1145,25 @@ class Reuniones:
 def instalar(app, srv):
     """Engancha las reuniones al App del servidor: `app.reuniones`."""
     app.reuniones = Reuniones(app, srv)
+    if getattr(app, "entregas", None) is not None:
+        app.entregas.al_revisar = lambda e, carpeta: _tildar_encargo(app.reuniones, e, carpeta)
     return app.reuniones
+
+
+def _tildar_encargo(reus, e, carpeta):
+    """Al revisar la entrega de un encargo: tilda el pendiente que lo originó (si sigue en las notas)."""
+    de = hq_tareas.de_encargo(e.get("ref")) if e.get("origen") == "encargo" else None
+    if not de:
+        return
+    f = reus._reunion(de[0], carpeta)
+    ps = Reuniones._pendientes(f) if f else None
+    if not ps or de[1] >= len(ps):
+        return
+    try:
+        of = hq_core.leer_oficina(carpeta)
+    except ErrorAPI:
+        return
+    a = agente_de_pendiente(ps[de[1]]["quien"], of)
+    if a:
+        dia = datetime.date.fromtimestamp(f["cerrada"] or f["creada"]).strftime("%Y-%m-%d")
+        tildar(carpeta, a["id"], linea_pendiente(ps[de[1]], f["tema"], dia))
