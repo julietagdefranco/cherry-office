@@ -1,13 +1,13 @@
 #!/bin/bash
-# Compila Próspera HQ en release y arma "build/Próspera HQ.app" (firma ad-hoc).
+# Compila Oficina en release y arma "build/Oficina.app" (firma ad-hoc).
 # Uso: app/build.sh   (desde cualquier carpeta)
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$APP_DIR/.." && pwd)"
 OUT="$APP_DIR/build"
-APP="$OUT/Próspera HQ.app"
-EXE="ProsperaHQ"
+APP="$OUT/Oficina.app"
+EXE="Oficina"
 
 cd "$APP_DIR"
 echo "==> swift build -c release"
@@ -45,10 +45,10 @@ for f in "$RES"/_* "$RES"/ui/_* "$RES/js" "$RES/lego_man.json" "$RES/personajes"
   [ -e "$f" ] && { echo "No debería estar en el bundle: $f" >&2; exit 1; }
 done
 
-# Ícono desde el logo (si falla, la app queda sin ícono).
+# Ícono desde app/Resources/icono.svg (si falla, la app queda sin ícono).
 ICON_TMP="$(mktemp -d)"
 trap 'rm -rf "$ICON_TMP"' EXIT
-if swift "$APP_DIR/scripts/make-icon.swift" "$REPO_DIR/oficina/logo-prospera.svg" "$ICON_TMP/icon.png" 2>/dev/null; then
+if swift "$APP_DIR/scripts/make-icon.swift" "$APP_DIR/Resources/icono.svg" "$ICON_TMP/icon.png" 2>/dev/null; then
   SET="$ICON_TMP/AppIcon.iconset"; mkdir -p "$SET"
   for s in 16 32 128 256 512; do
     sips -z $s $s "$ICON_TMP/icon.png" --out "$SET/icon_${s}x${s}.png" >/dev/null

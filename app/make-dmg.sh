@@ -1,5 +1,5 @@
 #!/bin/bash
-# Empaqueta "build/Próspera HQ.app" en "build/Próspera HQ <versión>.dmg" (UDZO).
+# Empaqueta "build/Oficina.app" en "build/Oficina <versión>.dmg" (UDZO).
 # Uso: app/make-dmg.sh [--rebuild]
 #   --rebuild        fuerza correr build.sh aunque la .app ya exista.
 # Variables de entorno (opcionales):
@@ -10,9 +10,9 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="$APP_DIR/build"
-APP="$OUT/Próspera HQ.app"
-ENTITLEMENTS="$APP_DIR/Resources/ProsperaHQ.entitlements"
-VOLNAME="Próspera HQ"
+APP="$OUT/Oficina.app"
+ENTITLEMENTS="$APP_DIR/Resources/Oficina.entitlements"
+VOLNAME="Oficina"
 
 REBUILD=0
 for a in "$@"; do
@@ -33,7 +33,7 @@ fi
 [ -d "$APP" ] || { echo "No existe $APP" >&2; exit 1; }
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
-DMG="$OUT/Próspera HQ $VERSION.dmg"
+DMG="$OUT/Oficina $VERSION.dmg"
 
 if [ -n "${DEVELOPER_ID:-}" ]; then
   echo "==> Firma Developer ID con hardened runtime"
@@ -46,7 +46,7 @@ echo "==> Armando $DMG"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 # ditto conserva firma, xattrs y symlinks mejor que cp.
-ditto "$APP" "$STAGE/Próspera HQ.app"
+ditto "$APP" "$STAGE/Oficina.app"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG" >/dev/null

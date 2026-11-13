@@ -3,7 +3,7 @@ import os
 
 /// Log de la app: os.Logger + archivo rotativo hq.log (1 MB, 3 copias). Nunca recibe contenido de mensajes.
 public final class HQLog: @unchecked Sendable {
-    private let logger = Logger(subsystem: "com.prospera.hq", category: "backend")
+    private let logger = Logger(subsystem: "com.oficina.app", category: "backend")
     private let queue = DispatchQueue(label: "hq.log")
     private let path: String?
     private let maxBytes: Int

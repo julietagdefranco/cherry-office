@@ -44,12 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
-        window.title = "Próspera HQ"
+        window.title = "Oficina"
         window.minSize = NSSize(width: 900, height: 600)
         window.contentView = webView
         window.isReleasedWhenClosed = false
-        window.setFrameAutosaveName("ProsperaHQMain")
-        if !window.setFrameUsingName("ProsperaHQMain") { window.center() }
+        window.setFrameAutosaveName("OficinaMain")
+        if !window.setFrameUsingName("OficinaMain") { window.center() }
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(webView)
     }
@@ -158,8 +158,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func openLoginInTerminal() async {
         guard let path = (await estado())?["claudePath"] as? String, !path.isEmpty else { return }
         let quoted = "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let script = "#!/bin/zsh\nclear\necho 'Iniciá sesión en Claude. Cuando termines, volvé a Próspera HQ.'\n\(quoted) auth login\necho\necho 'Listo. Ya podés cerrar esta ventana.'\n"
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("prospera-login-\(UUID().uuidString).command")
+        let script = "#!/bin/zsh\nclear\necho 'Iniciá sesión en Claude. Cuando termines, volvé a Oficina.'\n\(quoted) auth login\necho\necho 'Listo. Ya podés cerrar esta ventana.'\n"
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("oficina-login-\(UUID().uuidString).command")
         do {
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
