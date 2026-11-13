@@ -404,6 +404,7 @@ App.Oficina3D = (function () {
       Object.keys(viejas).forEach(function (id) {
         viejas[id].etiqueta.el.remove();
         if (viejas[id].etqTarea) viejas[id].etqTarea.el.remove();
+        if (viejas[id].etqFaro) viejas[id].etqFaro.el.remove();
         if (viejas[id].pantalla) { viejas[id].pantalla.tex.dispose(); viejas[id].pantalla.mat.dispose(); }
       });
       animando = {};
@@ -420,6 +421,7 @@ App.Oficina3D = (function () {
         crearPantalla(f);
       });
       actividad(trabajo);
+      faros(faroDe);
       encuadrar(cambioTam);
       actualizarEtiquetasHover();
       sombrasSucias = true;
@@ -744,6 +746,25 @@ App.Oficina3D = (function () {
     e.el.dataset.estado = t.estado;
   }
 
+  /* faros «te necesita»: mapa {id: tipo}; una etiqueta que late sobre la cabeza */
+  var faroDe = {};
+  function faros(mapa) {
+    faroDe = mapa || {};
+    for (var id in figuras) {
+      var f = figuras[id];
+      if (!f.etqFaro) {
+        f.etqFaro = etiqueta('faro', '', null);
+        vaciarNodo(f.etqFaro.el.firstChild);
+        f.etqFaro.el.firstChild.appendChild(document.createElement('b'));
+        f.etqFaro.obj = f.obj; f.etqFaro.off = new T.Vector3(0, 6.3, 0);
+      }
+      f.etqFaro.oculta = !faroDe[id];
+      f.etqFaro.el.firstChild.firstChild.textContent = faroDe[id] === 'error' ? '!' : '•';
+      f.etqFaro.el.dataset.tipo = faroDe[id] || '';
+    }
+    pedir();
+  }
+
   /* mapa: {id: {estado, herramienta, objetivo, tarea, origen}} de /api/actividad */
   function actividad(mapa) {
     trabajo = mapa || {};
@@ -832,6 +853,7 @@ App.Oficina3D = (function () {
     finReunion: function () { reunion([], null); },
     encuadrar: function () { encuadrar(true); pedir(); },
     actividad: actividad,
+    faros: faros,
     enfocar: enfocar,
     enfocarAgente: enfocarAgente,
     enfocarLugar: enfocarLugar,

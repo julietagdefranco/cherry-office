@@ -344,3 +344,86 @@ def resumir_en_segundo_plano(app, srv, msg, carpeta, agente, token):
             app.costos.registrar(carpeta, "resumen", caja.valor, agente)
     threading.Thread(target=correr, daemon=True).start()
     return listo
+
+
+# ----------------------------------------------------------------------------- avisos «te necesita» (Avisos.swift)
+
+SCHEMA_AVISOS = """
+CREATE TABLE IF NOT EXISTS avisos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    oficina TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    agente TEXT NOT NULL DEFAULT '',
+    texto TEXT NOT NULL,
+    ref TEXT NOT NULL DEFAULT '',
+    creado REAL NOT NULL,
+    visto INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS avisos_oficina ON avisos(oficina, visto);
+"""
+
+
+def texto_respuesta(t):
+    t = (t or "").replace("\n", " ").strip()
+    return t if len(t) <= 90 else t[:89] + "…"
+
+
+class Avisos:
+    """Guardados (respuesta, error, tarea) + calculados al leer (reunión esperando, propuestas pendientes)."""
+
+    def __init__(self, path):
+        self.path = path
+        self._tx(lambda c: c.executescript(SCHEMA_AVISOS))
+
+    def _tx(self, fn):
+        c = sqlite3.connect(self.path, timeout=30)
+        try:
+            with c:
+                return fn(c)
+        finally:
+            c.close()
+
+    def crear(self, oficina, tipo, texto, agente="", ref=""):
+        def fn(c):
+            if agente:
+                c.execute("UPDATE avisos SET visto=1 WHERE oficina=? AND tipo=? AND agente=? AND visto=0",
+                          (oficina, tipo, agente))
+            cur = c.execute("INSERT INTO avisos(oficina,tipo,agente,texto,ref,creado) VALUES(?,?,?,?,?,?)",
+                            (oficina, tipo, agente or "", texto, ref or "", time.time()))
+            return cur.lastrowid
+        return self._tx(fn)
+
+    def vistos(self, oficina, id_=None, agente=None):
+        if id_ is not None:
+            if not (isinstance(id_, str) and id_.startswith("a") and id_[1:].isdigit()):
+                return 0
+            return self._tx(lambda c: c.execute("UPDATE avisos SET visto=1 WHERE oficina=? AND id=?",
+                                                (oficina, int(id_[1:]))).rowcount)
+        if agente is not None:
+            return self._tx(lambda c: c.execute("UPDATE avisos SET visto=1 WHERE oficina=? AND agente=? AND visto=0",
+                                                (oficina, agente)).rowcount)
+        return self._tx(lambda c: c.execute("UPDATE avisos SET visto=1 WHERE oficina=? AND visto=0", (oficina,)).rowcount)
+
+    def pendientes(self, oficina):
+        def fn(c):
+            out = [{"id": "a%d" % r[0], "tipo": r[1], "agente": r[2], "texto": r[3], "ref": r[4], "creado": r[5]}
+                   for r in c.execute("SELECT id,tipo,agente,texto,ref,creado FROM avisos WHERE oficina=? AND visto=0 "
+                                      "ORDER BY id", (oficina,))]
+            try:
+                for rid, tema, creada in c.execute("SELECT id,tema,creada FROM reuniones WHERE oficina=? AND "
+                                                   "estado='esperando' ORDER BY creada", (oficina,)):
+                    out.append({"id": "reunion:" + rid, "tipo": "reunion", "agente": "",
+                                "texto": "La reunión «%s» te espera" % tema, "ref": rid, "creado": creada})
+            except sqlite3.Error:
+                pass
+            try:
+                n, desde = c.execute("SELECT COUNT(*), MIN(creada) FROM propuestas WHERE oficina=? AND estado='pendiente'",
+                                     (oficina,)).fetchone()
+                if n:
+                    out.append({"id": "propuestas", "tipo": "propuestas", "agente": "", "ref": "", "creado": desde,
+                                "texto": "Hay 1 propuesta de la biblioteca para revisar" if n == 1 else
+                                "Hay %d propuestas de la biblioteca para revisar" % n})
+            except sqlite3.Error:
+                pass
+            return sorted(out, key=lambda a: a["creado"] or 0)
+        return self._tx(fn)

@@ -42,6 +42,8 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     abrir: function (ruta) { if (puente) puente.postMessage({ accion: 'abrir', ruta: ruta }); },
     revelar: function (ruta) { if (puente) puente.postMessage({ accion: 'revelar', ruta: ruta }); },
     acerca: function () { if (puente) puente.postMessage({ accion: 'acerca' }); },
+    /* número en el ícono del Dock (avisos pendientes); 0 lo saca */
+    insignia: function (n) { if (puente) puente.postMessage({ accion: 'insignia', n: n | 0 }); },
     elegirCarpeta: function (titulo, inicio, crear) {
       if (!puente) return Promise.resolve(undefined);
       try {

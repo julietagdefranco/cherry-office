@@ -13,6 +13,9 @@ public final class Backend: Sendable {
 
     public var router: APIHandler { apiRouter }
 
+    /// La app se suscribe acá para mostrar una notificación de macOS por cada aviso nuevo.
+    public var avisos: CanalAvisos { runner.canalAvisos }
+
     /// Registra el enrutador de `/api/reuniones*` (lo hace la parte de reuniones al arrancar).
     public func registrarReuniones(_ r: SubRouter) { apiRouter.subrouters.reuniones = r }
 

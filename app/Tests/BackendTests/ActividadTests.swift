@@ -129,7 +129,7 @@ struct ActividadAPITests {
         let haiku = f.sb.llamadas.filter { Sandbox.valor($0, "--model") == "haiku" }
         #expect(haiku.count == 1)
         #expect(haiku.first.map { Sandbox.valor($0, "--tools") } == "")
-        #expect(haiku.first?.contains("--agent") == false)
+        #expect(haiku.first?.contains("--agent") == false, "\(haiku.first?.map { String($0.prefix(30)) } ?? [])")
         let c = await esperarAsync { (dict(await f.get("/api/costos").obj["origenes"])["resumen"] as? Double ?? 0) > 0 }
         #expect(c)
         let antes = f.sb.llamadas.count

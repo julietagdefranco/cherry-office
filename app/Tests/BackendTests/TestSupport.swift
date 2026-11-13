@@ -78,7 +78,9 @@ final class Sandbox: @unchecked Sendable {
       prev="$a"
     done
     msg="${@: -1}"
-    rec="$(printf '%s\x1f' "$@")"; printf '%s\x1e' "$rec" >> "$D/args.log"   # una sola escritura: corridas paralelas no se mezclan
+    rec="$(printf '%s\x1f' "$@")"
+    n=0; until mkdir "$D/args.lock" 2>/dev/null || [[ $n -gt 500 ]]; do sleep 0.01; n=$((n+1)); done   # corridas paralelas no se mezclan
+    printf '%s\x1e' "$rec" >> "$D/args.log"; rmdir "$D/args.lock" 2>/dev/null
     echo "S $agent" >> "$D/events.log"
     fin() { echo "E $agent" >> "$D/events.log"; }
     has() { [[ " $* " == *" $1 "* ]]; }

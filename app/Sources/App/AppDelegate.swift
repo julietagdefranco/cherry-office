@@ -10,11 +10,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var handler: HQSchemeHandler!
     private let env = ProcessInfo.processInfo.environment
     private var terminating = false
+    private var notificador: Notificador?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         runtime = Runtime.make()
         NSApp.mainMenu = MainMenu.build(delegate: self)
         buildWindow()
+        notificador = Notificador(webView: webView) { [weak self] in self?.traerVentana() }
+        notificador?.escuchar(runtime.avisos)
         NSApp.activate(ignoringOtherApps: true)
         Task { await boot() }
     }
@@ -101,6 +104,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         return .terminateLater
     }
 
+    /// Muestra la ventana y trae la app al frente (al tocar una notificación).
+    func traerVentana() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     // MARK: Mensajes del WebView (onboarding, spike)
 
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage,
@@ -129,6 +138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             Task { await manejarAbrir(accion: action, ruta: ruta) }
         case "acerca":
             mostrarAcerca(nil)
+        case "insignia":
+            notificador?.insignia((body["n"] as? Int) ?? 0)
         case "open":
             if let s = body["url"] as? String, let u = URL(string: s), u.scheme == "https" { NSWorkspace.shared.open(u) }
         case "login":

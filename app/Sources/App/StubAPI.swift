@@ -35,6 +35,8 @@ struct StubAPI: APIHandler {
 struct Runtime {
     let router: APIHandler
     let shutdown: () async -> Void
+    /// Avisos nuevos del backend (para notificaciones); nil en los modos stub.
+    var avisos: CanalAvisos? = nil
 
     static func make() -> Runtime {
         let env = ProcessInfo.processInfo.environment
@@ -43,7 +45,7 @@ struct Runtime {
         }
         do {
             let b = try Backend.makeDefault()
-            return Runtime(router: b.router, shutdown: { await b.shutdown() })
+            return Runtime(router: b.router, shutdown: { await b.shutdown() }, avisos: b.avisos)
         } catch {
             FileHandle.standardError.write(Data("[hq] Backend no pudo iniciar: \(error)\n".utf8))
             return Runtime(router: FailedAPI(message: "\(error)"), shutdown: {})

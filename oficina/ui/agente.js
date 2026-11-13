@@ -14,6 +14,7 @@
     App.Oficina3D.elegir(id);
     pintar();
     App.abrirDerecho('agente');
+    if (App.Avisos) App.Avisos.vistoAgente(id);
     App.marcarEstados();
   }
 
@@ -80,8 +81,7 @@
         (chats[id] = chats[id] || []).push({ r: 'a', t: 'No pude responder: ' + e.message, e: true });
       }).then(function () {
         ocupado(id, false);
-        if (actual === id && pestana === 'chat') pintar();
-        else App.aviso(App.agente(id) ? App.agente(id).nombre + ' te respondió.' : 'Llegó una respuesta.');
+        if (actual === id && pestana === 'chat') pintar();   // si no, el aviso llega por /api/actividad (banner y faro)
       });
     }
 

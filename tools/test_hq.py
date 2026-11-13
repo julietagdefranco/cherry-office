@@ -164,5 +164,22 @@ class VivoAPI(unittest.TestCase):
         self.assertIn("--verbose", args)
 
 
+class AvisosAPI(VivoAPI):
+    def test_chat_en_vivo_y_costo(self):   # no se repite el de la clase base
+        pass
+
+    def test_avisos(self):
+        sid = "11111111-1111-4111-8111-111111111111"
+        self.llamar("POST", "/api/chat", {"agent": "marce", "message": "hola", "session": sid})
+        self.llamar("POST", "/api/chat", {"agent": "marce", "message": "hola otra vez", "session": sid})
+        st, a = self.app.vivo("GET", "/api/avisos", {})
+        self.assertEqual([(x["tipo"], x["agente"]) for x in a["avisos"]], [("respuesta", "marce")])
+        self.assertEqual(a["avisos"][0]["texto"], "hola marce")
+        self.assertEqual(len(self.app.vivo("GET", "/api/actividad", {})[1]["avisos"]), 1)
+        st, r = self.app.vivo("POST", "/api/avisos/visto", {}, json.dumps({"agente": "marce"}).encode())
+        self.assertEqual(r["vistos"], 1)
+        self.assertEqual(self.app.vivo("GET", "/api/avisos", {})[1]["avisos"], [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

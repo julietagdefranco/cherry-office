@@ -105,8 +105,21 @@ public final class Router: APIHandler {
                 return method == "POST" ? try await chat(body) : no
             case ("actividad", 2):
                 guard method == "GET" else { return no }
-                guard let act = await oficinas.activa() else { return (200, ["agentes": [String: Any](), "version": 0]) }
-                return (200, runner.actividad.json(oficina: act.carpeta))
+                guard let act = await oficinas.activa() else { return (200, ["agentes": [String: Any](), "version": 0, "avisos": [Any]()]) }
+                var r = runner.actividad.json(oficina: act.carpeta)
+                r["avisos"] = await store.avisosPendientes(oficina: act.carpeta).map(\.json)
+                return (200, r)
+            case ("avisos", 2):
+                guard method == "GET" else { return no }
+                let act = try await oficinas.requerirActiva()
+                return (200, ["avisos": await store.avisosPendientes(oficina: act.carpeta).map(\.json)])
+            case ("avisos", 3) where partes[2] == "visto":
+                guard method == "POST" else { return no }
+                let act = try await oficinas.requerirActiva()
+                let d = try objeto(body)
+                let n = await store.avisosVistos(oficina: act.carpeta, id: d["id"] as? String,
+                                                 agente: (d["todos"] as? Bool) == true ? nil : d["agente"] as? String)
+                return (200, ["vistos": n])
             case ("costos", 2):
                 guard method == "GET" else { return no }
                 let act = try await oficinas.requerirActiva()
@@ -377,9 +390,17 @@ public final class Router: APIHandler {
                 }
                 try await store.marcarActiva(sid)
                 try await store.agregar(sid: sid, rol: "a", texto: texto.isEmpty ? "(sin respuesta)" : texto)
+                if let av = await store.avisoCrear(oficina: carpeta, tipo: "respuesta", agente: agente,
+                                                   texto: TextoAviso.respuesta(texto.isEmpty ? "(sin respuesta)" : texto), ref: sid) {
+                    runner.canalAvisos.emitir(av, nombre: def.nombre)
+                }
                 return (200, ["reply": texto])
             } catch let e as ClaudeError {
                 try? await store.agregar(sid: sid, rol: "a", texto: "No pude responder: " + e.mensaje, error: true)
+                if let av = await store.avisoCrear(oficina: carpeta, tipo: "error", agente: agente,
+                                                   texto: "No pudo responder: " + e.mensaje, ref: sid) {
+                    runner.canalAvisos.emitir(av, nombre: def.nombre)
+                }
                 return (e.status, ["error": e.mensaje])
             } catch {
                 let t = "No pude guardar la conversación."

@@ -538,6 +538,7 @@ class App:
         self.db = Datos(os.path.join(cfg["datos_dir"], "hq.db"))
         self.actividad = hq_vivo.Actividad()
         self.costos = hq_vivo.Costos(os.path.join(cfg["datos_dir"], "hq.db"))
+        self.avisos = hq_vivo.Avisos(os.path.join(cfg["datos_dir"], "hq.db"))
         self.migrados = self.db.migrar_json(sesiones_json or os.path.join(ROOT, ".sesiones.json"))
         self.auth_ok = None
         self.home = _home()
@@ -718,11 +719,13 @@ class App:
         if e:
             tipo, texto = clasificar_error(e)
             self.db.agregar(sid, agente, "a", "No pude responder: " + texto, True)
+            self.avisos.crear(carpeta, "error", "No pudo responder: " + texto, agente, sid)
             log.warning("chat agente=%s sid=%s tipo=%s rc=%s seg=%.1f", agente, sid[:8], tipo, rc, time.time() - t0)
             return 500, {"error": texto}
         texto = (out or {}).get("result") or so.strip()
         self.db.marcar_activa(sid)
         self.db.agregar(sid, agente, "a", texto or "(sin respuesta)")
+        self.avisos.crear(carpeta, "respuesta", hq_vivo.texto_respuesta(texto or "(sin respuesta)"), agente, sid)
         log.info("chat agente=%s sid=%s tipo=ok seg=%.1f", agente, sid[:8], time.time() - t0)
         return 200, {"reply": texto}
 
@@ -761,17 +764,34 @@ class App:
 
     # ---- en vivo (fuera de self.mut: no se traba mientras dura un chat)
 
-    def vivo(self, metodo, path, query):
+    def vivo(self, metodo, path, query, body=None):
         """/api/actividad y /api/costos. -> (status, dict) o None si no es una de esas rutas."""
-        if path not in ("/api/actividad", "/api/costos"):
+        if path not in ("/api/actividad", "/api/costos", "/api/avisos", "/api/avisos/visto"):
             return None
+        carpeta = self.activa_carpeta
+        if path == "/api/avisos/visto":
+            if metodo != "POST":
+                return 405, {"error": "método no permitido"}
+            if not carpeta:
+                return 409, {"error": "No hay una oficina abierta."}
+            try:
+                d = json.loads(body or b"{}")
+                d = d if isinstance(d, dict) else {}
+            except ValueError:
+                return 400, {"error": "pedido inválido"}
+            return 200, {"vistos": self.avisos.vistos(carpeta, d.get("id"), None if d.get("todos") is True else d.get("agente"))}
         if metodo != "GET":
             return 405, {"error": "método no permitido"}
-        carpeta = self.activa_carpeta
         if path == "/api/actividad":
-            return 200, (self.actividad.json(carpeta) if carpeta else {"agentes": {}, "version": 0})
+            if not carpeta:
+                return 200, {"agentes": {}, "version": 0, "avisos": []}
+            r = self.actividad.json(carpeta)
+            r["avisos"] = self.avisos.pendientes(carpeta)
+            return 200, r
         if not carpeta:
             return 409, {"error": "No hay una oficina abierta."}
+        if path == "/api/avisos":
+            return 200, {"avisos": self.avisos.pendientes(carpeta)}
         try:
             desde = float((query.get("desde") or ["0"])[0])
         except ValueError:
@@ -1090,7 +1110,7 @@ def crear_handler(app):
 
         def _api(self, metodo, u, body):
             q = parse_qs(u.query)
-            r = app.vivo(metodo, u.path, q)
+            r = app.vivo(metodo, u.path, q, body)
             if r is not None:
                 return self._json(*r)
             if u.path == "/api/reuniones" or u.path.startswith("/api/reuniones/"):

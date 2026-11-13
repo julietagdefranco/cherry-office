@@ -271,6 +271,8 @@ public final class ClaudeRunner: Sendable {
     private let limite: LimiteProcesos
     /// Qué hace cada agente ahora (lo alimentan los eventos de stream-json de cada corrida).
     public let actividad = ActividadRegistro()
+    /// Avisos guardados recién creados -> la app nativa (notificación). Ver Avisos.swift.
+    public let canalAvisos = CanalAvisos()
     /// Tope por defecto de procesos claude simultáneos (`HQ_MAX_CLAUDE` lo cambia).
     public static let maxClaudePorDefecto = 8
     /// Gracia entre terminate y kill (segundos).
