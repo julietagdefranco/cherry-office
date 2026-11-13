@@ -17,6 +17,7 @@ final class SubRouterBox: @unchecked Sendable {
     private var valorBiblioteca: SubRouter?
     private var valorExplorador: SubRouter?
     private var valorTareas: SubRouter?
+    private var valorEntregas: SubRouter?
     var reuniones: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valor }
         set { lock.lock(); valor = newValue; lock.unlock() }
@@ -32,6 +33,10 @@ final class SubRouterBox: @unchecked Sendable {
     var tareas: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valorTareas }
         set { lock.lock(); valorTareas = newValue; lock.unlock() }
+    }
+    var entregas: SubRouter? {
+        get { lock.lock(); defer { lock.unlock() }; return valorEntregas }
+        set { lock.lock(); valorEntregas = newValue; lock.unlock() }
     }
 }
 
@@ -91,6 +96,10 @@ public final class Router: APIHandler {
             if let r = subrouters.tareas, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
             return (404, Router.codificar(["error": "no"]))
         }
+        if EntregasRouter.esRuta(p) { // /api/entregas*
+            if let r = subrouters.entregas, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
+            return (404, Router.codificar(["error": "no"]))
+        }
         if ExploradorRouter.esRuta(p) { // /api/fs/carpetas, /api/oficina/archivos, /api/oficina/archivo
             if let r = subrouters.explorador, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
             return (404, Router.codificar(["error": "no"]))
@@ -119,9 +128,12 @@ public final class Router: APIHandler {
                 return method == "GET" ? try await consultas(query) : no
             case ("actividad", 2):
                 guard method == "GET" else { return no }
-                guard let act = await oficinas.activa() else { return (200, ["agentes": [String: Any](), "version": 0, "avisos": [Any]()]) }
+                guard let act = await oficinas.activa() else {
+                    return (200, ["agentes": [String: Any](), "version": 0, "avisos": [Any](), "entregasSinRevisar": 0])
+                }
                 var r = runner.actividad.json(oficina: act.carpeta)
                 r["avisos"] = await store.avisosPendientes(oficina: act.carpeta).map(\.json)
+                r["entregasSinRevisar"] = await store.entregasSinRevisar(oficina: act.carpeta)
                 return (200, r)
             case ("avisos", 2):
                 guard method == "GET" else { return no }
@@ -406,6 +418,7 @@ public final class Router: APIHandler {
         var ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
         let carpeta = act.carpeta
         let caja = CajaCosto()
+        let escritos = CajaArchivos()
         defer { let c = caja.valor; Task { await store.registrarCosto(oficina: carpeta, agente: agente, origen: "chat", ref: sid, costo: c) } }
         // Consultas a colegas: el token vive lo que dura este chat (se revoca al terminar). Si el servidor MCP no
         // arrancó, el chat sale igual, sin la herramienta.
@@ -424,7 +437,7 @@ public final class Router: APIHandler {
                 try await store.agregar(sid: sid, rol: "u", texto: msg)
                 let activa = await store.estaActiva(sid)
                 let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "chat", tarea: msg,
-                                                              extra: caja.observador()) { obs, token in
+                                                              extra: caja.observador(escritos.observador())) { obs, token in
                     let resumen = runner.resumirTarea(msg, oficina: carpeta, agente: agente, token: token, store: store)
                     defer { resumen?.cancel() }
                     return try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctxFinal, obs: obs,
@@ -436,7 +449,15 @@ public final class Router: APIHandler {
                                                    texto: TextoAviso.respuesta(texto.isEmpty ? "(sin respuesta)" : texto), ref: sid) {
                     runner.canalAvisos.emitir(av, nombre: def.nombre)
                 }
-                return (200, ["reply": texto])
+                // un chat que dejó archivos en archivos/entregables/ cuenta como entrega para revisar
+                let entregables = ArchivosEntrega.enEntregables(ArchivosEntrega.relativos(escritos.valor, carpeta: carpeta))
+                var r: [String: String] = ["reply": texto]
+                if !entregables.isEmpty, let e = await RegistroEntregas.registrar(
+                    store, runner.canalAvisos, oficina: carpeta, agente: agente, nombre: def.nombre, origen: "chat", ref: sid,
+                    titulo: TextoEntrega.titulo(msg), texto: texto, sid: sid, archivos: entregables, costo: caja.valor) {
+                    r["entrega"] = String(e.id)
+                }
+                return (200, r)
             } catch let e as ClaudeError {
                 try? await store.agregar(sid: sid, rol: "a", texto: "No pude responder: " + e.mensaje, error: true)
                 if let av = await store.avisoCrear(oficina: carpeta, tipo: "error", agente: agente,

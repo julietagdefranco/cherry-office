@@ -181,6 +181,15 @@ final class Sandbox: @unchecked Sendable {
       echo "{\"type\":\"result\",\"result\":\"consulte\",\"is_error\":false,\"total_cost_usd\":0.01}"
       fin; exit 0
     fi
+    if [[ "$msg" == *ENTREGA:* ]]; then
+      # escribe el archivo pedido (relativo a la carpeta de trabajo) y lo informa como un Write de claude
+      rel="${msg#*ENTREGA:}"; rel="${rel%% *}"
+      mkdir -p "$(dirname "$PWD/$rel")"; echo "entregado por $agent" > "$PWD/$rel"
+      echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Write\",\"input\":{\"file_path\":\"$PWD/$rel\",\"content\":\"x\"}}]}}"
+      echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/fuera/de/la/oficina.md"}}]}}'
+      echo "{\"type\":\"result\",\"result\":\"Listo, dejé $rel\",\"is_error\":false,\"total_cost_usd\":0.03}"
+      fin; exit 0
+    fi
     if [[ "$msg" == *STREAM* ]]; then
       echo '{"type":"system","subtype":"hook_started","hook_name":"x"}'
       echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-$agent\"}"

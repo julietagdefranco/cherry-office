@@ -13,11 +13,15 @@ final class BarraMenu: NSObject, NSMenuDelegate {
     private let proximas = NSMenuItem(title: "Próximas tareas", action: nil, keyEquivalent: "")
     private let submenu = NSMenu(title: "Próximas tareas")
     private let inicio = NSMenuItem(title: "Abrir al iniciar sesión", action: #selector(alternarInicio(_:)), keyEquivalent: "")
+    /// «N entregas sin revisar»: abre la oficina en el panel de entregables. Oculto con 0.
+    private let entregas = NSMenuItem(title: "", action: #selector(verEntregas(_:)), keyEquivalent: "")
+    private let abrirEntregas: () -> Void
     private static let maxProximas = 5
 
-    init(router: APIHandler, abrir: @escaping () -> Void) {
+    init(router: APIHandler, abrir: @escaping () -> Void, abrirEntregas: @escaping () -> Void) {
         self.router = router
         self.abrir = abrir
+        self.abrirEntregas = abrirEntregas
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         if let b = item.button {
@@ -30,6 +34,9 @@ final class BarraMenu: NSObject, NSMenuDelegate {
         let abrirItem = NSMenuItem(title: "Abrir Oficina", action: #selector(abrirOficina(_:)), keyEquivalent: "")
         abrirItem.target = self
         menu.addItem(abrirItem)
+        entregas.target = self
+        entregas.isHidden = true
+        menu.addItem(entregas)
         proximas.submenu = submenu
         menu.addItem(proximas)
         menu.addItem(.separator())
@@ -49,6 +56,7 @@ final class BarraMenu: NSObject, NSMenuDelegate {
     // MARK: acciones
 
     @objc private func abrirOficina(_ sender: Any?) { abrir() }
+    @objc private func verEntregas(_ sender: Any?) { abrirEntregas() }
 
     /// Prende o apaga «Abrir al iniciar sesión». Si no se puede registrar (por ejemplo, app sin firmar o sin aprobar),
     /// se avisa sin romper y el checkbox muestra el estado real.
@@ -94,6 +102,9 @@ final class BarraMenu: NSObject, NSMenuDelegate {
 
     /// Las próximas `maxProximas` corridas de las tareas activas de la oficina abierta.
     private func refrescar() async {
+        let n = (await obtener("/api/actividad")?["entregasSinRevisar"] as? Int) ?? 0
+        entregas.title = n == 1 ? "1 entrega sin revisar" : "\(n) entregas sin revisar"
+        entregas.isHidden = n == 0
         var lineas: [String] = []
         if let t = await obtener("/api/tareas")?["tareas"] as? [[String: Any]] {
             let ags = (await obtener("/api/agentes")?["agentes"] as? [[String: Any]]) ?? []

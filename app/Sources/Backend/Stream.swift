@@ -7,6 +7,9 @@ public enum EventoClaude: Sendable, Equatable {
     case inicio(sesion: String)
     case pensando
     case herramienta(nombre: String, objetivo: String?)
+    /// Ruta completa de un archivo que el agente escribió (`Write`, `Edit`, `NotebookEdit`). Llega justo después de su
+    /// `.herramienta`. Solo la usan las entregas (qué archivos produjo una corrida); la actividad la ignora.
+    case archivo(ruta: String)
     case texto
     case resultado(costo: Double?, error: Bool)
 }
@@ -27,14 +30,19 @@ extension EventoClaude {
             return []
         case "assistant":
             let bloques = ((o["message"] as? [String: Any])?["content"] as? [[String: Any]]) ?? []
-            return bloques.compactMap { b in
+            return bloques.flatMap { b -> [EventoClaude] in
                 switch b["type"] as? String {
-                case "thinking": return .pensando
-                case "text": return .texto
+                case "thinking": return [.pensando]
+                case "text": return [.texto]
                 case "tool_use":
-                    guard let n = b["name"] as? String else { return nil }
-                    return .herramienta(nombre: n, objetivo: objetivo(n, b["input"] as? [String: Any] ?? [:]))
-                default: return nil
+                    guard let n = b["name"] as? String else { return [] }
+                    let input = b["input"] as? [String: Any] ?? [:]
+                    var out: [EventoClaude] = [.herramienta(nombre: n, objetivo: objetivo(n, input))]
+                    if escritoras.contains(n), let p = input["file_path"] as? String ?? input["notebook_path"] as? String, !p.isEmpty {
+                        out.append(.archivo(ruta: p))
+                    }
+                    return out
+                default: return []
                 }
             }
         case "result":
@@ -44,6 +52,9 @@ extension EventoClaude {
             return []
         }
     }
+
+    /// Herramientas que escriben un archivo (su ruta llega en `file_path` o `notebook_path`).
+    static let escritoras: Set<String> = ["Write", "Edit", "MultiEdit", "NotebookEdit"]
 
     /// Objetivo legible y corto de una herramienta: nombre de archivo, patrón, dominio o colega. Sin contenido.
     static func objetivo(_ herramienta: String, _ input: [String: Any]) -> String? {
@@ -94,6 +105,24 @@ public final class CajaCosto: @unchecked Sendable {
     public func observador(_ siguiente: Observador? = nil) -> Observador {
         { [self] e in
             if case .resultado(let c, _) = e { sumar(c) }
+            siguiente?(e)
+        }
+    }
+}
+
+/// Junta las rutas de los archivos que escribieron una o varias corridas, sin repetir y en orden (el observador corre
+/// en otro hilo).
+public final class CajaArchivos: @unchecked Sendable {
+    private let lock = NSLock()
+    private var rutas: [String] = []
+    public init() {}
+    public func agregar(_ r: String) { lock.lock(); if !rutas.contains(r) { rutas.append(r) }; lock.unlock() }
+    public var valor: [String] { lock.lock(); defer { lock.unlock() }; return rutas }
+
+    /// Observador que anota los `.archivo` y reenvía todo a `siguiente`.
+    public func observador(_ siguiente: Observador? = nil) -> Observador {
+        { [self] e in
+            if case .archivo(let r) = e { agregar(r) }
             siguiente?(e)
         }
     }

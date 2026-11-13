@@ -380,10 +380,12 @@ public actor ReunionesRouter: SubRouter {
     static let maxParticipantes = 20
     static let maxRondas = 3
 
-    private let store: Store
+    let store: Store
     private let runner: ClaudeRunner
-    private let oficinas: Oficinas
+    let oficinas: Oficinas
     private let log: HQLog
+    /// Corre los encargos de los pendientes («Hacelo ahora»). nil = sin encargos (tests viejos).
+    let programador: Programador?
     private let timeoutTurno: TimeInterval
     private let timeoutSintesis: TimeInterval
     private var preparado = false
@@ -391,9 +393,9 @@ public actor ReunionesRouter: SubRouter {
     private var hablando: [String: String] = [:]
     private var cerrando: Set<String> = []
 
-    public init(store: Store, runner: ClaudeRunner, oficinas: Oficinas, log: HQLog,
+    public init(store: Store, runner: ClaudeRunner, oficinas: Oficinas, log: HQLog, programador: Programador? = nil,
                 env: [String: String] = ProcessInfo.processInfo.environment) {
-        self.store = store; self.runner = runner; self.oficinas = oficinas; self.log = log
+        self.store = store; self.runner = runner; self.oficinas = oficinas; self.log = log; self.programador = programador
         timeoutTurno = env["HQ_REUNION_TURNO_TIMEOUT"].flatMap(TimeInterval.init) ?? 180
         timeoutSintesis = env["HQ_REUNION_SINTESIS_TIMEOUT"].flatMap(TimeInterval.init) ?? 180
     }
@@ -406,7 +408,7 @@ public actor ReunionesRouter: SubRouter {
 
     public func handle(method: String, path: String, query: [String: String], body: Data?) async -> (status: Int, json: Data)? {
         let partes = path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
-        guard partes.count >= 2, partes[0] == "api", partes[1] == "reuniones", partes.count <= 4, !partes.contains("") else { return nil }
+        guard partes.count >= 2, partes[0] == "api", partes[1] == "reuniones", partes.count <= 6, !partes.contains("") else { return nil }
         do {
             try await preparar()
             let (code, obj) = try await despachar(method, partes, body)
@@ -431,6 +433,15 @@ public actor ReunionesRouter: SubRouter {
         case 3:
             guard Router.uuidValido(partes[2]) else { return (404, ["error": "no"]) }
             return m == "GET" ? (200, try await detalle(partes[2].lowercased())) : no
+        case 6:
+            // POST /api/reuniones/:id/pendientes/:n/encargar
+            guard Router.uuidValido(partes[2]), partes[3] == "pendientes", let n = Int(partes[4]), n >= 0, partes[5] == "encargar" else {
+                return (404, ["error": "no"])
+            }
+            guard m == "POST" else { return no }
+            return (202, try await encargar(partes[2].lowercased(), n))
+        case 5:
+            return (404, ["error": "no"])
         default:
             guard Router.uuidValido(partes[2]) else { return (404, ["error": "no"]) }
             let id = partes[2].lowercased()
@@ -496,7 +507,9 @@ public actor ReunionesRouter: SubRouter {
     private func respuesta(_ id: String, _ a: OficinaActiva) async throws -> [String: Any] {
         let vivo = corriendo[id] != nil, habla = hablando[id]
         let f = try await fila(id, a)
-        return vista(f, vivo: vivo, habla: habla, turnos: await store.turnosDe(reunion: id))
+        var o = vista(f, vivo: vivo, habla: habla, turnos: await store.turnosDe(reunion: id))
+        if let e = await estadoPendientes(f, a) { o["pendientesEstado"] = e }
+        return o
     }
 
     // MARK: endpoints
@@ -637,9 +650,11 @@ public actor ReunionesRouter: SubRouter {
         let hoy = Date()
         var errorActa: String?
         var rel: String?
+        let textoActa = ReunionTexto.acta(oficina: of, tema: f.tema, participantes: parts, turnos: turnos,
+                                          sintesis: sintesis, errorSintesis: errSint, fecha: hoy)
+        var salidaFinal: String?
         do {
-            let r = try escribirActa(a, f, ReunionTexto.acta(oficina: of, tema: f.tema, participantes: parts, turnos: turnos,
-                                                            sintesis: sintesis, errorSintesis: errSint, fecha: hoy), fecha: hoy)
+            let r = try escribirActa(a, f, textoActa, fecha: hoy)
             rel = r
             if let s = sintesis, !s.decisiones.isEmpty {
                 try Plantillas.anexarDecisiones(carpeta: a.carpeta, decisiones: s.decisiones, fecha: hoy)
@@ -664,6 +679,7 @@ public actor ReunionesRouter: SubRouter {
                 let definitiva = try escribirSalida(a, pedida, ReunionPatron.markdownSalida(oficina: of, f: f, participantes: parts, sintesis: sintesis,
                                                                                          errorSintesis: errSint, acta: rel, fecha: hoy))
                 try await store.reunionSalida(id, definitiva)
+                salidaFinal = definitiva
             } catch {
                 if errorActa == nil { errorActa = "No pude guardar el archivo de salida (\(pedida))." }
                 log.error("reuniones: salida: \(error)")
@@ -672,6 +688,11 @@ public actor ReunionesRouter: SubRouter {
         let js = sintesis.flatMap { try? JSONSerialization.data(withJSONObject: $0.json) }.flatMap { String(data: $0, encoding: .utf8) }
         do { try await store.reunionCerrar(id, sintesis: js, errorSintesis: errSint, acta: rel, error: errorActa) }
         catch { throw ErrorAPI(500, "No pude guardar el cierre de la reunión.") }
+        // el acta queda como entrega para revisar (sin agente: es de la reunión)
+        if let rel {
+            await RegistroEntregas.registrar(store, runner.canalAvisos, oficina: a.carpeta, agente: "", nombre: "", origen: "reunion", ref: id,
+                                             titulo: "Acta: \(f.tema)", texto: textoActa, archivos: [rel] + (salidaFinal.map { [$0] } ?? []))
+        }
         return try await respuesta(id, a)
     }
 

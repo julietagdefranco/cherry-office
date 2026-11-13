@@ -4,13 +4,13 @@ Equipo de agentes de IA (Betty, Don Armando, Marce, Doña Catalina, Patricia, Do
 
 - `agentes/` definiciones de los agentes para Claude Code
 - `contexto/` contexto maestro de Betty y un ejemplo del estado actual
-- `oficina/` la oficina 3D y el servidor de chat local
+- `oficina/` la interfaz de la oficina 3D (la sirve la app de macOS, `app/`)
 - `instalar.command` copia los agentes a `~/.claude` y prepara la memoria compartida
 
 ## Instalar
 1. Doble clic en `instalar.command`.
 2. Abrí una sesión nueva de Claude Code (reconoce a los agentes recién ahí).
-3. Doble clic en `oficina/Abrir Próspera HQ.command`.
+3. Abrí la app **Oficina** (`app/`: ver `app/README.md` para compilarla o instalar el `.dmg`).
 
 El instalador es seguro de repetir: reemplaza `/Users/julietadefranco` por tu `$HOME` al copiar (así funciona en cualquier usuario o compu), y si un agente ya instalado difiere, guarda antes un respaldo `.bak-AAAAMMDD-HHMMSS` junto al original. Nunca pisa tu `estado-actual.md` ni la memoria compartida.
 
@@ -22,5 +22,12 @@ El instalador crea `~/Próspera/_equipo/` (solo si falta):
 El estado principal sigue en `~/Próspera/_betty/estado-actual.md`. Al empezar, cada agente lee el estado, las decisiones y las notas de los demás que le sirvan. Los permisos de escritura los impone el servidor de la oficina.
 Las plantillas están en `contexto/equipo/`.
 
-Nota: en `oficina/server.py` las rutas por defecto se derivan de `$HOME`; los agentes de `agentes/*.md` quedan adaptados por el instalador.
+Nota: las rutas por defecto se derivan de `$HOME`; los agentes de `agentes/*.md` quedan adaptados por el instalador.
+
+## Desarrollo
+La interfaz se puede probar en el navegador con el mismo backend Swift de la app, sin compilar la .app:
+```bash
+cd app && swift run oficina-dev      # http://localhost:8765
+```
+Variables útiles: `PORT`, `HQ_DATA_DIR`, `HQ_OFICINAS_DIR`, `CLAUDE_BIN` (ver `app/Sources/Dev/main.swift`). Tests: `app/Tests/run-tests.sh`.
 Repositorio privado recomendado: incluye contexto de negocio y el modelo `lego_man.json` (del repo 3d-lego-configurator, sin licencia).

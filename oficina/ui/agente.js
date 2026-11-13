@@ -339,11 +339,13 @@
   }
 
   /* hoja para crear (t = null) o editar una tarea */
-  function hojaTarea(a, t, alGuardar) {
+  /* `pre` (solo al crear): {nombre, consigna, origen} precargados, p. ej. desde un pendiente de reunión */
+  function hojaTarea(a, t, alGuardar, pre) {
+    pre = pre || {};
     var hj = App.hoja({ titulo: t ? 'Editar tarea' : 'Nueva tarea de ' + a.nombre, ancho: 540 });
-    var nombre = h('input.campo', { value: t ? t.nombre : '', maxlength: 80, placeholder: 'Por ejemplo: Informe de la mañana', autofocus: true });
+    var nombre = h('input.campo', { value: t ? t.nombre : (pre.nombre || ''), maxlength: 80, placeholder: 'Por ejemplo: Informe de la mañana', autofocus: true });
     var consigna = h('textarea.campo', { rows: 6, maxlength: 4000, placeholder: 'Lo que ' + a.nombre + ' tiene que hacer cada vez, como si se lo escribieras en el chat.' });
-    consigna.value = t ? t.consigna : '';
+    consigna.value = t ? t.consigna : (pre.consigna || '');
     var dias = {};
     (t ? t.dias : [1, 2, 3, 4, 5]).forEach(function (n) { dias[n] = true; });
     var chips = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } }, DIAS.map(function (d) {
@@ -383,11 +385,12 @@
       if (!d.length) { err.textContent = 'Elegí al menos un día.'; return; }
       if (!/^\d\d:\d\d$/.test(cuerpo.hora)) { err.textContent = 'Elegí la hora.'; return; }
       guardar.disabled = true; err.textContent = '';
-      var p = t ? api.patch('/api/tareas/' + encodeURIComponent(t.id), cuerpo) : api.post('/api/tareas', Object.assign({ agente: a.id }, cuerpo));
+      var p = t ? api.patch('/api/tareas/' + encodeURIComponent(t.id), cuerpo)
+        : api.post('/api/tareas', Object.assign({ agente: a.id }, pre.origen ? { origen: pre.origen } : {}, cuerpo));
       p.then(function () {
         hj.cerrar();
         App.aviso(t ? 'Cambios guardados.' : 'Tarea creada.');
-        alGuardar();
+        if (alGuardar) alGuardar();
       }).catch(function (e) { err.textContent = e.message; guardar.disabled = false; });
     } }, t ? 'Guardar cambios' : 'Crear tarea');
     App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), guardar);
@@ -396,5 +399,16 @@
   function cerrar() { if (App.modoDerecho() === 'agente') App.cerrarDerecho(); else alCerrar(); }
   function alCerrar() { actual = null; App.Oficina3D.elegir(null); App.marcarEstados(); }
 
-  App.Agente = { abrir: abrir, cerrar: cerrar, alCerrar: alCerrar, actual: function () { return actual; } };
+  /* abre la hoja de «Nueva tarea» de un agente con datos precargados (desde un pendiente de reunión) */
+  function nuevaTarea(id, pre, alGuardar) {
+    var a = App.agente(id); if (!a) return;
+    hojaTarea(a, null, alGuardar, pre);
+  }
+
+  App.Agente = { abrir: abrir, cerrar: cerrar, alCerrar: alCerrar, actual: function () { return actual; }, nuevaTarea: nuevaTarea,
+    /* abre una conversación concreta del agente (p. ej. la de una entrega) en su pestaña de chat */
+    abrirSesion: function (id, sid) {
+      var a = App.agente(id); if (!a) return;
+      actual = id; App.Oficina3D.elegir(id); App.abrirDerecho('agente'); abrirSesion(a, sid); App.marcarEstados();
+    } };
 })();

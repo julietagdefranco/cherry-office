@@ -5,6 +5,14 @@ import Foundation
 
 // MARK: - modelo
 
+/// De qué pendiente de reunión salió una tarea («Convertir en tarea»): id de la reunión y posición del pendiente.
+public struct OrigenTarea: Codable, Sendable, Equatable {
+    public var reunion: String
+    public var pendiente: Int
+    public init(reunion: String, pendiente: Int) { self.reunion = reunion; self.pendiente = pendiente }
+    public var json: [String: Any] { ["reunion": reunion, "pendiente": pendiente] }
+}
+
 /// Una consigna que un agente corre solo, en ciertos días a cierta hora (en la zona de la tarea).
 public struct TareaProgramada: Codable, Sendable, Equatable {
     public var id: String
@@ -23,14 +31,16 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
     /// "A partir de": una corrida anterior a esta fecha no se pone al día (se fija al crear, al reactivar y al cambiar el horario,
     /// para que una tarea nueva o movida no dispare enseguida la corrida de hoy que ya pasó). ISO 8601, UTC.
     public var desde: String?
+    /// Pendiente de reunión del que salió (opcional).
+    public var origen: OrigenTarea?
 
     public init(id: String, agente: String, nombre: String, consigna: String, dias: [Int], hora: String,
-                zona: String? = nil, activa: Bool = true, creada: String? = nil, desde: String? = nil) {
+                zona: String? = nil, activa: Bool = true, creada: String? = nil, desde: String? = nil, origen: OrigenTarea? = nil) {
         self.id = id; self.agente = agente; self.nombre = nombre; self.consigna = consigna; self.dias = dias
-        self.hora = hora; self.zona = zona; self.activa = activa; self.creada = creada; self.desde = desde
+        self.hora = hora; self.zona = zona; self.activa = activa; self.creada = creada; self.desde = desde; self.origen = origen
     }
 
-    enum CodingKeys: String, CodingKey { case id, agente, nombre, consigna, dias, hora, zona, activa, creada, desde }
+    enum CodingKeys: String, CodingKey { case id, agente, nombre, consigna, dias, hora, zona, activa, creada, desde, origen }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -44,6 +54,7 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
         activa = try c.decodeIfPresent(Bool.self, forKey: .activa) ?? true
         creada = try c.decodeIfPresent(String.self, forKey: .creada)
         desde = try c.decodeIfPresent(String.self, forKey: .desde)
+        origen = try c.decodeIfPresent(OrigenTarea.self, forKey: .origen)
     }
 
     /// Zona efectiva: la de la tarea, o la del sistema si no tiene (o no se reconoce).
@@ -61,6 +72,7 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
         var o: [String: Any] = ["id": id, "agente": agente, "nombre": nombre, "consigna": consigna, "dias": dias,
                                 "hora": hora, "zona": zona ?? sistema.identifier, "activa": activa]
         if let creada { o["creada"] = creada }
+        if let origen { o["origen"] = origen.json }
         return o
     }
 }
@@ -76,6 +88,11 @@ public enum ValidarTareas {
     public static func hora(_ s: String) -> (Int, Int)? { Programacion.horaMinuto(s) }
 
     public static func zonaValida(_ s: String) -> Bool { !s.isEmpty && TimeZone(identifier: s) != nil }
+
+    public static let maxPendientes = 200
+    public static func origenValido(_ o: OrigenTarea) -> Bool {
+        Router.uuidValido(o.reunion) && o.reunion == o.reunion.lowercased() && (0..<maxPendientes).contains(o.pendiente)
+    }
 
     /// Reglas de `tareas` dentro de una oficina: id slug único, agente existente (solo exigido a las activas: al despedir a un
     /// agente sus tareas quedan desactivadas y se conservan), días 1…7 sin repetir y no vacíos, hora, zona, consigna y nombre.
@@ -96,6 +113,7 @@ public enum ValidarTareas {
             }
             guard hora(t.hora) != nil else { throw ErrorAPI(400, "La hora de la tarea \(t.id) tiene que ser HH:MM (por ejemplo 08:00).") }
             if let z = t.zona, !zonaValida(z) { throw ErrorAPI(400, "La zona horaria de la tarea \(t.id) no existe: \(z).") }
+            if let og = t.origen, !origenValido(og) { throw ErrorAPI(400, "El origen de la tarea \(t.id) no es válido.") }
         }
     }
 }

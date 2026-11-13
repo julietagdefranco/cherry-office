@@ -54,6 +54,7 @@ final class Notificador: NSObject, UNUserNotificationCenterDelegate {
         case "respuesta": return "\(nombre) te respondió"
         case "error": return "\(nombre) no pudo responder"
         case "tarea": return "\(nombre) terminó una tarea"
+        case "entrega": return a.agente.isEmpty ? "Nueva entrega para revisar" : "\(nombre) te entregó algo"
         default: return "Próspera HQ"
         }
     }

@@ -80,7 +80,7 @@ public final class ActividadRegistro: @unchecked Sendable {
             est.estado = "pensando"; est.herramienta = nil; est.objetivo = nil
         case .herramienta(let n, let obj):
             est.estado = Self.estado(herramienta: n); est.herramienta = n; est.objetivo = obj
-        case .inicio, .resultado:
+        case .inicio, .resultado, .archivo:
             return
         }
         corridas[k]?[token] = est
