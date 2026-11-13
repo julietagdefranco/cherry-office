@@ -1,0 +1,7 @@
+.DS_Store
+.sesiones.json
+__pycache__/
+_prueba/
+# tu estado real (se genera al instalar, no se sube)
+_betty/estado-actual.md
+_betty/estado-actual.respaldo.md
