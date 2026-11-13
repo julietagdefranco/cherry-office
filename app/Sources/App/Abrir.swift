@@ -65,7 +65,7 @@ extension AppDelegate {
         guard let oficina else { NSSound.beep(); return }
         let destino = (ruta?.isEmpty == false) ? ruta! : oficina
         guard let url = AbrirArchivo.resolver(destino, bases: bases) else {
-            NSLog("Próspera HQ: ruta fuera de la oficina y de las carpetas vinculadas: \(destino)")
+            NSLog("Oficina: ruta fuera de la oficina y de las carpetas vinculadas: \(destino)")
             NSSound.beep(); return
         }
         var esDir: ObjCBool = false
@@ -101,7 +101,7 @@ extension AppDelegate {
         Task { await manejarAbrir(accion: "revelar", ruta: nil) }
     }
 
-    /// «Acerca de Próspera HQ»: versión y créditos de lo que lleva dentro la app.
+    /// «Acerca de Oficina»: versión y créditos de lo que lleva dentro la app.
     @objc func mostrarAcerca(_ sender: Any?) {
         let cuerpo = NSMutableAttributedString()
         let normal: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.labelColor]

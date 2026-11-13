@@ -1,4 +1,4 @@
-// Genera un PNG 1024x1024 (fondo crema redondeado + logo centrado) desde un SVG.
+// Genera un PNG 1024x1024 (fondo claro redondeado + logo centrado) desde un SVG.
 // Uso: swift make-icon.swift <logo.svg> <salida.png>
 import AppKit
 
@@ -14,9 +14,9 @@ NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 let inset: CGFloat = 100
 let bg = NSBezierPath(roundedRect: NSRect(x: inset, y: inset, width: size - 2 * inset, height: size - 2 * inset), xRadius: 180, yRadius: 180)
-NSColor(red: 0.992, green: 0.906, blue: 0.953, alpha: 1).setFill()
+NSColor(red: 0.965, green: 0.953, blue: 0.937, alpha: 1).setFill()
 bg.fill()
-let w = size - 2 * inset - 120
+let w = size - 2 * inset - 280
 let ratio = svg.size.height / max(svg.size.width, 1)
 let h = w * ratio
 svg.draw(in: NSRect(x: (size - w) / 2, y: (size - h) / 2, width: w, height: h))

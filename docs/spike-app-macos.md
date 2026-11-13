@@ -14,7 +14,7 @@ Extra: `GET` con query (`/api/historial?agent=..&session=..`) llega con `query` 
 ## Cómo repetirlo
 ```
 cd app && swift build
-HQ_SPIKE=1 HQ_SPIKE_EXIT=1 HQ_LOG_REQUESTS=1 HQ_WEB_ROOT=../oficina .build/debug/ProsperaHQ
+HQ_SPIKE=1 HQ_SPIKE_EXIT=1 HQ_LOG_REQUESTS=1 HQ_WEB_ROOT=../oficina .build/debug/Oficina
 ```
 
 ## Variables de entorno del contenedor (desarrollo)

@@ -1,4 +1,4 @@
-# Próspera HQ para macOS (app nativa)
+# Oficina para macOS (app nativa)
 
 App en Swift (SwiftUI + WKWebView) que abre la misma oficina 3D y el mismo chat sin Terminal, sin server HTTP y sin Python. Plan completo en `docs/plan-app-macos.md`.
 
@@ -11,14 +11,14 @@ App en Swift (SwiftUI + WKWebView) que abre la misma oficina 3D y el mismo chat 
 ```bash
 app/build.sh
 ```
-Compila en release y arma `app/build/Próspera HQ.app` con firma ad-hoc. El front sale de `oficina/` (única fuente), más three.js y Poppins offline de `app/Resources/vendor`.
+Compila en release y arma `app/build/Oficina.app` con firma ad-hoc. El front sale de `oficina/` (única fuente), más three.js y Poppins offline de `app/Resources/vendor`.
 
 ## Empaquetar (.dmg)
 ```bash
 app/make-dmg.sh             # usa la .app existente (la compila si no existe)
 app/make-dmg.sh --rebuild   # fuerza build.sh primero
 ```
-Genera `app/build/Próspera HQ <versión>.dmg` (UDZO, volumen "Próspera HQ") con la .app y un acceso a Aplicaciones. La versión sale de `CFBundleShortVersionString` en `app/Resources/Info.plist`.
+Genera `app/build/Oficina <versión>.dmg` (UDZO, volumen "Oficina") con la .app y un acceso a Aplicaciones. La versión sale de `CFBundleShortVersionString` en `app/Resources/Info.plist`.
 
 ### Con Developer ID (sin avisos de Gatekeeper)
 ```bash
@@ -26,7 +26,7 @@ DEVELOPER_ID="Developer ID Application: Tu Nombre (TEAMID)" \
 NOTARY_PROFILE="mi-perfil" \
 app/make-dmg.sh --rebuild
 ```
-- `DEVELOPER_ID`: firma la app con hardened runtime (`--options runtime --timestamp`) y los entitlements de `app/Resources/ProsperaHQ.entitlements`, y firma también el dmg.
+- `DEVELOPER_ID`: firma la app con hardened runtime (`--options runtime --timestamp`) y los entitlements de `app/Resources/Oficina.entitlements`, y firma también el dmg.
 - `NOTARY_PROFILE` (requiere `DEVELOPER_ID`): notariza con `xcrun notarytool submit --keychain-profile ... --wait` y hace `xcrun stapler staple`. El perfil se crea una vez con `xcrun notarytool store-credentials "mi-perfil"`.
 - Sin ninguna de las dos variables queda la firma ad-hoc. El script nunca toma identidades del llavero por su cuenta.
 
@@ -36,24 +36,24 @@ Entitlements: vacíos a propósito. No hay App Sandbox (la app ejecuta `claude` 
 
 ## Instalar
 1. Abrir el `.dmg`.
-2. Arrastrar **Próspera HQ** a **Aplicaciones**.
+2. Arrastrar **Oficina** a **Aplicaciones**.
 3. Expulsar el volumen y abrir la app desde Aplicaciones.
 
 ## Abrir una app sin firma de Developer ID
 Con firma ad-hoc, macOS bloquea la primera apertura ("no se puede verificar el desarrollador"). Opciones:
 
-1. **Clic derecho → Abrir.** En Aplicaciones, clic derecho (o Control+clic) sobre Próspera HQ → Abrir → confirmar Abrir. Solo hace falta la primera vez. En macOS recientes (Sequoia en adelante) este atajo ya no alcanza.
-2. **Ajustes del Sistema → Privacidad y seguridad.** Intentar abrir la app una vez, ir a esa sección, bajar hasta el aviso sobre "Próspera HQ" y tocar **Abrir igualmente**. Confirmar con la contraseña o Touch ID.
+1. **Clic derecho → Abrir.** En Aplicaciones, clic derecho (o Control+clic) sobre Oficina → Abrir → confirmar Abrir. Solo hace falta la primera vez. En macOS recientes (Sequoia en adelante) este atajo ya no alcanza.
+2. **Ajustes del Sistema → Privacidad y seguridad.** Intentar abrir la app una vez, ir a esa sección, bajar hasta el aviso sobre "Oficina" y tocar **Abrir igualmente**. Confirmar con la contraseña o Touch ID.
 3. **Quitar la cuarentena** (alternativa por Terminal):
    ```bash
-   xattr -dr com.apple.quarantine "/Applications/Próspera HQ.app"
+   xattr -dr com.apple.quarantine "/Applications/Oficina.app"
    ```
 
 ## Verificar el dmg a mano
 ```bash
-hdiutil verify "app/build/Próspera HQ 0.1.0.dmg"
-codesign --verify --deep --strict "/Volumes/Próspera HQ/Próspera HQ.app"   # con el dmg montado
-spctl -a -vv -t install "app/build/Próspera HQ 0.1.0.dmg"                  # solo pasa si está notarizado
+hdiutil verify "app/build/Oficina 0.1.0.dmg"
+codesign --verify --deep --strict "/Volumes/Oficina/Oficina.app"   # con el dmg montado
+spctl -a -vv -t install "app/build/Oficina 0.1.0.dmg"                  # solo pasa si está notarizado
 ```
 
 ## Agentes y oficinas
@@ -154,7 +154,7 @@ Archivos y conocimiento de la oficina activa: se suben o se vinculan carpetas ex
 
 ## Abrir archivos y créditos (app nativa)
 - El front manda `window.webkit.messageHandlers.hq.postMessage({accion: 'abrir' | 'revelar', ruta})` (`App.nativo` en `oficina/ui/base.js`). `app/Sources/App/Abrir.swift` valida la ruta (enlaces simbólicos resueltos) contra la carpeta de la oficina activa y las carpetas vinculadas (las pide al backend) y la abre con `NSWorkspace`; nunca abre aplicaciones, scripts ni archivos ejecutables. `revelar` sin ruta abre la carpeta de la oficina (menú «Oficina», ⇧⌘O, y botón en la barra lateral).
-- «Acerca de Próspera HQ» (menú de la app y enlace en la barra lateral): LDraw parts library (CC BY 4.0), three.js (MIT), Poppins (OFL) y aviso de que el proyecto no está afiliado a LEGO.
+- «Acerca de Oficina» (menú de la app y enlace en la barra lateral): LDraw parts library (CC BY 4.0), three.js (MIT), Poppins (OFL) y aviso de que el proyecto no está afiliado a LEGO.
 
 - Al importar Próspera, si `~/Próspera` existe se vincula (`id: prospera`) para mario, don-armando, nicolas y sofia, y las rutas absolutas de sus `.md` apuntan a esa carpeta. Al abrir una oficina se reescanean sus carpetas vinculadas en segundo plano.
 
