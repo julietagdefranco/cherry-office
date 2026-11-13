@@ -13,7 +13,9 @@ public struct OrigenTarea: Codable, Sendable, Equatable {
     public var json: [String: Any] { ["reunion": reunion, "pendiente": pendiente] }
 }
 
-/// Una consigna que un agente corre solo, en ciertos días a cierta hora (en la zona de la tarea).
+/// Una consigna que un agente corre solo. Dos tipos:
+/// - repetida: en ciertos días (`dias`) a cierta hora, en la zona de la tarea;
+/// - única (`fecha` presente): una sola vez, ese día a esa hora; al terminar bien deja su entrega y queda `hecha` (y en pausa).
 public struct TareaProgramada: Codable, Sendable, Equatable {
     public var id: String
     public var agente: String
@@ -33,14 +35,23 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
     public var desde: String?
     /// Pendiente de reunión del que salió (opcional).
     public var origen: OrigenTarea?
+    /// Solo las únicas: el día en que corre, "AAAA-MM-DD" (en la zona de la tarea). nil = tarea repetida.
+    public var fecha: String?
+    /// Solo las únicas: cuándo terminó bien y dejó su entrega (ISO 8601, UTC). Una única hecha no vuelve a correr sola.
+    public var hecha: String?
 
     public init(id: String, agente: String, nombre: String, consigna: String, dias: [Int], hora: String,
-                zona: String? = nil, activa: Bool = true, creada: String? = nil, desde: String? = nil, origen: OrigenTarea? = nil) {
+                zona: String? = nil, activa: Bool = true, creada: String? = nil, desde: String? = nil, origen: OrigenTarea? = nil,
+                fecha: String? = nil, hecha: String? = nil) {
         self.id = id; self.agente = agente; self.nombre = nombre; self.consigna = consigna; self.dias = dias
         self.hora = hora; self.zona = zona; self.activa = activa; self.creada = creada; self.desde = desde; self.origen = origen
+        self.fecha = fecha; self.hecha = hecha
     }
 
-    enum CodingKeys: String, CodingKey { case id, agente, nombre, consigna, dias, hora, zona, activa, creada, desde, origen }
+    /// Una sola vez (con fecha), en lugar de repetirse por días.
+    public var unica: Bool { fecha != nil }
+
+    enum CodingKeys: String, CodingKey { case id, agente, nombre, consigna, dias, hora, zona, activa, creada, desde, origen, fecha, hecha }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -55,6 +66,8 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
         creada = try c.decodeIfPresent(String.self, forKey: .creada)
         desde = try c.decodeIfPresent(String.self, forKey: .desde)
         origen = try c.decodeIfPresent(OrigenTarea.self, forKey: .origen)
+        fecha = try c.decodeIfPresent(String.self, forKey: .fecha)
+        hecha = try c.decodeIfPresent(String.self, forKey: .hecha)
     }
 
     /// Zona efectiva: la de la tarea, o la del sistema si no tiene (o no se reconoce).
@@ -73,6 +86,9 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
                                 "hora": hora, "zona": zona ?? sistema.identifier, "activa": activa]
         if let creada { o["creada"] = creada }
         if let origen { o["origen"] = origen.json }
+        o["tipo"] = unica ? "unica" : "repetida"
+        if let fecha { o["fecha"] = fecha }
+        if unica { o["hecha"] = hecha ?? NSNull() }
         return o
     }
 }
@@ -108,8 +124,14 @@ public enum ValidarTareas {
             guard !n.isEmpty, n.count <= maxNombre else { throw ErrorAPI(400, "La tarea \(t.id) necesita un nombre (hasta \(maxNombre) caracteres).") }
             let c = t.consigna.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !c.isEmpty, c.count <= maxConsigna else { throw ErrorAPI(400, "La consigna de la tarea \(t.id) tiene que tener entre 1 y \(maxConsigna) caracteres.") }
-            guard !t.dias.isEmpty, t.dias.allSatisfy({ (1...7).contains($0) }), Set(t.dias).count == t.dias.count else {
-                throw ErrorAPI(400, "Los días de la tarea \(t.id) tienen que ser números del 1 (lunes) al 7 (domingo), sin repetir y al menos uno.")
+            if let f = t.fecha {
+                guard Programacion.diaCalendario(f) != nil else { throw ErrorAPI(400, "La fecha de la tarea \(t.id) tiene que ser AAAA-MM-DD (por ejemplo 2026-11-20).") }
+                if let h = t.hecha, Programacion.fecha(h) == nil { throw ErrorAPI(400, "La tarea \(t.id) tiene una marca de hecha inválida.") }
+            } else {
+                guard !t.dias.isEmpty, t.dias.allSatisfy({ (1...7).contains($0) }), Set(t.dias).count == t.dias.count else {
+                    throw ErrorAPI(400, "Los días de la tarea \(t.id) tienen que ser números del 1 (lunes) al 7 (domingo), sin repetir y al menos uno.")
+                }
+                guard t.hecha == nil else { throw ErrorAPI(400, "Solo una tarea de una sola vez puede estar hecha (\(t.id)).") }
             }
             guard hora(t.hora) != nil else { throw ErrorAPI(400, "La hora de la tarea \(t.id) tiene que ser HH:MM (por ejemplo 08:00).") }
             if let z = t.zona, !zonaValida(z) { throw ErrorAPI(400, "La zona horaria de la tarea \(t.id) no existe: \(z).") }
@@ -146,6 +168,47 @@ public enum Programacion {
 
     /// ISO 8601 en UTC con segundos (`2026-11-13T11:00:00Z`).
     public static func iso(_ d: Date) -> String { formato.string(from: d) }
+
+    /// "AAAA-MM-DD" estricto y existente (no 2026-02-30) -> (año, mes, día).
+    public static func diaCalendario(_ s: String) -> (Int, Int, Int)? {
+        let u = Array(s.utf8)
+        guard u.count == 10, u[4] == UInt8(ascii: "-"), u[7] == UInt8(ascii: "-") else { return nil }
+        func num(_ r: Range<Int>) -> Int? {
+            var n = 0
+            for i in r { guard u[i] >= 48, u[i] <= 57 else { return nil }; n = n * 10 + Int(u[i]) - 48 }
+            return n
+        }
+        guard let a = num(0..<4), let m = num(5..<7), let d = num(8..<10), a >= 2000, (1...12).contains(m), (1...31).contains(d) else { return nil }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        guard let f = cal.date(from: DateComponents(year: a, month: m, day: d)),
+              cal.component(.month, from: f) == m, cal.component(.day, from: f) == d else { return nil }
+        return (a, m, d)
+    }
+
+    /// "AAAA-MM-DD" de `d` en la zona `zona`.
+    public static func textoDia(_ d: Date, zona: TimeZone) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zona
+        let c = cal.dateComponents([.year, .month, .day], from: d)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// "HH:MM" de `d` en la zona `zona`.
+    public static func textoHora(_ d: Date, zona: TimeZone) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zona
+        let c = cal.dateComponents([.hour, .minute], from: d)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
+
+    /// El instante de una tarea única (su fecha a su hora, en su zona). nil si no es única o no se puede armar.
+    public static func instanteUnica(_ t: TareaProgramada, calendario base: Calendar = Calendar(identifier: .gregorian),
+                                     sistema: TimeZone = .current) -> Date? {
+        guard let f = t.fecha, let (a, mes, d) = diaCalendario(f), let (h, m) = horaMinuto(t.hora) else { return nil }
+        let cal = calendario(t, base: base, sistema: sistema)
+        return cal.date(from: DateComponents(year: a, month: mes, day: d, hour: h, minute: m, second: 0))
+    }
     public static func fecha(_ s: String) -> Date? { formato.date(from: s) ?? formatoFrac.date(from: s) }
 
     /// Calendario gregoriano en la zona de la tarea (parte de `base`, que se inyecta en los tests).
@@ -170,9 +233,13 @@ public enum Programacion {
     /// Horario del día `offset` (0 = el día de `ref`, +1 = mañana, -1 = ayer...).
     private static func dia(_ ref: Date, _ offset: Int, _ cal: Calendar) -> Date? { cal.date(byAdding: .day, value: offset, to: ref) }
 
-    /// Próxima corrida estrictamente posterior a `desde`, o nil si no hay (tarea sin días válidos).
+    /// Próxima corrida estrictamente posterior a `desde`, o nil si no hay (tarea sin días válidos; única ya hecha o vencida).
     public static func proxima(_ t: TareaProgramada, desde: Date, calendario base: Calendar = Calendar(identifier: .gregorian),
                                sistema: TimeZone = .current) -> Date? {
+        if t.unica {
+            guard t.hecha == nil, let i = instanteUnica(t, calendario: base, sistema: sistema), i > desde else { return nil }
+            return i
+        }
         let cal = calendario(t, base: base, sistema: sistema)
         for i in 0...8 {
             guard let d = dia(desde, i, cal), t.dias.contains(diaISO(d, cal)), let c = horario(t, enElDiaDe: d, cal), c > desde else { continue }
@@ -184,6 +251,10 @@ public enum Programacion {
     /// Último horario marcado que ya pasó (≤ `hasta`), buscando hasta una semana atrás.
     public static func anterior(_ t: TareaProgramada, hasta: Date, calendario base: Calendar = Calendar(identifier: .gregorian),
                                 sistema: TimeZone = .current) -> Date? {
+        if t.unica {
+            guard let i = instanteUnica(t, calendario: base, sistema: sistema), i <= hasta else { return nil }
+            return i
+        }
         let cal = calendario(t, base: base, sistema: sistema)
         for i in 0...8 {
             guard let d = dia(hasta, -i, cal), t.dias.contains(diaISO(d, cal)), let c = horario(t, enElDiaDe: d, cal), c <= hasta else { continue }
@@ -197,8 +268,15 @@ public enum Programacion {
     /// - nunca dos veces el mismo: si `ultimaProgramada` (la última que se corrió) es igual o posterior, no;
     /// - si la app estuvo cerrada o dormida, se pone al día UNA vez si pasaron menos de 12 h desde ese horario;
     /// - una corrida anterior a la creación de la tarea (o a su último cambio de horario) no cuenta.
+    /// Una única es distinta: corre una vez cuando llega (o ya pasó) su fecha y hora, sin ventana de 12 h (lo que se encargó
+    /// para un día se hace aunque la app haya estado cerrada), salvo que ya esté hecha o que ya haya tenido su corrida
+    /// programada desde el último cambio de horario (`ultimaProgramada` = esa corrida, la arma el programador).
     public static func debeCorrer(_ t: TareaProgramada, ahora: Date, ultimaProgramada: Date?,
                                   calendario base: Calendar = Calendar(identifier: .gregorian), sistema: TimeZone = .current) -> Date? {
+        if t.unica {
+            guard t.activa, t.hecha == nil, ultimaProgramada == nil else { return nil }
+            return anterior(t, hasta: ahora, calendario: base, sistema: sistema)
+        }
         guard t.activa, let p = anterior(t, hasta: ahora, calendario: base, sistema: sistema) else { return nil }
         if let u = ultimaProgramada, u >= p { return nil }
         if ahora.timeIntervalSince(p) >= ventanaPuestaAlDia { return nil }

@@ -106,6 +106,13 @@ extension Store {
                        [.text(oficina), .text(tarea)]) { $0.isNull(0) ? nil : $0.double(0) })?.first ?? nil
     }
 
+    /// Última corrida programada (no manual) que arrancó desde `inicio` (epoch): para una tarea única, la que ya tuvo desde su
+    /// último cambio de horario.
+    func ultimaProgramada(oficina: String, tarea: String, desdeInicio inicio: Double) -> Double? {
+        (try? db.query("SELECT MAX(programada) FROM ejecuciones WHERE oficina=? AND tarea=? AND manual=0 AND inicio>=?",
+                       [.text(oficina), .text(tarea), .double(inicio)]) { $0.isNull(0) ? nil : $0.double(0) })?.first ?? nil
+    }
+
     func borrarEjecuciones(oficina: String, tarea: String) throws {
         try db.run("DELETE FROM ejecuciones WHERE oficina=? AND tarea=?", [.text(oficina), .text(tarea)])
     }
@@ -212,7 +219,9 @@ public actor Programador {
         let ahora = reloj()
         for t in act.oficina.tareas ?? [] where t.activa {
             guard let def = act.oficina.agente(t.agente), !estaCorriendo(oficina: act.carpeta, tarea: t.id) else { continue }
-            let ult = await store.ultimaProgramada(oficina: act.carpeta, tarea: t.id).map { Date(timeIntervalSince1970: $0) }
+            let ult = await (t.unica
+                ? store.ultimaProgramada(oficina: act.carpeta, tarea: t.id, desdeInicio: t.fechaInicio?.timeIntervalSince1970 ?? 0)
+                : store.ultimaProgramada(oficina: act.carpeta, tarea: t.id)).map { Date(timeIntervalSince1970: $0) }
             guard let p = Programacion.debeCorrer(t, ahora: ahora, ultimaProgramada: ult, sistema: sistema) else { continue }
             if (try? await lanzar(act, t, def, programada: p, manual: false)) != nil {
                 log.info("tarea \(t.id) agente=\(def.id) programada=\(Programacion.iso(p))")
@@ -225,6 +234,26 @@ public actor Programador {
         do { try runner.verificar(carpeta: act.carpeta) } catch let e as ClaudeError { throw ErrorAPI(500, e.mensaje) }
         await preparar()
         return try await lanzar(act, t, def, programada: Date(), manual: true)
+    }
+
+    /// Una tarea única que se crea «para ahora» (o con la hora ya pasada): corre enseguida como su corrida programada (no
+    /// manual), así el programador no la vuelve a lanzar. Si no se puede lanzar, la toma el programador en la próxima vuelta.
+    func correrUnica(_ act: OficinaActiva, _ t: TareaProgramada, _ def: AgenteDef) async throws -> Ejecucion {
+        guard t.unica, let p = Programacion.instanteUnica(t, sistema: sistema) else { throw ErrorAPI(400, "No es una tarea de una sola vez.") }
+        do { try runner.verificar(carpeta: act.carpeta) } catch let e as ClaudeError { throw ErrorAPI(500, e.mensaje) }
+        await preparar()
+        return try await lanzar(act, t, def, programada: p, manual: false)
+    }
+
+    /// Marca hecha (y en pausa) una tarea única que terminó bien, si sigue en la oficina abierta y no le cambiaron la fecha.
+    private func marcarHecha(_ carpeta: String, _ t: TareaProgramada) async {
+        guard t.unica, await oficinas.activa()?.carpeta == carpeta else { return }
+        let ahora = Programacion.iso(reloj())
+        _ = try? await oficinas.modificar { o in
+            guard let i = o.tareas?.firstIndex(where: { $0.id == t.id }), o.tareas![i].fecha == t.fecha, o.tareas![i].hora == t.hora else { return }
+            o.tareas![i].hecha = ahora
+            o.tareas![i].activa = false
+        }
     }
 
     /// «Hacelo ahora» de un pendiente de reunión: una corrida única (no queda en `oficina.json`) con id de tarea
@@ -377,6 +406,7 @@ public actor Programador {
                                              origen: ej.tarea.hasPrefix(Programador.prefijoEncargo) ? "encargo" : "tarea", ref: ej.tarea,
                                              titulo: nombre, texto: r.texto, sid: sid,
                                              archivos: ArchivosEntrega.relativos(escritos.valor, carpeta: carpeta), costo: caja.valor)
+            await marcarHecha(carpeta, t)
         }
         if let fin = await store.ejecucion(ej.id) { await gancho(fin) }
     }

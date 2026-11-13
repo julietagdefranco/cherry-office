@@ -298,7 +298,7 @@
         if (!App.Agente || !App.Agente.nuevaTarea) return;
         App.Agente.nuevaTarea(est.agente, { nombre: p.que.length > 80 ? p.que.slice(0, 79) + '…' : p.que,
           consigna: 'Pendiente de la reunión «' + r.tema + '»' + (r.acta ? ' (acta: ' + r.acta + ')' : '') + ': ' + p.que,
-          origen: { reunion: r.id, pendiente: i } }, function () { refrescar(r.id); });
+          origen: { reunion: r.id, pendiente: i }, unica: true }, function () { refrescar(r.id); });
       } }, 'Convertir en tarea'));
     } else if (!est.agente) {
       fila.appendChild(h('span.ayuda', { style: { margin: 0 } }, 'Te toca a vos.'));
