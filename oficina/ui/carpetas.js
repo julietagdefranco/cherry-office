@@ -13,12 +13,21 @@
     return explorador(titulo, op);
   };
 
+  /* un .zip (oficina exportada): panel de macOS en la app, explorador propio en el navegador */
+  App.elegirZip = function (titulo) {
+    if (App.nativo.hay) {
+      return App.nativo.elegirArchivo(titulo).then(function (r) { return r === undefined ? explorador(titulo, { zip: true }) : r; });
+    }
+    return explorador(titulo, { zip: true });
+  };
+
   function explorador(titulo, op) {
     return new Promise(function (resolver) {
       var elegida = null, actual = null;
       var hj = App.hoja({ titulo: titulo, ancho: 680, alCerrar: function () { resolver(elegida); } });
       var accesos = h('div.accesos'), carpetas = h('div.carpetas'), ruta = h('div.ruta-actual');
       var btn = h('button.btn.primario', { disabled: true, onclick: function () { elegida = actual; hj.cerrar(); } }, 'Elegir esta carpeta');
+      if (op.zip) btn.style.display = 'none';
       var nueva = op.crear ? h('button.btn.izq', { onclick: crearCarpeta }, App.icono('mas'), 'Nueva carpeta') : null;
       App.add(hj.cuerpo, ruta, h('div.explorador', accesos, carpetas));
       if (nueva) App.add(hj.pie, nueva);
@@ -26,7 +35,7 @@
 
       function ir(r) {
         App.vaciar(carpetas).appendChild(h('div.vacio', h('span.giro')));
-        api.get('/api/fs/carpetas', { ruta: r || '' }).then(function (d) {
+        api.get('/api/fs/carpetas', { ruta: r || '', archivos: op.zip ? 'zip' : '' }).then(function (d) {
           actual = d.ruta;
           btn.disabled = false;
           btn.textContent = op.oficinas ? (d.esOficina ? 'Abrir esta oficina' : 'Elegir esta carpeta') : 'Elegir esta carpeta';
@@ -39,12 +48,17 @@
           App.vaciar(carpetas);
           var lista = (d.carpetas || []).slice();
           if (op.oficinas) lista.sort(function (a, b) { return (b.esOficina ? 1 : 0) - (a.esOficina ? 1 : 0); });
-          if (!lista.length) carpetas.appendChild(h('div.vacio', 'No hay carpetas acá.'));
+          var zips = op.zip ? (d.archivos || []) : [];
+          if (!lista.length && !zips.length) carpetas.appendChild(h('div.vacio', op.zip ? 'No hay carpetas ni archivos .zip acá.' : 'No hay carpetas acá.'));
           lista.forEach(function (c) {
             carpetas.appendChild(h('div.carpeta' + (c.esOficina ? '.es-oficina' : ''), {
               onclick: function () { if (op.oficinas && c.esOficina) { elegida = c.ruta; hj.cerrar(); } else ir(c.ruta); },
               title: c.ruta
             }, App.icono(c.esOficina ? 'edificio' : 'carpeta'), h('span', { style: { flex: 1 } }, c.nombre), c.esOficina ? h('span.insignia.ok', 'Oficina') : App.icono('flecha')));
+          });
+          zips.forEach(function (z) {
+            carpetas.appendChild(h('div.carpeta.es-oficina', { onclick: function () { elegida = z.ruta; hj.cerrar(); }, title: z.ruta },
+              App.icono('importar'), h('span', { style: { flex: 1 } }, z.nombre), h('small', { style: { color: 'var(--tenue)' } }, App.tam(z.tam || 0))));
           });
         }).catch(function (e) { App.vaciar(carpetas).appendChild(h('div.vacio', e.message)); });
       }

@@ -65,7 +65,9 @@ public final class Backend: Sendable {
         self.mcp = mcp
         apiRouter = Router(config: cfg, store: store, runner: runner, log: log, oficinas: oficinas, mcp: mcp, listo: { _ = await mig.value })
         registrarReuniones(ReunionesRouter(store: store, runner: runner, oficinas: oficinas, log: log, programador: programador, env: env))
-        registrarBiblioteca(BibliotecaRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env))
+        let biblioteca = BibliotecaRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env)
+        registrarBiblioteca(biblioteca)
+        apiRouter.subrouters.paquete = PaqueteRouter(config: cfg, store: store, oficinas: oficinas, biblioteca: biblioteca, log: log)
         registrarExplorador(ExploradorRouter(config: cfg, oficinas: oficinas, log: log))
         registrarTareas(TareasRouter(oficinas: oficinas, store: store, programador: programador))
         // revisar la entrega de un encargo tilda su pendiente en las notas del agente

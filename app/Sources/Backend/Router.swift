@@ -18,6 +18,7 @@ final class SubRouterBox: @unchecked Sendable {
     private var valorExplorador: SubRouter?
     private var valorTareas: SubRouter?
     private var valorEntregas: SubRouter?
+    private var valorPaquete: SubRouter?
     var reuniones: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valor }
         set { lock.lock(); valor = newValue; lock.unlock() }
@@ -37,6 +38,11 @@ final class SubRouterBox: @unchecked Sendable {
     var entregas: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valorEntregas }
         set { lock.lock(); valorEntregas = newValue; lock.unlock() }
+    }
+    /// `/api/oficina/exportar` y `/api/oficinas/importar` (Paquete.swift).
+    var paquete: SubRouter? {
+        get { lock.lock(); defer { lock.unlock() }; return valorPaquete }
+        set { lock.lock(); valorPaquete = newValue; lock.unlock() }
     }
 }
 
@@ -98,6 +104,10 @@ public final class Router: APIHandler {
         }
         if EntregasRouter.esRuta(p) { // /api/entregas*
             if let r = subrouters.entregas, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
+            return (404, Router.codificar(["error": "no"]))
+        }
+        if PaqueteRouter.esRuta(p) { // /api/oficina/exportar, /api/oficinas/importar
+            if let r = subrouters.paquete, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
             return (404, Router.codificar(["error": "no"]))
         }
         if ExploradorRouter.esRuta(p) { // /api/fs/carpetas, /api/oficina/archivos, /api/oficina/archivo

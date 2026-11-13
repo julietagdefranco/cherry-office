@@ -139,6 +139,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                           crear: (body["crear"] as? Bool) ?? false) { replyHandler($0 as Any? ?? NSNull(), nil) }
             return
         }
+        if let body = message.body as? [String: Any], (body["accion"] as? String) == "elegirArchivo" {
+            guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.protocol == HQSchemeHandler.scheme else {
+                replyHandler(NSNull(), nil); return
+            }
+            elegirArchivoZip(titulo: body["titulo"] as? String) { replyHandler($0 as Any? ?? NSNull(), nil) }
+            return
+        }
         userContentController(ucc, didReceive: message)
         replyHandler(nil, nil)
     }
