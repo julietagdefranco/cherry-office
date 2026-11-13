@@ -109,7 +109,7 @@ struct ReunionesTests {
         f.sb.modo("marce", "puerta")
         let r = await nueva(f, "plan", ["marce", "marce"])
         #expect(r.status == 200)
-        #expect(Set(r.obj.keys) == ["id", "tema", "agentes", "estado", "creada", "hablando", "rondas", "turnos"])
+        #expect(Set(r.obj.keys) == ["id", "tema", "agentes", "estado", "creada", "hablando", "rondas", "turnos", "patron", "salida"])
         let id = str(r.obj["id"])
         #expect(Router.uuidValido(id) && id == id.lowercased())
         #expect(r.obj["tema"] as? String == "plan")
@@ -648,7 +648,7 @@ struct ReunionesTests {
         let l = lista((await f.get("/api/reuniones")).obj["reuniones"])
         #expect(l.map { str($0["id"]) } == [b, a])
         #expect(l.map { $0["turnos"] as? Int } == [2, 1])
-        #expect(Set(l[0].keys) == ["id", "tema", "agentes", "estado", "creada", "turnos"])
+        #expect(Set(l[0].keys) == ["id", "tema", "agentes", "estado", "creada", "turnos", "patron", "salida"])
         // otra oficina
         _ = await llamar(f.b, "POST", "/api/oficinas", body: json(["nombre": "Otra"]))
         #expect(lista((await f.get("/api/reuniones")).obj["reuniones"]).isEmpty)
@@ -737,6 +737,265 @@ struct ReunionesTests {
         let diez = await nueva(f, "tema", ["marce"], ["documentos": (1...10).map { "doc\($0)" }])
         #expect(diez.status == 200)
         await aguardar(f, str(diez.obj["id"]))
+    }
+
+    // MARK: patrones de reunión
+
+    static let equipo4: [Ag] = equipo + [("lola", "redes", "Community manager")]
+
+    @Test("patrones: puros (plan, visibles, validación y sufijo de la salida)")
+    func patronesPuros() {
+        let bandos = (a: ["x", "z"], b: ["y"])
+        #expect(ReunionPatron.plan(patron: .debate, ids: ["x", "y", "z"], lider: nil, bandos: nil).map(\.agente) == ["x", "y", "z"])
+        let l = ReunionPatron.plan(patron: .lider, ids: ["x", "y", "z"], lider: "y", bandos: nil)
+        #expect(l.map(\.agente) == ["y", "x", "z", "y"])
+        #expect(l.map(\.fase) == [.abre, .opina, .opina, .cierra])
+        let r = ReunionPatron.plan(patron: .redblue, ids: ["x", "y", "z", "w"], lider: nil, bandos: (a: ["x", "z"], b: ["y", "w"]))
+        #expect(r.map(\.agente) == ["x", "y", "z", "w"])
+        #expect(r.map(\.fase) == [.defiende, .critica, .defiende, .critica])
+        // bandos desparejos: alterna mientras haya de ambos lados
+        #expect(ReunionPatron.plan(patron: .redblue, ids: ["x", "y", "z"], lider: nil, bandos: bandos).map(\.agente) == ["x", "y", "z"])
+        #expect(ReunionPatron.plan(patron: .revision, ids: ["x", "y"], lider: nil, bandos: nil).map(\.fase) == [.revisa, .revisa])
+        let t = [TurnoReunion(ronda: 1, agente: "x", texto: "a", error: false, ts: 0), TurnoReunion(ronda: 2, agente: "y", texto: "b", error: false, ts: 0),
+                 TurnoReunion(ronda: 2, agente: "usuario", texto: "c", error: false, ts: 0)]
+        #expect(ReunionPatron.visibles(patron: .mapreduce, turnos: t, ronda: 2).map(\.texto) == ["a", "c"])
+        #expect(ReunionPatron.visibles(patron: .debate, turnos: t, ronda: 2).count == 3)
+        for bien in ["archivos/a.md", "archivos/entregables/reuniones/2026-01-01-x.md", "archivos/A.MD"] { #expect(ReunionPatron.errorDeSalida(bien) == nil, "\(bien)") }
+        for mal in ["", "/etc/x.md", "archivos/../x.md", "archivos/a/../../x.md", "../archivos/x.md", "archivos/x.txt", "archivos/.md", "x.md", "archivos",
+                    "otra/x.md", "archivos//x.md", "archivos/.texto/x.md", "archivos/a\\b.md", "~/x.md", "archivos/x.md/"] {
+            #expect(ReunionPatron.errorDeSalida(mal) != nil, "\(mal)")
+        }
+        let existe: Set<String> = ["archivos/a.md", "archivos/a-2.md"]
+        #expect(ReunionPatron.rutaLibre("archivos/a.md") { existe.contains($0) } == "archivos/a-3.md")
+        #expect(ReunionPatron.rutaLibre("archivos/b.md") { existe.contains($0) } == "archivos/b.md")
+        #expect(ReunionPatron.salidaPorDefecto(tema: "¿Cómo lanzamos?", fecha: Date(timeIntervalSince1970: 1_700_000_000)) == "archivos/entregables/reuniones/2023-11-14-como-lanzamos.md")
+    }
+
+    @Test("patrones: validaciones del cuerpo")
+    func patronesValidaciones() async throws {
+        let f = try await fix(ReunionesTests.equipo4)
+        escribir("ficha", en: f.ruta("conocimiento/fuentes/doc.md"))
+        func malo(_ extra: [String: Any], _ motivo: String, _ ags: [String] = ["marce", "nico", "betty"]) async {
+            let r = await nueva(f, "tema", ags, extra)
+            #expect(r.status == 400, "\(motivo) -> \(r.status) \(r.obj)")
+            #expect(r.obj["error"] is String)
+        }
+        await malo(["patron": "asamblea"], "patrón desconocido")
+        await malo(["patron": 3], "patrón no texto")
+        await malo(["patron": "lider"], "líder sin lider")
+        await malo(["patron": "lider", "lider": "lola"], "líder que existe pero no participa")
+        await malo(["patron": "lider", "lider": "fantasma"], "líder inexistente")
+        await malo(["patron": "lider", "lider": 4], "líder no texto")
+        await malo(["patron": "redblue"], "redblue sin bandos")
+        await malo(["patron": "redblue", "bandos": ["a": ["marce", "nico", "betty"], "b": [String]()]], "bando b vacío")
+        await malo(["patron": "redblue", "bandos": ["a": [String](), "b": ["marce", "nico", "betty"]]], "bando a vacío")
+        await malo(["patron": "redblue", "bandos": ["a": ["marce"], "b": ["nico"]]], "no cubre a betty")
+        await malo(["patron": "redblue", "bandos": ["a": ["marce", "nico"], "b": ["nico", "betty"]]], "nico en los dos")
+        await malo(["patron": "redblue", "bandos": ["a": ["marce", "nico"], "b": ["betty", "lola"]]], "lola no participa")
+        await malo(["patron": "redblue", "bandos": ["a": ["marce", "nico"]]], "falta b")
+        await malo(["patron": "redblue", "bandos": ["a": "marce", "b": "nico"]], "bandos no listas")
+        await malo(["patron": "redblue", "bandos": ["a": ["marce", 1], "b": ["nico", "betty"]]], "bando con no texto")
+        await malo(["patron": "revision"], "revisión sin documentos")
+        await malo(["patron": "revision", "documentos": [String]()], "revisión con lista vacía")
+        for s in ["archivos/../x.md", "/tmp/x.md", "archivos/x.txt", "reuniones/x.md", 5] as [Any] { await malo(["salida": s], "salida=\(s)") }
+        #expect(f.sb.llamadas.isEmpty)
+        #expect(lista((await f.get("/api/reuniones")).obj["reuniones"]).isEmpty)
+        // los que sí: datos de otro patrón se ignoran
+        let ok = await nueva(f, "tema", ["marce", "nico"], ["patron": "mapreduce", "lider": "lola", "bandos": ["a": 1]])
+        #expect(ok.status == 200)
+        #expect(ok.obj["patron"] as? String == "mapreduce")
+        #expect(ok.obj["lider"] == nil && ok.obj["bandos"] == nil)
+        await aguardar(f, str(ok.obj["id"]))
+        let rev = await nueva(f, "tema", ["marce"], ["patron": "revision", "documentos": ["doc"], "salida": NSNull()])
+        #expect(rev.status == 200)
+        await aguardar(f, str(rev.obj["id"]))
+    }
+
+    @Test("patrones: por defecto es debate, con salida sugerida; el listado y el detalle devuelven patrón, líder, bandos y salida")
+    func patronesCampos() async throws {
+        let f = try await fix(ReunionesTests.equipo4)
+        let r = await nueva(f, "Plan de lanzamiento")
+        #expect(r.obj["patron"] as? String == "debate")
+        #expect(r.obj["salida"] as? String == "archivos/entregables/reuniones/\(hoy())-plan-de-lanzamiento.md")
+        #expect(r.obj["lider"] == nil && r.obj["bandos"] == nil)
+        await aguardar(f, str(r.obj["id"]))
+        let l = try #require(lista((await f.get("/api/reuniones")).obj["reuniones"]).first)
+        #expect(l["patron"] as? String == "debate")
+        #expect(l["salida"] as? String == "archivos/entregables/reuniones/\(hoy())-plan-de-lanzamiento.md")
+        let b = await nueva(f, "Otro", ["marce", "nico", "betty", "lola"], ["patron": "redblue", "salida": " archivos/mi/carpeta/x.md ",
+                                                                           "bandos": ["a": ["marce", "lola"], "b": ["nico", "betty"]]])
+        #expect(b.status == 200)
+        let id = str(b.obj["id"])
+        await aguardar(f, id)
+        let d = await ver(f, id)
+        #expect(d["patron"] as? String == "redblue")
+        #expect(d["salida"] as? String == "archivos/mi/carpeta/x.md")
+        let bd = d["bandos"] as? [String: [String]]
+        #expect(bd?["a"] == ["marce", "lola"] && bd?["b"] == ["nico", "betty"])
+        let li = await nueva(f, "Tercero", ["marce", "nico"], ["patron": "lider", "lider": "nico"])
+        #expect(li.obj["lider"] as? String == "nico")
+        await aguardar(f, str(li.obj["id"]))
+        let l2 = lista((await f.get("/api/reuniones")).obj["reuniones"]).first { $0["id"] as? String == str(li.obj["id"]) }
+        #expect(l2?["lider"] as? String == "nico" && l2?["patron"] as? String == "lider")
+    }
+
+    @Test("lider: en cada ronda abre el líder, opina el resto y cierra el líder; la consigna lo dice")
+    func patronLider() async throws {
+        let f = try await fix()
+        let r = await nueva(f, "plan de lanzamiento", ["marce", "nico", "betty"], ["patron": "lider", "lider": "betty", "rondas": 2])
+        #expect(r.status == 200)
+        let base = try #require(r.obj["agentes"] as? [String])
+        let resto = base.filter { $0 != "betty" }
+        let fin = await aguardar(f, str(r.obj["id"]))
+        let t = turnos(fin)
+        #expect(t.map { str($0["agente"]) } == (["betty"] + resto + ["betty"]) + (["betty"] + resto + ["betty"]))
+        #expect(t.map { $0["ronda"] as? Int ?? 0 } == [1, 1, 1, 1, 2, 2, 2, 2])
+        let p = f.sb.prompts.filter { $0.contains("Estás en una reunión") }
+        #expect(p.count == 8)
+        #expect(p[0].contains("Abrí la ronda") && p[0].contains("Sos Betty"))
+        for i in [1, 2] { #expect(p[i].contains("lidera la reunión y ya abrió la ronda") && p[i].contains("Betty (")) }
+        #expect(p[3].contains("Cerrala con tu posición"))
+        #expect(p[4].contains("Abrí la ronda") && p[7].contains("Cerrala con tu posición"))
+        // la síntesis sabe quién lideró
+        let c = await f.post("/api/reuniones/\(str(r.obj["id"]))/cerrar")
+        #expect(c.status == 200)
+        #expect((f.sb.prompts.last { $0.contains("secretario de actas") } ?? "").contains("La reunión la lideró Betty"))
+    }
+
+    @Test("redblue: alternan A, B, A, B; la consigna dice de qué bando es cada uno; la síntesis pondera ambos")
+    func patronRedBlue() async throws {
+        let f = try await fix(ReunionesTests.equipo4)
+        let r = await nueva(f, "plan de lanzamiento", ["marce", "nico", "betty", "lola"],
+                            ["patron": "redblue", "bandos": ["a": ["marce", "betty"], "b": ["nico", "lola"]]])
+        #expect(r.status == 200)
+        let base = try #require(r.obj["agentes"] as? [String])
+        let a = base.filter { ["marce", "betty"].contains($0) }, b = base.filter { ["nico", "lola"].contains($0) }
+        let fin = await aguardar(f, str(r.obj["id"]))
+        #expect(turnos(fin).map { str($0["agente"]) } == [a[0], b[0], a[1], b[1]])
+        let p = f.sb.prompts.filter { $0.contains("Estás en una reunión") }
+        #expect(p.count == 4)
+        #expect(p[0].contains("del bando A: DEFENDÉS") && p[2].contains("del bando A: DEFENDÉS"))
+        #expect(p[1].contains("del bando B: CRITICÁS") && p[3].contains("del bando B: CRITICÁS"))
+        #expect(p[0].contains("Bando A (defiende") && p[0].contains("Bando B (la critica)"))
+        _ = await f.post("/api/reuniones/\(str(r.obj["id"]))/cerrar")
+        let s = try #require(f.sb.prompts.last { $0.contains("secretario de actas") })
+        #expect(s.contains("ponderar los argumentos de ambos bandos"))
+    }
+
+    @Test("mapreduce: todos corren a la vez, sin ver los turnos de su ronda (sí los de rondas anteriores)")
+    func patronMapReduce() async throws {
+        let f = try await fix()
+        for a in ["marce", "nico", "betty"] { f.sb.modo(a, "puerta") }
+        let r = await nueva(f, "plan de lanzamiento", ["marce", "nico", "betty"], ["patron": "mapreduce", "rondas": 2])
+        #expect(r.status == 200)
+        let id = str(r.obj["id"])
+        // los tres procesos están esperando a la vez: ninguno terminó todavía
+        #expect(await esperarAsync { Set(f.sb.eventos.filter { $0.hasPrefix("S ") }) == ["S marce", "S nico", "S betty"] })
+        #expect(!f.sb.eventos.contains { $0.hasPrefix("E ") })
+        let g = await ver(f, id)
+        #expect(g["estado"] as? String == "en_curso")
+        #expect(turnos(g).isEmpty)
+        f.sb.abrirPuerta()
+        let fin = await aguardar(f, id)
+        #expect(fin["estado"] as? String == "esperando")
+        #expect(turnos(fin).count == 6)
+        #expect(Set(turnos(fin).filter { $0["ronda"] as? Int == 1 }.map { str($0["agente"]) }) == ["marce", "nico", "betty"])
+        #expect(Set(turnos(fin).filter { $0["ronda"] as? Int == 2 }.map { str($0["agente"]) }) == ["marce", "nico", "betty"])
+        let p = f.sb.prompts.filter { $0.contains("Estás en una reunión") }
+        #expect(p.count == 6)
+        let ronda1 = p.filter { $0.contains("estamos en la ronda 1") }, ronda2 = p.filter { $0.contains("estamos en la ronda 2") }
+        #expect(ronda1.count == 3 && ronda2.count == 3)
+        for x in ronda1 {
+            #expect(!x.contains("Opinión de"))                      // nadie vio a nadie
+            #expect(x.contains("(todavía no habló nadie)"))
+            #expect(x.contains("cada participante responde por separado"))
+        }
+        for x in ronda2 {
+            #expect(x.contains("— Ronda 1 —"))
+            #expect(["Opinión de marce", "Opinión de nico", "Opinión de betty"].allSatisfy { x.contains($0) })
+            #expect(!x.contains("— Ronda 2 —"))
+        }
+        // el costo se registra por turno, como siempre (6 x 0.02)
+        #expect(await esperarAsync { (await f.get("/api/costos").obj["total"] as? Double ?? 0) > 0.11 })
+    }
+
+    @Test("revision: cada uno revisa los documentos adjuntos desde su rol")
+    func patronRevision() async throws {
+        let f = try await fix()
+        escribir("# Guion\nFICHA_GUION: abrir con un gancho", en: f.ruta("conocimiento/fuentes/guion.md"))
+        let r = await nueva(f, "revisar el guion", ["marce", "nico"], ["patron": "revision", "documentos": ["guion"]])
+        #expect(r.status == 200)
+        let id = str(r.obj["id"])
+        let fin = await aguardar(f, id)
+        #expect(turnos(fin).count == 2)
+        for x in f.sb.prompts.filter({ $0.contains("Estás en una reunión") }) {
+            #expect(x.contains("panel de revisión") && x.contains("hallazgos") && x.contains("FICHA_GUION"))
+        }
+        let c = await f.post("/api/reuniones/\(id)/cerrar")
+        #expect(c.status == 200)
+        #expect((f.sb.prompts.last { $0.contains("secretario de actas") } ?? "").contains("cambios recomendados"))
+        // el archivo de salida llama «Cambios recomendados» a las decisiones
+        #expect(f.leer(str(c.obj["salida"])).contains("## Cambios recomendados"))
+    }
+
+    // MARK: archivo de salida
+
+    @Test("salida: al cerrar el backend escribe el markdown (por defecto o el pedido), crea carpetas y agrega -2 si existe")
+    func salidaSeEscribe() async throws {
+        let f = try await fix()
+        let r = await nueva(f, "Plan de lanzamiento", ["marce", "nico"], ["patron": "lider", "lider": "nico"])
+        let id = str(r.obj["id"])
+        await aguardar(f, id)
+        #expect(!f.existe(str(r.obj["salida"])))                   // todavía no: se escribe al cerrar
+        let c = await f.post("/api/reuniones/\(id)/cerrar")
+        #expect(c.status == 200)
+        let rel = "archivos/entregables/reuniones/\(hoy())-plan-de-lanzamiento.md"
+        #expect(c.obj["salida"] as? String == rel)
+        #expect(c.obj["salidaRuta"] as? String == f.ruta(rel))
+        #expect(c.obj["error"] == nil)
+        let md = f.leer(rel)
+        #expect(md.hasPrefix("# Plan de lanzamiento"))
+        #expect(md.contains("**Patrón:** Líder y equipo") && md.contains("**Líder:** Nico"))
+        #expect(md.contains("## Resumen") && md.contains("Se acordó avanzar con el plan."))
+        #expect(md.contains("## Decisiones") && md.contains("- Lanzar en diciembre"))
+        #expect(md.contains("## Pendientes") && md.contains("- **Marce:** Armar el calendario"))
+        #expect(md.contains("`\(str(c.obj["acta"]))`"))
+        #expect(f.existe(str(c.obj["acta"])))                      // el acta sigue como siempre
+        // misma ruta otra vez: sufijo -2, y el campo apunta al archivo real
+        let r2 = await nueva(f, "Plan de lanzamiento", ["marce"])
+        await aguardar(f, str(r2.obj["id"]))
+        let c2 = await f.post("/api/reuniones/\(str(r2.obj["id"]))/cerrar")
+        #expect(c2.obj["salida"] as? String == "archivos/entregables/reuniones/\(hoy())-plan-de-lanzamiento-2.md")
+        #expect(f.existe(str(c2.obj["salida"])))
+        // ruta pedida, con carpetas intermedias nuevas
+        let r3 = await nueva(f, "x", ["marce"], ["salida": "archivos/a/b/c/informe.md"])
+        await aguardar(f, str(r3.obj["id"]))
+        let c3 = await f.post("/api/reuniones/\(str(r3.obj["id"]))/cerrar")
+        #expect(c3.obj["salida"] as? String == "archivos/a/b/c/informe.md")
+        #expect(f.leer("archivos/a/b/c/informe.md").contains("**Patrón:** Debate"))
+        #expect((await ver(f, str(r3.obj["id"])))["salidaRuta"] as? String == f.ruta("archivos/a/b/c/informe.md"))
+    }
+
+    @Test("salida: si no hubo síntesis igual se escribe, avisándolo; si no se puede escribir se informa y el cierre sigue")
+    func salidaErrores() async throws {
+        let f = try await fix()
+        f.sb.modo("acta", "nojson")
+        let r = await nueva(f, "sin sintesis", ["marce"])
+        await aguardar(f, str(r.obj["id"]))
+        let c = await f.post("/api/reuniones/\(str(r.obj["id"]))/cerrar")
+        #expect(c.obj["errorSintesis"] != nil)
+        #expect(f.leer(str(c.obj["salida"])).contains("No se pudo generar la síntesis"))
+        // «archivos/estorbo» es un archivo: no se pueden crear las carpetas
+        f.sb.modo("acta", nil)
+        escribir("estorbo", en: f.ruta("archivos/estorbo"))
+        let r2 = await nueva(f, "con estorbo", ["marce"], ["salida": "archivos/estorbo/x.md"])
+        await aguardar(f, str(r2.obj["id"]))
+        let c2 = await f.post("/api/reuniones/\(str(r2.obj["id"]))/cerrar")
+        #expect(c2.status == 200)
+        #expect(c2.obj["estado"] as? String == "cerrada")
+        #expect(str(c2.obj["error"]).contains("archivo de salida"))
+        #expect(c2.obj["salidaRuta"] == nil)
+        #expect(f.existe(str(c2.obj["acta"])))                     // el acta se guardó igual
     }
 }
 }  // extension Etapa2

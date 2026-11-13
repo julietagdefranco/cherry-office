@@ -6,6 +6,24 @@
   var visto = null;         // id de la reunión que muestra el panel
   var reloj = null, vigilando = null, cerrando = false;
 
+  /* patrones de reunión: misma lista y mismos ids que el backend (ReunionPatrones.swift / hq_reuniones.py) */
+  var PATRONES = [
+    { id: 'debate', nombre: 'Debate', txt: 'Hablan uno tras otro y cada uno responde a lo que se dijo antes.' },
+    { id: 'lider', nombre: 'Líder y equipo', txt: 'El líder abre y encuadra, el equipo opina y el líder cierra con su posición.' },
+    { id: 'mapreduce', nombre: 'Opiniones independientes', txt: 'Todos responden a la vez sin ver a los demás; después se sintetiza.' },
+    { id: 'redblue', nombre: 'Dos bandos', txt: 'Un bando defiende la propuesta y el otro la critica, alternándose.' },
+    { id: 'revision', nombre: 'Panel de revisión', txt: 'Cada uno revisa los documentos adjuntos desde su rol: hallazgos, riesgos y cambios.' }
+  ];
+  function patronDe(id) { return PATRONES.filter(function (p) { return p.id === id; })[0] || PATRONES[0]; }
+  function slug(t) {
+    var s = (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return s.length > 41 ? s.slice(0, 41).replace(/-+$/, '') : s;
+  }
+  function salidaSugerida(tema) {
+    var d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; };
+    return 'archivos/entregables/reuniones/' + d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '-' + (slug(tema) || 'reunion') + '.md';
+  }
+
   function activa(r) { return r && (r.estado === 'en_curso' || r.estado === 'esperando'); }
 
   /* ---------------- lista ---------------- */
@@ -41,17 +59,52 @@
         var i = elegidos.indexOf(a.id);
         if (i >= 0) elegidos.splice(i, 1); else if (elegidos.length < 10) elegidos.push(a.id); else App.aviso('Hasta 10 por reunión.');
         b.classList.toggle('sel', elegidos.indexOf(a.id) >= 0);
+        extras();
       } }, App.retratoImg(a, 'retrato', 72), h('div', { style: { minWidth: 0 } }, h('div.persona-nombre', a.nombre), h('div.persona-rol', a.rol)));
       grilla.appendChild(b);
     });
     var rondas = h('select.campo', [1, 2, 3].map(function (n) { return h('option', { value: n, selected: n === 1 }, n === 1 ? 'Una ronda' : n + ' rondas'); }));
     var docs = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } }), docsSel = [];
     var err = h('div.error-txt');
+    /* patrón, líder o bandos según el patrón, y archivo de salida */
+    var bando = {}, editoSalida = false;
+    var patron = h('select.campo', PATRONES.map(function (p) { return h('option', { value: p.id }, p.nombre); }));
+    var patronAyuda = h('div.ayuda', PATRONES[0].txt);
+    var liderSel = h('select.campo'), liderFila = h('div.fila-campo.oculto', h('label.etiqueta-campo', 'Líder'), liderSel);
+    var bandosCaja = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } });
+    var bandosFila = h('div.fila-campo.oculto', h('label.etiqueta-campo', 'Bandos'), bandosCaja,
+      h('div.ayuda', 'A defiende la propuesta del tema; B la critica. Tiene que haber al menos uno en cada bando.'));
+    var salida = h('input.campo', { type: 'text', maxlength: 200, value: salidaSugerida(''), oninput: function () { editoSalida = true; } });
+    function extras() {
+      var p = patron.value;
+      patronAyuda.textContent = patronDe(p).txt;
+      liderFila.classList.toggle('oculto', p !== 'lider');
+      bandosFila.classList.toggle('oculto', p !== 'redblue');
+      var previo = liderSel.value;
+      App.vaciar(liderSel);
+      elegidos.forEach(function (id) { liderSel.appendChild(h('option', { value: id, selected: id === previo }, nombre(id))); });
+      App.vaciar(bandosCaja);
+      elegidos.forEach(function (id, i) {
+        if (!bando[id]) bando[id] = i % 2 === 0 ? 'a' : 'b';
+        var fila = h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, h('span', { style: { flex: 1 } }, nombre(id)));
+        ['a', 'b'].forEach(function (k) {
+          var bt = h('button.btn.chico' + (bando[id] === k ? '.primario' : ''), { type: 'button', onclick: function () { bando[id] = k; extras(); } }, k.toUpperCase());
+          fila.appendChild(bt);
+        });
+        bandosCaja.appendChild(fila);
+      });
+    }
+    patron.onchange = extras;
+    tema.addEventListener('input', function () { if (!editoSalida) salida.value = salidaSugerida(tema.value); });
     App.add(hj.cuerpo, 
       h('div.fila-campo', h('label.etiqueta-campo', 'Tema'), tema),
       h('div.fila-campo', h('label.etiqueta-campo', 'Quiénes participan'), grilla),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Tipo de reunión'), patron, patronAyuda),
+      liderFila, bandosFila,
       h('div.dos', h('div.fila-campo', h('label.etiqueta-campo', 'Rondas'), rondas, h('div.ayuda', 'En cada ronda habla cada uno una vez. Después podés pedir otra.')),
-        h('div.fila-campo', h('label.etiqueta-campo', 'Documentos de la biblioteca (opcional)'), docs)), err);
+        h('div.fila-campo', h('label.etiqueta-campo', 'Documentos de la biblioteca (opcional)'), docs)),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Archivo de salida'), salida,
+        h('div.ayuda', 'Al cerrar se guarda acá un resumen en markdown (dentro de archivos/). Si ya existe, se agrega -2, -3…')), err);
     api.get('/api/archivos').then(function (r) {
       var listos = (r.archivos || []).filter(function (f) { return f.estado === 'listo'; });
       if (!listos.length) { docs.appendChild(h('span.ayuda', 'No hay documentos listos.')); return; }
@@ -65,8 +118,20 @@
         err.textContent = '';
         if (!tema.value.trim()) { err.textContent = 'Escribí el tema.'; return; }
         if (elegidos.length < 2) { err.textContent = 'Elegí al menos dos participantes.'; return; }
+        var cuerpo = { tema: tema.value.trim(), agentes: elegidos, rondas: +rondas.value, documentos: docsSel.length ? docsSel : undefined, patron: patron.value };
+        if (patron.value === 'lider') {
+          if (!liderSel.value) { err.textContent = 'Elegí quién lidera.'; return; }
+          cuerpo.lider = liderSel.value;
+        }
+        if (patron.value === 'redblue') {
+          var a = elegidos.filter(function (id) { return bando[id] === 'a'; }), b = elegidos.filter(function (id) { return bando[id] === 'b'; });
+          if (!a.length || !b.length) { err.textContent = 'Poné al menos uno en cada bando.'; return; }
+          cuerpo.bandos = { a: a, b: b };
+        }
+        if (patron.value === 'revision' && !docsSel.length) { err.textContent = 'El panel de revisión necesita al menos un documento.'; return; }
+        if (editoSalida && salida.value.trim()) cuerpo.salida = salida.value.trim();
         ir.disabled = true;
-        api.post('/api/reuniones', { tema: tema.value.trim(), agentes: elegidos, rondas: +rondas.value, documentos: docsSel.length ? docsSel : undefined })
+        api.post('/api/reuniones', cuerpo)
           .then(function (r) { hj.cerrar(); E.reunion = r; sincronizar(); panel(r.id); vigilar(r.id); })
           .catch(function (e) { err.textContent = e.message; ir.disabled = false; });
       }
@@ -146,7 +211,7 @@
     var est = r.estado === 'cerrada' ? 'Cerrada' : r.estado === 'en_curso' ? 'En curso' : 'Esperando que intervengas o cierres';
     App.add(App.vaciar(der), 
       h('div.der-cab', h('div.retrato', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', borderRadius: '12px' } }, App.icono('reunion')),
-        h('div.der-tit', h('h2', { title: r.tema }, r.tema), h('div.sub', est + ' · ' + r.agentes.map(nombre).join(', '))),
+        h('div.der-tit', h('h2', { title: r.tema }, r.tema), h('div.sub', est + ' · ' + patronDe(r.patron).nombre + ' · ' + r.agentes.map(nombre).join(', '))),
         h('button.btn.fantasma.icono', { title: 'Cerrar panel', onclick: App.cerrarDerecho }, App.icono('cerrar'))),
       cuerpo, pie);
     var t = h('div.turnos'), ronda = 0;
@@ -172,6 +237,7 @@
 
     if (r.estado === 'cerrada') {
       App.add(pie, h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
+        r.salidaRuta && App.nativo.hay ? h('button.btn', { onclick: function () { App.nativo.abrir(r.salidaRuta); } }, App.icono('abrir'), 'Abrir archivo de salida') : null,
         r.actaRuta && App.nativo.hay ? h('button.btn', { onclick: function () { App.nativo.abrir(r.actaRuta); } }, App.icono('abrir'), 'Abrir acta') : null,
         h('button.btn.primario', { onclick: function () { App.cerrarDerecho(); nueva(); } }, 'Nueva reunión')));
     } else {
@@ -197,7 +263,8 @@
       h('h4', 'Resumen'), h('p', s.resumen || '—'),
       s.decisiones && s.decisiones.length ? [h('h4', 'Decisiones'), h('ul', s.decisiones.map(function (d) { return h('li', d); }))] : null,
       s.pendientes && s.pendientes.length ? [h('h4', 'Pendientes'), h('ul', s.pendientes.map(function (p) { return h('li', h('b', p.quien + ': '), p.que); }))] : null,
-      r.acta ? h('div.ayuda', { style: { marginTop: '10px' } }, 'Acta guardada en ' + r.acta + '. Las decisiones se sumaron a la memoria de la oficina.') : null);
+      r.acta ? h('div.ayuda', { style: { marginTop: '10px' } }, 'Acta guardada en ' + r.acta + '. Las decisiones se sumaron a la memoria de la oficina.') : null,
+      r.salidaRuta ? h('div.ayuda', 'Archivo de salida: ' + r.salida) : null);
   }
 
   function cerrar(r) {

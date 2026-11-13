@@ -62,7 +62,10 @@ CREATE TABLE IF NOT EXISTS turnos (
 );
 CREATE INDEX IF NOT EXISTS turnos_reunion ON turnos(reunion, id);
 """
-COLUMNAS = "id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos"
+COLUMNAS = "id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida"
+PATRONES = ("debate", "lider", "mapreduce", "redblue", "revision")
+ETIQUETAS = {"debate": "Debate", "lider": "Líder y equipo", "mapreduce": "Map-reduce (opiniones independientes)",
+             "redblue": "Red/blue (dos bandos)", "revision": "Panel de revisión"}
 MAX_FICHA = 2500
 MAX_FICHAS = 8000
 
@@ -175,8 +178,159 @@ def fichas(carpeta, documentos):
     return "\n\n---\n\n".join(out)
 
 
-def prompt_turno(oficina, carpeta, tema, participantes, quien, turnos, ronda, fichas_texto=""):
-    dicho = transcripcion(turnos, oficina, False, MAX_TRANSCRIPCION_TURNO)
+# ----------------------------------------------------------------------------- patrones (puros)
+# Mismos textos y mismo orden que app/Sources/Backend/ReunionPatrones.swift.
+
+def plan(patron, ids, lider, bandos):
+    """Orden de una ronda: lista de (agente, fase). Map-reduce da el orden de siempre pero se corre en paralelo."""
+    libre = [(i, "libre") for i in ids]
+    if patron == "revision":
+        return [(i, "revisa") for i in ids]
+    if patron == "lider":
+        if lider not in ids:
+            return libre
+        return [(lider, "abre")] + [(i, "opina") for i in ids if i != lider] + [(lider, "cierra")]
+    if patron == "redblue":
+        if not bandos:
+            return libre
+        a = [i for i in ids if i in bandos["a"]]
+        b = [i for i in ids if i in bandos["b"]]
+        out = []
+        for k in range(max(len(a), len(b))):
+            if k < len(a):
+                out.append((a[k], "defiende"))
+            if k < len(b):
+                out.append((b[k], "critica"))
+        return out
+    return libre
+
+
+def visibles(patron, turnos, ronda):
+    """Map-reduce: nadie ve los turnos de la ronda en curso (sí las intervenciones del usuario y las rondas anteriores)."""
+    if patron != "mapreduce":
+        return turnos
+    return [t for t in turnos if t["ronda"] < ronda or t["agente"] == "usuario"]
+
+
+def salida_por_defecto(tema, fecha):
+    return "archivos/entregables/reuniones/%s-%s.md" % (fecha.strftime("%Y-%m-%d"), hq_core.slug_de(tema) or "reunion")
+
+
+def error_de_salida(s):
+    """Mensaje de error si `s` no sirve como ruta de salida; None si está bien."""
+    malo = "«salida» tiene que ser una ruta relativa dentro de archivos/ que termine en .md (sin «..»)."
+    if not isinstance(s, str) or not s or len(s) > 200 or s[0] in "/~" or "\\" in s or "\0" in s:
+        return malo
+    comps = s.split("/")
+    if len(comps) < 2 or comps[0] != "archivos":
+        return malo
+    if any(c == "" or c.startswith(".") for c in comps):
+        return malo
+    if not comps[-1].lower().endswith(".md") or len(comps[-1]) <= 3:
+        return malo
+    return None
+
+
+def ruta_libre(rel, existe):
+    if not existe(rel):
+        return rel
+    base, n = rel[:-3], 2
+    while existe("%s-%d.md" % (base, n)):
+        n += 1
+    return "%s-%d.md" % (base, n)
+
+
+def _nombres(lista):
+    return ", ".join("%s (%s)" % (a["nombre"], a["rol"]) for a in lista)
+
+
+def consigna(patron, fase, quien, lider, bando_a, bando_b):
+    """Último párrafo del prompt de un turno. En debate es el texto de siempre."""
+    n, r = quien["nombre"], quien["rol"]
+    cierre = "Respondé solo con tu intervención, en primera persona y sin encabezados."
+    if patron == "lider" and fase == "abre":
+        return ("Sos %s, %s, y liderás esta reunión. Abrí la ronda en 100-150 palabras: encuadrá el tema, decí qué hay que "
+                "resolver y dejale al equipo dos o tres preguntas concretas. %s") % (n, r, cierre)
+    if patron == "lider" and fase == "opina":
+        l = "%s (%s)" % (lider["nombre"], lider["rol"]) if lider else "el líder"
+        return ("Sos %s, %s. %s lidera la reunión y ya abrió la ronda. Opiná desde tu rol en 120-180 palabras, respondiendo a "
+                "lo que planteó y sin repetir lo ya dicho; decí con qué estás de acuerdo y con qué no, y proponé un próximo "
+                "paso concreto. %s") % (n, r, l, cierre)
+    if patron == "lider" and fase == "cierra":
+        return ("Sos %s, %s, y liderás esta reunión. El equipo ya opinó en esta ronda. Cerrala con tu posición en 100-150 "
+                "palabras: qué tomás de lo dicho, qué descartás y por qué, y qué queda por decidir. %s") % (n, r, cierre)
+    if patron == "mapreduce":
+        return ("Sos %s, %s. En esta ronda cada participante responde por separado y sin ver lo que dicen los demás; no "
+                "asumas qué van a decir. Opiná desde tu rol en 120-180 palabras, con tu propia postura (podés apoyarte en "
+                "lo dicho en rondas anteriores) y proponé un próximo paso concreto. %s") % (n, r, cierre)
+    if patron == "redblue" and fase == "defiende":
+        return ("Esta reunión es un debate entre dos bandos. Bando A (defiende la propuesta o postura del tema): %s. Bando B "
+                "(la critica): %s. Sos %s, %s, del bando A: DEFENDÉS. Argumentá a favor desde tu rol en 120-180 palabras, "
+                "respondiendo a las críticas del bando B si ya hablaron y sin repetir lo ya dicho, y proponé un próximo paso "
+                "concreto. %s") % (_nombres(bando_a), _nombres(bando_b), n, r, cierre)
+    if patron == "redblue" and fase == "critica":
+        return ("Esta reunión es un debate entre dos bandos. Bando A (defiende la propuesta o postura del tema): %s. Bando B "
+                "(la critica): %s. Sos %s, %s, del bando B: CRITICÁS. Señalá desde tu rol en 120-180 palabras los riesgos, "
+                "huecos y objeciones de lo que defendió el bando A, sin repetir lo ya dicho, y proponé qué habría que "
+                "cambiar o probar. %s") % (_nombres(bando_a), _nombres(bando_b), n, r, cierre)
+    if patron == "revision":
+        return ("Sos %s, %s. Esta reunión es un panel de revisión de los documentos adjuntos. Revisalos desde tu rol en "
+                "120-180 palabras: hallazgos (qué está bien y qué falla), riesgos y qué cambiarías, sin repetir lo que ya "
+                "señalaron tus colegas. Si necesitás el texto completo, leelo en archivos/.texto/<slug>.md. %s"
+                ) % (n, r, cierre.replace("tu intervención", "tu revisión"))
+    return ("Sos %s, %s. Opiná desde tu rol en 120-180 palabras, sin repetir lo ya dicho; decí con qué estás de acuerdo "
+            "y con qué no, y proponé un próximo paso concreto. Respondé solo con tu opinión, en primera persona y sin "
+            "encabezados.") % (n, r)
+
+
+def variante_sintesis(patron, lider, bando_a, bando_b):
+    """Frase que se suma al prompt de la síntesis según el patrón ('' en debate)."""
+    if patron == "lider":
+        return ("\nLa reunión la lideró %s, que abrió y cerró cada ronda: su posición final pesa en las decisiones."
+                % ("%s (%s)" % (lider["nombre"], lider["rol"]) if lider else "un líder"))
+    if patron == "mapreduce":
+        return ("\nCada participante opinó por separado en cada ronda, sin ver a los demás: en el resumen marcá las "
+                "coincidencias y las diferencias entre posturas independientes.")
+    if patron == "redblue":
+        return ("\nFue un debate entre dos bandos. Bando A (defiende): %s. Bando B (critica): %s. El resumen tiene que "
+                "ponderar los argumentos de ambos bandos con equilibrio, y las decisiones reflejar qué se adopta y qué "
+                "objeciones del bando B se incorporan." % (_nombres(bando_a), _nombres(bando_b)))
+    if patron == "revision":
+        return ("\nFue un panel de revisión de los documentos adjuntos: en «decisiones» poné los cambios recomendados "
+                "(concretos y accionables) y en «resumen» los hallazgos y riesgos principales.")
+    return ""
+
+
+def markdown_salida(oficina, f, participantes, sintesis, error_sintesis, acta, fecha):
+    patron = f.get("patron") or "debate"
+    s = "# %s\n\n" % f["tema"]
+    s += "- **Patrón:** %s\n- **Oficina:** %s\n- **Fecha:** %s\n" % (ETIQUETAS.get(patron, "Debate"), oficina["nombre"],
+                                                                      fecha.strftime("%Y-%m-%d"))
+    s += "- **Participantes:** %s\n" % _gente(participantes)
+    if patron == "lider" and f.get("lider"):
+        s += "- **Líder:** %s\n" % nombre_de(f["lider"], oficina)
+    if patron == "redblue" and f.get("bandos"):
+        s += "- **Bando A (defiende):** %s\n" % ", ".join(nombre_de(i, oficina) for i in f["bandos"].get("a", []))
+        s += "- **Bando B (critica):** %s\n" % ", ".join(nombre_de(i, oficina) for i in f["bandos"].get("b", []))
+    s += "\n## Resumen\n\n"
+    if sintesis:
+        s += (sintesis["resumen"] or "_(sin resumen)_") + "\n\n## " + ("Cambios recomendados" if patron == "revision" else "Decisiones") + "\n\n"
+        s += ("\n".join("- " + d for d in sintesis["decisiones"]) + "\n") if sintesis["decisiones"] else "_(ninguna)_\n"
+        s += "\n## Pendientes\n\n"
+        if sintesis["pendientes"]:
+            s += "\n".join(("- **%s:** %s" % (p["quien"], p["que"])) if p["quien"] else "- " + p["que"]
+                           for p in sintesis["pendientes"]) + "\n"
+        else:
+            s += "_(ninguno)_\n"
+    else:
+        s += "_No se pudo generar la síntesis%s._\n" % (": " + error_sintesis.strip().rstrip(".…").rstrip() if error_sintesis else "")
+    s += "\n---\n" + ("Acta completa con la transcripción: `%s`.\n" % acta if acta else "_(el acta no se pudo guardar)_\n")
+    return s
+
+
+def prompt_turno(oficina, carpeta, tema, participantes, quien, turnos, ronda, fichas_texto="",
+                 patron="debate", fase="libre", lider=None, bando_a=(), bando_b=()):
+    dicho = transcripcion(visibles(patron, turnos, ronda), oficina, False, MAX_TRANSCRIPCION_TURNO)
     docs = ("\n\nDocumentos adjuntos a la reunión (fichas de la biblioteca; el texto completo está en "
             "archivos/.texto/<slug>.md):\n" + fichas_texto) if fichas_texto else ""
     return (
@@ -185,14 +339,12 @@ def prompt_turno(oficina, carpeta, tema, participantes, quien, turnos, ronda, fi
         "Memoria común de la oficina:\n%s\n\n"
         "Decisiones recientes:\n%s%s\n\n"
         "Lo que se dijo hasta ahora (estamos en la ronda %d):\n%s\n\n"
-        "Sos %s, %s. Opiná desde tu rol en 120-180 palabras, sin repetir lo ya dicho; decí con qué estás de acuerdo "
-        "y con qué no, y proponé un próximo paso concreto. Respondé solo con tu opinión, en primera persona y sin "
-        "encabezados."
+        "%s"
     ) % (oficina["nombre"], tema, _gente(participantes), memoria(carpeta), decisiones_recientes(carpeta), docs, ronda,
-         dicho or "(todavía no habló nadie)", quien["nombre"], quien["rol"])
+         dicho or "(todavía no habló nadie)", consigna(patron, fase, quien, lider, bando_a, bando_b))
 
 
-def prompt_sintesis(oficina, tema, participantes, turnos):
+def prompt_sintesis(oficina, tema, participantes, turnos, patron="debate", lider=None, bando_a=(), bando_b=()):
     return (
         "Sos el secretario de actas de la oficina «%s». Tema de la reunión: %s\n"
         "Participantes: %s\n\n"
@@ -201,9 +353,9 @@ def prompt_sintesis(oficina, tema, participantes, turnos):
         "{\"resumen\": \"resumen de la reunión en 3-6 oraciones\", \"decisiones\": [\"decisión concreta confirmada por la "
         "conversación\"], \"pendientes\": [{\"quien\": \"nombre de quien se encarga\", \"que\": \"tarea concreta\"}]}\n"
         "Incluí en \"decisiones\" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "
-        "\"pendientes\" los próximos pasos con responsable."
+        "\"pendientes\" los próximos pasos con responsable.%s"
     ) % (oficina["nombre"], tema, _gente(participantes),
-         transcripcion(turnos, oficina, True, MAX_TRANSCRIPCION_ACTA))
+         transcripcion(turnos, oficina, True, MAX_TRANSCRIPCION_ACTA), variante_sintesis(patron, lider, bando_a, bando_b))
 
 
 def parsear_sintesis(t):
@@ -297,6 +449,10 @@ class Reuniones:
             c.executescript(SCHEMA)
             if "documentos" not in [r[1] for r in c.execute("PRAGMA table_info(reuniones)").fetchall()]:
                 c.execute("ALTER TABLE reuniones ADD COLUMN documentos TEXT")
+            cols = [r[1] for r in c.execute("PRAGMA table_info(reuniones)").fetchall()]
+            for nombre in ("patron", "lider", "bandos", "salida"):
+                if nombre not in cols:
+                    c.execute("ALTER TABLE reuniones ADD COLUMN %s TEXT" % nombre)
             # una reunión que estaba en curso al apagarse el servidor queda esperando
             c.execute("UPDATE reuniones SET estado='esperando' WHERE estado='en_curso'")
 
@@ -328,7 +484,12 @@ class Reuniones:
             docs = json.loads(r[11]) if r[11] else []
         except ValueError:
             docs = []
-        return {"id": r[0], "oficina": r[1], "tema": r[2], "agentes": ags if isinstance(ags, list) else [], "estado": r[4],
+        try:
+            bandos = json.loads(r[14]) if r[14] else None
+        except ValueError:
+            bandos = None
+        return {"patron": r[12] or "debate", "lider": r[13], "bandos": bandos if isinstance(bandos, dict) else None,
+                "salida": r[15], "id": r[0], "oficina": r[1], "tema": r[2], "agentes": ags if isinstance(ags, list) else [], "estado": r[4],
                 "creada": r[5], "cerrada": r[6], "sintesis": r[7], "error_sintesis": r[8], "acta": r[9], "error": r[10],
                 "documentos": docs if isinstance(docs, list) else []}
 
@@ -412,6 +573,13 @@ class Reuniones:
         vivo, hablando = vivo_hablando or self._vivo(f["id"])
         estado = "en_curso" if vivo else ("esperando" if f["estado"] == "en_curso" else f["estado"])
         o = {"id": f["id"], "tema": f["tema"], "agentes": f["agentes"], "estado": estado, "creada": iso(f["creada"])}
+        o["patron"] = f.get("patron") or "debate"
+        if f.get("lider"):
+            o["lider"] = f["lider"]
+        if f.get("bandos"):
+            o["bandos"] = f["bandos"]
+        if f.get("salida"):
+            o["salida"] = f["salida"]
         if resumen:
             o["turnos"] = len(turnos)
             return o
@@ -439,6 +607,8 @@ class Reuniones:
             o["actaRuta"] = os.path.join(f["oficina"], f["acta"])
         if f["error"]:
             o["error"] = f["error"]
+        if f["estado"] == "cerrada" and f.get("salida") and os.path.isfile(os.path.join(f["oficina"], f["salida"])):
+            o["salidaRuta"] = os.path.join(f["oficina"], f["salida"])
         return o
 
     def _respuesta(self, id_, carpeta):
@@ -496,11 +666,43 @@ class Reuniones:
                     documentos.append(x)
             if len(documentos) > 10:
                 raise ErrorAPI(400, "Máximo 10 documentos por reunión.")
+        patron = "debate"
+        if d.get("patron") is not None:
+            if not isinstance(d["patron"], str) or d["patron"] not in PATRONES:
+                raise ErrorAPI(400, "«patron» tiene que ser uno de: %s." % ", ".join(PATRONES))
+            patron = d["patron"]
+        lider = None
+        if patron == "lider":
+            lider = d.get("lider")
+            if not isinstance(lider, str) or lider not in ids:
+                raise ErrorAPI(400, "«lider» tiene que ser uno de los participantes.")
+        bandos = None
+        if patron == "redblue":
+            malo = ErrorAPI(400, "«bandos» tiene que repartir a todos los participantes entre «a» y «b», con al menos uno en cada bando.")
+            b = d.get("bandos")
+            if not isinstance(b, dict) or not isinstance(b.get("a"), list) or not isinstance(b.get("b"), list):
+                raise malo
+            ba, bb = b["a"], b["b"]
+            if (not ba or not bb or not all(isinstance(x, str) for x in ba + bb) or len(set(ba)) != len(ba)
+                    or len(set(bb)) != len(bb) or set(ba) & set(bb) or set(ba) | set(bb) != set(ids)):
+                raise malo
+            bandos = {"a": ba, "b": bb}
+        if patron == "revision" and not documentos:
+            raise ErrorAPI(400, "El panel de revisión necesita al menos un documento adjunto.")
+        salida = salida_por_defecto(tema, datetime.date.today())
+        if d.get("salida") is not None:
+            t = d["salida"].strip() if isinstance(d["salida"], str) else None
+            err = error_de_salida(t)
+            if err:
+                raise ErrorAPI(400, err)
+            salida = t
         id_ = str(uuid.uuid4())
         orden = [a["id"] for a in ordenar([agente_de(of, i) for i in ids], of, tema)]
-        self._sql("INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos) VALUES(?,?,?,?,?,?,?)",
+        self._sql("INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos,patron,lider,bandos,salida) "
+                  "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                   (id_, carpeta, tema, json.dumps(orden), "esperando", time.time(),
-                   json.dumps(documentos) if documentos else None), escribir=True)
+                   json.dumps(documentos) if documentos else None, patron, lider,
+                   json.dumps(bandos, sort_keys=True) if bandos else None, salida), escribir=True)
         self._arrancar(id_, carpeta, rondas)
         return self._respuesta(id_, carpeta)
 
@@ -537,13 +739,15 @@ class Reuniones:
         try:
             turnos = self._turnos(id_)
             parts = [a for a in (agente_de(of, i) for i in f["agentes"]) if a]
+            lider_def, banda, bandb = self._roles(f, of)
             sintesis, err_sint = None, None
             if not any(not t["error"] for t in turnos):
                 err_sint = "No hubo opiniones para resumir."
             else:
                 caja = hq_vivo.CajaCosto()
                 try:
-                    t = self._sin_agente(prompt_sintesis(of, f["tema"], parts, turnos), carpeta, self.timeout_sintesis,
+                    t = self._sin_agente(prompt_sintesis(of, f["tema"], parts, turnos, f["patron"], lider_def, banda, bandb),
+                                         carpeta, self.timeout_sintesis,
                                          caja.observador())
                     sintesis = parsear_sintesis(t)
                     if sintesis is None:
@@ -561,6 +765,15 @@ class Reuniones:
             except (OSError, ErrorAPI):
                 error_acta = "No pude guardar el acta o las decisiones en la carpeta de la oficina."
                 self.srv.log.exception("reuniones: no pude escribir el acta")
+            # archivo de salida: lo escribe el backend (los turnos son de solo lectura); un fallo se informa como el del acta
+            if f.get("salida"):
+                try:
+                    final = self._escribir_salida(carpeta, f["salida"], markdown_salida(of, f, parts, sintesis, err_sint, rel, hoy))
+                    self._sql("UPDATE reuniones SET salida=? WHERE id=?", (final, id_), escribir=True)
+                except (OSError, ErrorAPI):
+                    if not error_acta:
+                        error_acta = "No pude guardar el archivo de salida (%s)." % f["salida"]
+                    self.srv.log.exception("reuniones: no pude escribir la salida")
             self._sql("UPDATE reuniones SET estado='cerrada', cerrada=?, sintesis=?, error_sintesis=?, acta=?, error=? WHERE id=?",
                       (time.time(), json.dumps(sintesis, ensure_ascii=False) if sintesis else None, err_sint, rel,
                        error_acta, id_), escribir=True)
@@ -579,6 +792,29 @@ class Reuniones:
             n += 1
         hq_core.escribir_atomico(os.path.join(carpeta, rel), texto)
         return rel
+
+    @staticmethod
+    def _escribir_salida(carpeta, rel, texto):
+        """Escribe `rel` (ya validada, dentro de archivos/) creando carpetas; si existe agrega -2, -3. Devuelve la ruta final.
+        Se niega si un enlace simbólico sacaría el archivo de la carpeta de la oficina."""
+        if error_de_salida(rel):
+            raise ErrorAPI(400, "salida inválida")
+        final = ruta_libre(rel, lambda r: os.path.exists(os.path.join(carpeta, r)))
+        ruta = os.path.join(carpeta, final)
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        base = os.path.realpath(carpeta) + os.sep
+        if not (os.path.realpath(os.path.dirname(ruta)) + os.sep).startswith(base):
+            raise ErrorAPI(400, "salida fuera de la oficina")
+        hq_core.escribir_atomico(ruta, texto)
+        return final
+
+    @staticmethod
+    def _roles(f, of):
+        """Líder y bandos de la reunión como agentes (los que ya no existan en la oficina se omiten)."""
+        bandos = f.get("bandos") or {}
+        return (agente_de(of, f["lider"]) if f.get("lider") else None,
+                [a for a in (agente_de(of, i) for i in bandos.get("a", [])) if a],
+                [a for a in (agente_de(of, i) for i in bandos.get("b", [])) if a])
 
     # ---- claude
 
@@ -642,6 +878,7 @@ class Reuniones:
                 self.hablando.pop(id_, None)
 
     def _correr_ronda(self, id_, carpeta):
+        """Una ronda en el orden y con la consigna que marca el patrón. -> (hubo algún turno bueno, último error)."""
         try:
             of = hq_core.leer_oficina(carpeta)
         except ErrorAPI:
@@ -651,33 +888,71 @@ class Reuniones:
             return False, "No encontré la reunión."
         ronda = max([t["ronda"] for t in self._turnos(id_)] or [0]) + 1
         parts = [a for a in (agente_de(of, i) for i in f["agentes"]) if a]
+        pasos = plan(f["patron"], [a["id"] for a in parts], f.get("lider"), f.get("bandos"))
         ok, ultimo = False, None
-        for ag in parts:
+        if f["patron"] == "mapreduce":
+            # todos a la vez (un hilo por agente); cada uno respeta su carril y no ve los turnos de esta ronda
+            pendientes = [p[0] for p in pasos]
             with self.mut:
-                self.hablando[id_] = ag["id"]
-            prompt = prompt_turno(of, carpeta, f["tema"], parts, ag, self._turnos(id_), ronda,
-                                  fichas(carpeta, f.get("documentos")))
-            fallo = False
-            caja = hq_vivo.CajaCosto()
-            try:
-                with self.app._lock(carpeta, ag["id"]):  # mismo carril que el chat 1 a 1 de ese agente
-                    with self.app.actividad.seguir(carpeta, ag["id"], "reunion", "Reunión: " + f["tema"],
-                                                   extra=caja.observador()) as (obs, _t):
-                        texto = self._turno_solo_lectura(ag["id"], prompt, carpeta, hq_core.dirs_vinculos(of, ag),
-                                                         obs).strip()
-                if not texto:
-                    texto, fallo = "(sin respuesta)", True
-            except ErrorAPI as e:
-                texto, fallo = e.mensaje, True
-                self.srv.log.warning("reunion turno agente=%s status=%s", ag["id"], e.status)
-            finally:
-                self.app.costos.registrar(carpeta, "reunion", caja.valor, ag["id"], id_)
+                self.hablando[id_] = pendientes[0] if pendientes else None
+            resultados = []
+
+            def hilo(paso):
+                try:
+                    r = self._hacer_turno(id_, carpeta, of, f, ronda, parts, paso)
+                except Exception:
+                    self.srv.log.exception("reuniones: fallo un turno")
+                    r = ("No pude responder.", True)
+                with self.mut:
+                    resultados.append(r)
+                    pendientes.remove(paso[0])
+                    self.hablando[id_] = pendientes[0] if pendientes else None
+
+            hilos = [threading.Thread(target=hilo, args=(p,), daemon=True) for p in pasos]
+            for h in hilos:
+                h.start()
+            for h in hilos:
+                h.join()
+            for texto, fallo in resultados:
+                if fallo:
+                    ultimo = texto
+                else:
+                    ok = True
+            return ok, ultimo
+        for paso in pasos:
+            with self.mut:
+                self.hablando[id_] = paso[0]
+            texto, fallo = self._hacer_turno(id_, carpeta, of, f, ronda, parts, paso)
             if fallo:
                 ultimo = texto
             else:
                 ok = True
-            self._turno(id_, carpeta, ronda, ag["id"], texto, fallo)
         return ok, ultimo
+
+    def _hacer_turno(self, id_, carpeta, of, f, ronda, parts, paso):
+        """Un turno: arma el prompt, corre el turno de solo lectura en el carril del agente (con actividad y costo) y lo guarda."""
+        ag = agente_de(of, paso[0])
+        if ag is None:
+            return "No encontré al agente.", True
+        lider_def, banda, bandb = self._roles(f, of)
+        prompt = prompt_turno(of, carpeta, f["tema"], parts, ag, self._turnos(id_), ronda, fichas(carpeta, f.get("documentos")),
+                              f["patron"], paso[1], lider_def, banda, bandb)
+        fallo = False
+        caja = hq_vivo.CajaCosto()
+        try:
+            with self.app._lock(carpeta, ag["id"]):  # mismo carril que el chat 1 a 1 de ese agente
+                with self.app.actividad.seguir(carpeta, ag["id"], "reunion", "Reunión: " + f["tema"],
+                                               extra=caja.observador()) as (obs, _t):
+                    texto = self._turno_solo_lectura(ag["id"], prompt, carpeta, hq_core.dirs_vinculos(of, ag), obs).strip()
+            if not texto:
+                texto, fallo = "(sin respuesta)", True
+        except ErrorAPI as e:
+            texto, fallo = e.mensaje, True
+            self.srv.log.warning("reunion turno agente=%s status=%s", ag["id"], e.status)
+        finally:
+            self.app.costos.registrar(carpeta, "reunion", caja.valor, ag["id"], id_)
+        self._turno(id_, carpeta, ronda, ag["id"], texto, fallo)
+        return texto, fallo
 
 
 def instalar(app, srv):

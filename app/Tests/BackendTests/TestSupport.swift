@@ -78,7 +78,10 @@ final class Sandbox: @unchecked Sendable {
       prev="$a"
     done
     msg="${@: -1}"
+    # con claudes en paralelo (mapreduce) los registros no se pueden mezclar: se escribe bajo un candado (mkdir es atómico)
+    while ! mkdir "$D/args.lock" 2>/dev/null; do sleep 0.01; done
     { printf '%s\x1f' "$@"; printf '\x1e'; } >> "$D/args.log"
+    rmdir "$D/args.lock"
     echo "S $agent" >> "$D/events.log"
     fin() { echo "E $agent" >> "$D/events.log"; }
     has() { [[ " $* " == *" $1 "* ]]; }
