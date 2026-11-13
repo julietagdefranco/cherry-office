@@ -236,14 +236,14 @@
     if (r.error) cuerpo.appendChild(h('div.sintesis', h('div.error-txt', r.error)));
 
     if (r.estado === 'cerrada') {
-      App.add(pie, h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
+      App.add(pie, h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' } },
         r.salidaRuta && App.nativo.hay ? h('button.btn', { onclick: function () { App.nativo.abrir(r.salidaRuta); } }, App.icono('abrir'), 'Abrir archivo de salida') : null,
         r.actaRuta && App.nativo.hay ? h('button.btn', { onclick: function () { App.nativo.abrir(r.actaRuta); } }, App.icono('abrir'), 'Abrir acta') : null,
         h('button.btn.primario', { onclick: function () { App.cerrarDerecho(); nueva(); } }, 'Nueva reunión')));
     } else {
       var txt = h('textarea.campo', { rows: 2, placeholder: 'Intervenir: sumá un dato o una pregunta para la próxima ronda', maxlength: 5000 });
       var ocupado = r.estado === 'en_curso' || cerrando;
-      App.add(pie, txt, h('div', { style: { display: 'flex', gap: '8px', marginTop: '8px' } },
+      App.add(pie, txt, h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' } },
         h('button.btn', { disabled: cerrando, onclick: function () {
           var v = txt.value.trim(); if (!v) { txt.focus(); return; }
           api.post('/api/reuniones/' + r.id + '/intervencion', { texto: v }).then(function (d) { E.reunion = d; pintarPanel(d); }).catch(App.fallo);
