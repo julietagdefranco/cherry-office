@@ -54,6 +54,22 @@ struct AvisosTests {
         #expect(fuera)
     }
 
+    @Test("abrir la reunión que espera apaga su aviso (marcarla vista) hasta que vuelva a esperar")
+    func reunionVista() async throws {
+        let f = try await Fix.crear(agentes: [("marce", "direccion", nil), ("pato", "direccion", nil)])
+        let r = await f.post("/api/reuniones", ["tema": "lanzamiento", "agentes": ["marce", "pato"]])
+        let id = str(r.obj["id"])
+        let ok = await esperarAsync(hasta: 15) { await avisos(f).contains { str($0["id"]) == "reunion:\(id)" } }
+        #expect(ok)
+        let v = await f.post("/api/avisos/visto", ["id": "reunion:\(id)"])
+        #expect(v.obj["vistos"] as? Int == 1)
+        #expect(!(await avisos(f)).contains { str($0["tipo"]) == "reunion" })
+        // terminar otra ronda la deja esperando de nuevo: vuelve a avisar
+        _ = await f.post("/api/reuniones/\(id)/ronda")
+        let vuelve = await esperarAsync(hasta: 15) { await avisos(f).contains { str($0["id"]) == "reunion:\(id)" } }
+        #expect(vuelve)
+    }
+
     @Test("sin oficina: /api/avisos 409 y /api/actividad trae avisos vacíos")
     func sinOficina() async throws {
         let sb = Sandbox()
