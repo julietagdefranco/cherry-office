@@ -1343,7 +1343,7 @@ App.Oficina3D = (function () {
   var VERBO = { pensando: 'pensando', leyendo: 'leyendo', escribiendo: 'escribiendo', buscando: 'buscando',
     consultando: 'consultando a', trabajando: 'trabajando' };
 
-  /* pantalla del escritorio: una textura de canvas en las dos caras (hacia el agente y hacia la cámara) */
+  /* pantalla del escritorio: una textura de canvas solo en la cara que mira al agente (el dorso queda negro) */
   function crearPantalla(f) {
     if (!f.asiento) return;
     var c = document.createElement('canvas'); c.width = 128; c.height = 80;
@@ -1355,8 +1355,7 @@ App.Oficina3D = (function () {
     var cx = f.asiento.x, cz = f.asiento.z - 0.2, tope = PLACA + LADRILLO * 2 + PLACA, y = tope + 1.9, zm = cz + 3.1;
     var g = new T.Group();
     var adelante = new T.Mesh(geo, mat); adelante.position.set(cx + 1, y, zm + 0.065); adelante.rotation.y = Math.PI;
-    var atras = new T.Mesh(geo, mat); atras.position.set(cx + 1, y, zm + 0.515);
-    g.add(adelante, atras);
+    g.add(adelante);
     mundo.add(g);
     f.pantalla = { canvas: c, ctx: c.getContext('2d'), tex: tex, mat: mat, grupo: g };
     dibujarPantalla(f);
@@ -1366,7 +1365,7 @@ App.Oficina3D = (function () {
     var P2 = f.pantalla; if (!P2) return;
     var x = P2.ctx, w = 128, h = 80, t = trabajo[f.a.id], n = f.cuadroPant || 0, i;
     var est = t ? t.estado : null;
-    /* libre: se oculta y se ve la pantalla decorada del monitor (y su parte de atrás negra) */
+    /* libre: se oculta y se ve la pantalla decorada del monitor */
     P2.grupo.visible = !!est;
     if (!est) return;
     x.fillStyle = est === 'leyendo' ? '#f1efe9' : '#1f2227';
