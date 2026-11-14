@@ -18,10 +18,20 @@ public struct Avatar: Codable, Sendable, Equatable {
     public var torso: String?
     public var colorTorso: String?
     public var colorPiernas: String?
+    public var colorPiel: String?
+    public var colorBrazos: String?
+    public var colorAccesorio: String?
+    public var piernas: String?
+    public var sombrero: String?
+    public var cuello: String?
     public init(semilla: String? = nil, pelo: String? = nil, colorPelo: String? = nil, cara: String? = nil,
-                torso: String? = nil, colorTorso: String? = nil, colorPiernas: String? = nil) {
+                torso: String? = nil, colorTorso: String? = nil, colorPiernas: String? = nil,
+                colorPiel: String? = nil, colorBrazos: String? = nil, colorAccesorio: String? = nil,
+                piernas: String? = nil, sombrero: String? = nil, cuello: String? = nil) {
         self.semilla = semilla; self.pelo = pelo; self.colorPelo = colorPelo; self.cara = cara
         self.torso = torso; self.colorTorso = colorTorso; self.colorPiernas = colorPiernas
+        self.colorPiel = colorPiel; self.colorBrazos = colorBrazos; self.colorAccesorio = colorAccesorio
+        self.piernas = piernas; self.sombrero = sombrero; self.cuello = cuello
     }
 }
 

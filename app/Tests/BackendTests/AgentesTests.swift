@@ -222,6 +222,18 @@ struct AgentesTests {
         #expect(a["modelo"] as? String == "opus")
         #expect(dict(a["avatar"])["semilla"] as? String == "otra")
         #expect(dict(a["avatar"])["colorPelo"] as? String == "#aabbcc")
+        // piel, mangas, piernas y accesorios se guardan (colores en minúsculas)
+        let r2 = await contratar(f.b, id: "con-falda", depto: "redes",
+                                 extra: ["avatar": ["colorPiel": "#F6D7B3", "colorBrazos": "#A5CA18", "colorAccesorio": "#1C1C20",
+                                                    "piernas": "falda-larga", "sombrero": "boina", "cuello": "mono"]])
+        let av2 = dict(dict(r2.obj["agente"])["avatar"])
+        #expect(av2["colorPiel"] as? String == "#f6d7b3")
+        #expect(av2["colorBrazos"] as? String == "#a5ca18")
+        #expect(av2["piernas"] as? String == "falda-larga")
+        #expect(av2["sombrero"] as? String == "boina")
+        #expect(av2["cuello"] as? String == "mono")
+        #expect((await f.post("/api/agentes", ["nombre": "X", "rol": "r", "prompt": "p", "departamento": "redes",
+                                               "avatar": ["colorPiel": "piel"]])).status == 400)
         #expect(f.leer(".claude/agents/mi-id.md").contains("description: Hace cosas\nmodel: opus"))
         // sin id: nombre repetido -> -2 -> -3
         var ids: [String] = []

@@ -9,6 +9,11 @@
   "piernaD": "3816",
   "piernaI": "3817"
  },
+ "legado": {
+  "pelo": 12,
+  "cara": 10,
+  "torso": 10
+ },
  "pelo": {
   "corto-liso": {
    "nombre": "Corto liso",
@@ -69,6 +74,66 @@
    "nombre": "Ondas cortas",
    "parte": "3277",
    "genero": "u"
+  },
+  "entradas": {
+   "nombre": "Corto con entradas",
+   "parte": "12893",
+   "genero": "m"
+  },
+  "jopo": {
+   "nombre": "Jopo corto",
+   "parte": "21787",
+   "genero": "m"
+  },
+  "hacia-atras": {
+   "nombre": "Peinado hacia atrás",
+   "parte": "64798",
+   "genero": "m"
+  },
+  "parado": {
+   "nombre": "Corto parado",
+   "parte": "53981",
+   "genero": "u"
+  },
+  "afro": {
+   "nombre": "Afro",
+   "parte": "87995",
+   "genero": "u"
+  },
+  "bob-raya": {
+   "nombre": "Bob con raya al medio",
+   "parte": "29633",
+   "genero": "f"
+  },
+  "media-melena": {
+   "nombre": "Media melena tras la oreja",
+   "parte": "36037",
+   "genero": "f"
+  },
+  "corto-costado": {
+   "nombre": "Corto de costado",
+   "parte": "20877",
+   "genero": "f"
+  },
+  "rodete-alto": {
+   "nombre": "Rodete alto con flequillo",
+   "parte": "25613",
+   "genero": "f"
+  },
+  "rodete-bajo": {
+   "nombre": "Rodete bajo",
+   "parte": "99240",
+   "genero": "f"
+  },
+  "cola-flequillo": {
+   "nombre": "Cola con flequillo",
+   "parte": "62696",
+   "genero": "f"
+  },
+  "largo-mechon": {
+   "nombre": "Largo con mechón",
+   "parte": "85974",
+   "genero": "f"
   }
  },
  "cara": {
@@ -120,6 +185,146 @@
   "m-gris": {
    "nombre": "Marco gris",
    "parte": "3626bp0i",
+   "genero": "m"
+  },
+  "f-pestanas": {
+   "nombre": "Pestañas y sonrisa abierta",
+   "parte": "3626cp0c",
+   "genero": "f"
+  },
+  "f-labios-rojos": {
+   "nombre": "Labios rojos, cejas arqueadas",
+   "parte": "3626cp0f",
+   "genero": "f"
+  },
+  "f-rosa": {
+   "nombre": "Labios rosa, sonriente",
+   "parte": "3626cp1k",
+   "genero": "f"
+  },
+  "f-lentes-rojos": {
+   "nombre": "Anteojos rojos y lunar",
+   "parte": "3626cp7d",
+   "genero": "f"
+  },
+  "f-lentes-celestes": {
+   "nombre": "Anteojos celestes",
+   "parte": "3626cp7f",
+   "genero": "f"
+  },
+  "f-lentes-plata": {
+   "nombre": "Anteojos plateados",
+   "parte": "3626cp8l",
+   "genero": "f"
+  },
+  "f-lentes-dorados": {
+   "nombre": "Anteojos dorados",
+   "parte": "3626cpx1",
+   "genero": "f"
+  },
+  "f-lentes-verdes": {
+   "nombre": "Anteojos verdes, labios rojos",
+   "parte": "3626cpx2",
+   "genero": "f"
+  },
+  "f-lentes-redondos": {
+   "nombre": "Anteojos grandes redondos",
+   "parte": "3626cpd7i",
+   "genero": "f"
+  },
+  "f-pecas": {
+   "nombre": "Pecas y labios rosa",
+   "parte": "3626cp81",
+   "genero": "f"
+  },
+  "f-pecas-suaves": {
+   "nombre": "Pestañas y pecas",
+   "parte": "3626cp7l",
+   "genero": "f"
+  },
+  "f-cejas-negras": {
+   "nombre": "Sonrisa, cejas negras",
+   "parte": "3626cp8c",
+   "genero": "f"
+  },
+  "f-lunar": {
+   "nombre": "Lunar y labios bordó",
+   "parte": "3626cpd66",
+   "genero": "f"
+  },
+  "f-lunar-suave": {
+   "nombre": "Lunar y labios nude",
+   "parte": "3626cpd6h",
+   "genero": "f"
+  },
+  "f-ceja-alzada": {
+   "nombre": "Ceja alzada",
+   "parte": "3626cpx3",
+   "genero": "f"
+  },
+  "m-risuena": {
+   "nombre": "Sonrisa de costado",
+   "parte": "3626cp05",
+   "genero": "m"
+  },
+  "m-candado": {
+   "nombre": "Barba candado",
+   "parte": "3626cp40",
+   "genero": "m"
+  },
+  "m-pecas-ceja": {
+   "nombre": "Pecas y ceja alzada",
+   "parte": "3626cp71",
+   "genero": "m"
+  },
+  "m-bigote": {
+   "nombre": "Bigote negro",
+   "parte": "3626cp7c",
+   "genero": "m"
+  },
+  "m-canoso-lentes": {
+   "nombre": "Canoso con anteojos",
+   "parte": "3626cp7e",
+   "genero": "m"
+  },
+  "m-bigote-lentes": {
+   "nombre": "Bigote gris y anteojos",
+   "parte": "3626cp7k",
+   "genero": "m"
+  },
+  "m-barba-blanca": {
+   "nombre": "Barba blanca",
+   "parte": "3626cp7p",
+   "genero": "m"
+  },
+  "m-barba": {
+   "nombre": "Barba castaña",
+   "parte": "3626cp88",
+   "genero": "m"
+  },
+  "m-pecas-risa": {
+   "nombre": "Pecas y risa",
+   "parte": "3626cp8b",
+   "genero": "m"
+  },
+  "m-cachetes": {
+   "nombre": "Sonrisa con hoyuelos",
+   "parte": "3626cpx5",
+   "genero": "m"
+  },
+  "m-abuelo": {
+   "nombre": "Barba blanca y anteojos redondos",
+   "parte": "3626cph5",
+   "genero": "m"
+  },
+  "m-lentes-grandes": {
+   "nombre": "Anteojos grandes y bigote",
+   "parte": "3626cpd67",
+   "genero": "m"
+  },
+  "m-hoyuelo": {
+   "nombre": "Sonrisa ladeada",
+   "parte": "3626cp7n",
    "genero": "m"
   }
  },
@@ -211,11 +416,221 @@
     "gris",
     "bordo"
    ]
+  },
+  "cardigan": {
+   "nombre": "Cárdigan sobre vestido",
+   "parte": "973pc9",
+   "genero": "f"
+  },
+  "sweater-v": {
+   "nombre": "Sweater escote V",
+   "parte": "973p94"
+  },
+  "rombos": {
+   "nombre": "Sweater de rombos",
+   "parte": "973p93"
+  },
+  "tejido": {
+   "nombre": "Sweater tejido",
+   "parte": "973p9c"
+  },
+  "cuello-redondo": {
+   "nombre": "Sweater cuello redondo",
+   "parte": "973pd17"
+  },
+  "saco-sweater": {
+   "nombre": "Saco sobre sweater",
+   "parte": "973p1y"
+  },
+  "saco-camisa": {
+   "nombre": "Saco y camisa blanca",
+   "parte": "973p7z"
+  },
+  "escoces": {
+   "nombre": "Camisa escocesa",
+   "parte": "973p6y"
+  },
+  "camisa-bolsillos": {
+   "nombre": "Camisa con bolsillos",
+   "parte": "973p7g"
+  },
+  "remera-v": {
+   "nombre": "Remera escote V",
+   "parte": "973p0v"
+  },
+  "credencial": {
+   "nombre": "Camisa, corbata y credencial",
+   "parte": "973p87"
+  },
+  "saco-panuelo": {
+   "nombre": "Saco con pañuelo",
+   "parte": "973p9w",
+   "genero": "f"
+  },
+  "saco-collar": {
+   "nombre": "Saco con collar dorado",
+   "parte": "973pbj",
+   "genero": "f"
+  },
+  "blusa-dije": {
+   "nombre": "Blusa con dije",
+   "parte": "973p8k",
+   "genero": "f"
+  },
+  "blusa-cinto": {
+   "nombre": "Blusa con cinto y collar",
+   "parte": "973pq6",
+   "genero": "f"
+  },
+  "camisa-bufanda": {
+   "nombre": "Camisa con bufanda",
+   "parte": "973pcd6",
+   "genero": "f"
+  },
+  "saco-bufanda": {
+   "nombre": "Saco con bufanda lila",
+   "parte": "973p7y",
+   "genero": "f"
+  },
+  "buzo-abierto": {
+   "nombre": "Buzo abierto",
+   "parte": "973p9b"
+  },
+  "buzo": {
+   "nombre": "Buzo con capucha",
+   "parte": "973p7j"
+  },
+  "chaleco-pluma": {
+   "nombre": "Chaleco sobre sweater",
+   "parte": "973pce"
+  },
+  "tres-piezas": {
+   "nombre": "Traje tres piezas",
+   "parte": "973pdb"
+  },
+  "chaleco-rombos": {
+   "nombre": "Chaleco de rombos",
+   "parte": "973pca"
+  },
+  "chaleco": {
+   "nombre": "Chaleco con bolsillos",
+   "parte": "973p73"
+  },
+  "cuello-abierto": {
+   "nombre": "Camisa de cuello abierto",
+   "parte": "973p3y"
+  },
+  "corbata-rosa": {
+   "nombre": "Saco y corbata rosa",
+   "parte": "973pd31"
+  },
+  "bufanda-roja": {
+   "nombre": "Bufanda roja",
+   "parte": "973p2u"
+  }
+ },
+ "piernas": {
+  "pantalon": {
+   "nombre": "Pantalón"
+  },
+  "falda-corta": {
+   "nombre": "Falda corta",
+   "parte": "600880c01",
+   "genero": "f"
+  },
+  "falda-midi": {
+   "nombre": "Falda midi",
+   "parte": "u9209c01",
+   "genero": "f"
+  },
+  "falda-larga": {
+   "nombre": "Falda larga",
+   "parte": "36036",
+   "genero": "f",
+   "reemplaza": true
+  }
+ },
+ "sombrero": {
+  "ninguno": {
+   "nombre": "Sin sombrero"
+  },
+  "fedora": {
+   "nombre": "Fedora",
+   "parte": "61506"
+  },
+  "boina": {
+   "nombre": "Boina",
+   "parte": "90386"
+  },
+  "gorro": {
+   "nombre": "Gorro de lana",
+   "parte": "90541"
+  },
+  "gorro-tejido": {
+   "nombre": "Gorro tejido",
+   "parte": "41334"
+  },
+  "gorra": {
+   "nombre": "Gorra",
+   "parte": "86035"
+  },
+  "gorra-chata": {
+   "nombre": "Gorra de golf",
+   "parte": "2514"
+  },
+  "bombin": {
+   "nombre": "Bombín",
+   "parte": "95674"
+  }
+ },
+ "cuello": {
+  "nada": {
+   "nombre": "Nada"
+  },
+  "barba": {
+   "nombre": "Barba",
+   "parte": "93223",
+   "color": "pelo",
+   "genero": "m"
+  },
+  "bigote": {
+   "nombre": "Bigote",
+   "parte": "15439",
+   "color": "pelo",
+   "genero": "m"
+  },
+  "mono": {
+   "nombre": "Moño",
+   "parte": "27151",
+   "color": "accesorio"
   }
  },
  "colores": {
   "piel": [
-   "#f6c928"
+   {
+    "id": "amarillo",
+    "hex": "#f6c928"
+   },
+   {
+    "id": "clara",
+    "hex": "#f6d7b3"
+   },
+   {
+    "id": "durazno",
+    "hex": "#e0a77f"
+   },
+   {
+    "id": "trigueña",
+    "hex": "#c08a5f"
+   },
+   {
+    "id": "morena",
+    "hex": "#8a5a3c"
+   },
+   {
+    "id": "oscura",
+    "hex": "#4e3122"
+   }
   ],
   "torso": [
    {
@@ -265,6 +680,30 @@
    {
     "id": "rosa",
     "hex": "#e58aa6"
+   },
+   {
+    "id": "camel",
+    "hex": "#c9a97a"
+   },
+   {
+    "id": "lima",
+    "hex": "#a5ca18"
+   },
+   {
+    "id": "rojo",
+    "hex": "#c9263a"
+   },
+   {
+    "id": "verde-oscuro",
+    "hex": "#2f5d3a"
+   },
+   {
+    "id": "marron",
+    "hex": "#6b4426"
+   },
+   {
+    "id": "amarillo",
+    "hex": "#f2cd37"
    }
   ],
   "piernas": [
@@ -291,6 +730,26 @@
    {
     "id": "jean",
     "hex": "#3d5f8f"
+   },
+   {
+    "id": "rojo",
+    "hex": "#b40000"
+   },
+   {
+    "id": "bordo",
+    "hex": "#8a2b3a"
+   },
+   {
+    "id": "verde-oliva",
+    "hex": "#5d6b3a"
+   },
+   {
+    "id": "camel",
+    "hex": "#c9a97a"
+   },
+   {
+    "id": "blanco",
+    "hex": "#efefef"
    }
   ],
   "pelo": [
@@ -317,6 +776,52 @@
    {
     "id": "gris",
     "hex": "#a3a6ab"
+   },
+   {
+    "id": "castaño-claro",
+    "hex": "#9a6a3c"
+   },
+   {
+    "id": "blanco",
+    "hex": "#e8e6e0"
+   }
+  ],
+  "accesorio": [
+   {
+    "id": "negro",
+    "hex": "#1c1c20"
+   },
+   {
+    "id": "marron",
+    "hex": "#5a4030"
+   },
+   {
+    "id": "gris",
+    "hex": "#8a8f98"
+   },
+   {
+    "id": "beige",
+    "hex": "#b7a183"
+   },
+   {
+    "id": "bordo",
+    "hex": "#8a2b3a"
+   },
+   {
+    "id": "azul-marino",
+    "hex": "#1f3a5f"
+   },
+   {
+    "id": "rojo",
+    "hex": "#c9263a"
+   },
+   {
+    "id": "blanco",
+    "hex": "#f1f1ee"
+   },
+   {
+    "id": "verde-oscuro",
+    "hex": "#2f5d3a"
    }
   ]
  }
