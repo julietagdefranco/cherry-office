@@ -366,3 +366,8 @@ select.campo { padding-right: 26px; }
 .archivo-fila:hover { border-color: var(--linea-fuerte); }
 .archivo-fila span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entrega-texto { margin: 12px 14px 16px; }
+
+/* tarjetas e insignia informativa (las usan Parte del día, Flujos y el Creador) */
+.tarjeta { background: var(--panel); border: 1px solid var(--linea); border-radius: var(--radio); padding: 12px; }
+.tarjeta.tenue { background: var(--panel-2); color: var(--suave); }
+.insignia.info { color: var(--suave); background: var(--panel-2); border-color: var(--linea-fuerte); }
