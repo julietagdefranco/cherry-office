@@ -648,7 +648,8 @@ struct BibliotecaTests {
         #expect(Sandbox.valor(l, "--tools") == "Read,Glob,Grep,Skill,Edit,Write")
         // permiso de escritura: SOLO su archivo de notas (ni entregables ni nada más)
         let notas = f.carpeta + "/conocimiento/agentes/marce.md"
-        #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "Skill", "Edit(/\(notas))", "Write(/\(notas))"])
+        #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "Skill", "Edit(/\(notas))", "Write(/\(notas))",
+                                       "--disallowedTools", "mcp__claude_ai_*"])
         #expect(!l.contains("--add-dir"))
         #expect(sinPrivate(try #require(f.sb.cwds[f.sb.llamadas.firstIndex(where: { $0 == l })!])) == sinPrivate(f.carpeta))
         let p = try #require(l.last)

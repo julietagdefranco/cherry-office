@@ -975,8 +975,10 @@ public actor BibliotecaRouter: SubRouter {
             guard let ag = a.oficina.agente(id) else { resultados[id] = "error: el agente ya no está en la oficina"; continue }
             let prompt = Biblioteca.promptLectura(titulo: titulo, nombre: f.nombre, slug: slug, agente: ag, esImagen: TipoArchivo.imagenes.contains(f.tipo),
                                                   ruta: rutaAbsoluta(f, a))
-            let ctx = ContextoOficina(carpeta: carpeta, escritura: [a.ruta("conocimiento/agentes/\(id).md")],
-                                      dirsExtra: Permisos.dirsVinculos(a.oficina, agente: ag))
+            var c = ContextoOficina(carpeta: carpeta, escritura: [a.ruta("conocimiento/agentes/\(id).md")],
+                                    dirsExtra: Permisos.dirsVinculos(a.oficina, agente: ag))
+            c.vedadas = ["mcp__claude_ai_*"] // leer una ficha no usa conectores de claude.ai (plan §3)
+            let ctx = c
             let runner = self.runner
             let caja = CajaCosto(), st = store
             defer { let c = caja.valor; Task { await st.registrarCosto(oficina: carpeta, agente: id, origen: "biblioteca", ref: slug, costo: c) } }
