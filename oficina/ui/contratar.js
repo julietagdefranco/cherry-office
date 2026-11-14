@@ -5,6 +5,45 @@
   var h = App.h, api = App.api;
   var MODELOS = [['sonnet', 'Sonnet (equilibrado)'], ['opus', 'Opus (el más capaz)'], ['haiku', 'Haiku (rápido)'], ['inherit', 'El que use Claude Code']];
 
+  /* ---------------- editor de minifig (agentes y tu perfil) ----------------
+     avatar: objeto inicial; semilla(): de dónde salen los valores que falten. Devuelve {el, valor(), retratar()}. */
+  App.EditorAvatar = function (avatar, semilla) {
+    var av = JSON.parse(JSON.stringify(avatar || {}));
+    var img = h('img.grande', { alt: '' }), controles = h('div'), catalogo = null;
+    var retratar = App.debounce(function () {
+      App.Piezas.retrato(av, av.semilla || semilla(), 236).then(function (u) { img.src = u; }).catch(function () {});
+    }, 120);
+    function selector(etq, clave, opciones) {
+      return h('div.fila-campo', h('label.etiqueta-campo', etq), h('select.campo', {
+        onchange: function (e) { av[clave] = e.target.value; retratar(); }
+      }, opciones.map(function (o) { return h('option', { value: o[0], selected: o[0] === av[clave] }, o[1]); })));
+    }
+    function colores(etq, clave, lista) {
+      var p = h('div.paleta');
+      lista.forEach(function (c) {
+        p.appendChild(h('button', { class: c.hex.toLowerCase() === (av[clave] || '').toLowerCase() ? 'sel' : '', style: { background: c.hex }, title: c.id,
+          onclick: function () { av[clave] = c.hex; p.querySelectorAll('button').forEach(function (b) { b.classList.remove('sel'); }); this.classList.add('sel'); retratar(); } }));
+      });
+      return h('div.fila-campo', h('label.etiqueta-campo', etq), p);
+    }
+    function pintarControles() {
+      var c = catalogo;
+      function ops(g) { return Object.keys(c[g]).map(function (k) { return [k, c[g][k].nombre]; }); }
+      App.add(App.vaciar(controles),
+        selector('Peinado', 'pelo', ops('pelo')), colores('Color de pelo', 'colorPelo', c.colores.pelo),
+        selector('Cara', 'cara', ops('cara')), selector('Ropa', 'torso', ops('torso')),
+        colores('Color de la ropa', 'colorTorso', c.colores.torso), colores('Pantalón', 'colorPiernas', c.colores.piernas));
+    }
+    App.Piezas.completar(av, semilla()).then(function (a) { av = a; return App.Piezas.catalogo(); })
+      .then(function (c) { catalogo = c; pintarControles(); retratar(); }).catch(App.fallo);
+    var azar = h('button.btn.chico', {
+      onclick: function () {
+        App.Piezas.completar({ semilla: App.uuid().slice(0, 8) }).then(function (a) { av = a; pintarControles(); retratar(); });
+      }
+    }, App.icono('dado'), 'Otro aspecto');
+    return { el: h('div.editor-avatar', img, azar, controles), valor: function () { return av; }, retratar: retratar };
+  };
+
   /* ---------------- editor ---------------- */
   App.EditorAgente = function (dato, op) {
     op = op || {};
@@ -12,10 +51,6 @@
     d.avatar = d.avatar || { semilla: d.id || App.uuid().slice(0, 8) };
     var usados = App.E.oficina.agentes.map(function (a) { return a.id; });
     var idTocado = !!op.editar;
-    var img = h('img.grande', { alt: '' });
-    var controles = h('div');
-    var catalogo = null;
-
     function campo(etq, el, ayuda) { return h('div.fila-campo', h('label.etiqueta-campo', etq), el, ayuda ? h('div.ayuda', ayuda) : null); }
     var nombre = h('input.campo', { value: d.nombre || '', maxlength: 80, placeholder: 'Ej.: Lu' });
     var id = h('input.campo', { value: d.id || '', maxlength: 41, disabled: !!op.editar, spellcheck: 'false' });
@@ -25,47 +60,12 @@
     var desc = h('input.campo', { value: d.description || '', maxlength: 1000, placeholder: 'En una línea, para qué sirve' });
     var prompt = h('textarea.campo', { rows: 9, maxlength: 20000 }); prompt.value = d.prompt || '';
     var chips = [0, 1, 2].map(function (i) { return h('input.campo', { value: (d.chips || [])[i] || '', maxlength: 200, placeholder: i === 0 ? 'Pedido de ejemplo' : '', style: { marginBottom: '6px' } }); });
-    if (!op.editar) nombre.addEventListener('input', function () { if (!idTocado) id.value = App.slug(nombre.value, usados); retratar(); });
+    var ava = App.EditorAvatar(d.avatar, function () { return d.avatar.semilla || id.value; });
+    if (!op.editar) nombre.addEventListener('input', function () { if (!idTocado) id.value = App.slug(nombre.value, usados); ava.retratar(); });
     id.addEventListener('input', function () { idTocado = true; });
 
-    var retratar = App.debounce(function () {
-      App.Piezas.retrato(d.avatar, d.avatar.semilla || id.value, 236).then(function (u) { img.src = u; }).catch(function () {});
-    }, 120);
-
-    function selector(etq, clave, opciones) {
-      return h('div.fila-campo', h('label.etiqueta-campo', etq), h('select.campo', {
-        onchange: function (e) { d.avatar[clave] = e.target.value; retratar(); }
-      }, opciones.map(function (o) { return h('option', { value: o[0], selected: o[0] === d.avatar[clave] }, o[1]); })));
-    }
-    function colores(etq, clave, lista) {
-      var p = h('div.paleta');
-      lista.forEach(function (c) {
-        p.appendChild(h('button', { class: c.hex.toLowerCase() === (d.avatar[clave] || '').toLowerCase() ? 'sel' : '', style: { background: c.hex }, title: c.id,
-          onclick: function () { d.avatar[clave] = c.hex; p.querySelectorAll('button').forEach(function (b) { b.classList.remove('sel'); }); this.classList.add('sel'); retratar(); } }));
-      });
-      return h('div.fila-campo', h('label.etiqueta-campo', etq), p);
-    }
-    function pintarControles() {
-      var c = catalogo;
-      function ops(g) { return Object.keys(c[g]).map(function (k) { return [k, c[g][k].nombre]; }); }
-      App.add(App.vaciar(controles), 
-        selector('Peinado', 'pelo', ops('pelo')), colores('Color de pelo', 'colorPelo', c.colores.pelo),
-        selector('Cara', 'cara', ops('cara')), selector('Ropa', 'torso', ops('torso')),
-        colores('Color de la ropa', 'colorTorso', c.colores.torso), colores('Pantalón', 'colorPiernas', c.colores.piernas));
-    }
-    App.Piezas.completar(d.avatar, d.id).then(function (av) {
-      d.avatar = av;
-      return App.Piezas.catalogo();
-    }).then(function (c) { catalogo = c; pintarControles(); retratar(); }).catch(App.fallo);
-
-    var azar = h('button.btn.chico', {
-      onclick: function () {
-        App.Piezas.completar({ semilla: App.uuid().slice(0, 8) }).then(function (av) { d.avatar = av; pintarControles(); retratar(); });
-      }
-    }, App.icono('dado'), 'Otro aspecto');
-
     var el = h('div.editor',
-      h('div.editor-avatar', img, azar, controles),
+      ava.el,
       h('div',
         h('div.dos', campo('Nombre', nombre), campo('Identificador', id, op.editar ? 'No se puede cambiar.' : 'Así se llama el agente en Claude Code.')),
         campo('Rol', rol),
@@ -80,7 +80,7 @@
         return {
           id: id.value.trim(), nombre: nombre.value.trim(), rol: rol.value.trim(), departamento: dep.value, modelo: modelo.value,
           description: desc.value.trim() || rol.value.trim(), prompt: prompt.value.trim(),
-          chips: chips.map(function (c) { return c.value.trim(); }).filter(Boolean), avatar: d.avatar, brief: d.brief || undefined
+          chips: chips.map(function (c) { return c.value.trim(); }).filter(Boolean), avatar: ava.valor(), brief: d.brief || undefined
         };
       },
       validar: function () {

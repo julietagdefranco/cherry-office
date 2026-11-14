@@ -174,6 +174,16 @@ public final class Router: APIHandler {
                 let act = try await oficinas.requerirActiva()
                 let desde = query["desde"].flatMap { Double($0) } ?? 0
                 return (200, await store.costos(oficina: act.carpeta, desde: desde))
+            case ("perfil", 2):
+                switch method {
+                case "GET": return (200, ["perfil": await oficinas.perfilActual().json])
+                case "PUT":
+                    let d = try objeto(body)
+                    let nombre = try Validar.texto(d["nombre"], "nombre", max: 80, obligatorio: false) ?? ""
+                    let p = try await oficinas.guardarPerfil(Perfil(nombre: nombre, avatar: try NuevoAgente.avatarValido(d["avatar"])))
+                    return (200, ["perfil": p.json, "oficina": await oficinas.activa().map { $0.oficina.json as Any } ?? NSNull()])
+                default: return no
+                }
             case ("oficinas", 2):
                 switch method {
                 case "GET": return (200, ["oficinas": await oficinas.listar(), "activa": await oficinas.activa().map { $0.carpeta as Any } ?? NSNull()])
@@ -280,7 +290,8 @@ public final class Router: APIHandler {
         return ["app": "prospera-hq", "version": config.version, "claude": bin != nil,
                 "agentes": (act?.oficina.agentes.map(\.id) ?? []).sorted(), "auth": a,
                 "claudePath": bin.map { $0 as Any } ?? NSNull(),
-                "oficina": act.map { $0.resumen as Any } ?? NSNull()]
+                "oficina": act.map { $0.resumen as Any } ?? NSNull(),
+                "perfil": await oficinas.perfilActual().json]
     }
 
     // MARK: oficinas

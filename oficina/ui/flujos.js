@@ -35,7 +35,7 @@ App.Flujos = (function () {
 
   /* quién: retrato del agente, «Vos» o un signo de pregunta si ya no está */
   function marca(q, tam) {
-    if (esPersona(q)) return h('div.retrato.vos', { title: 'Vos' }, 'Vos');
+    if (esPersona(q)) { var yo = App.Yo.retrato('retrato', tam || 64); yo.title = 'Vos'; return yo; }
     var a = q && App.agente(q);
     if (a) return App.retratoImg(a, 'retrato', tam || 64);
     return h('div.retrato.sin-asignar', { title: 'Sin asignar' }, '?');

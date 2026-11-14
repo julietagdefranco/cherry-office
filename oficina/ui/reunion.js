@@ -220,9 +220,9 @@
       if (x.ronda !== ronda && x.agente !== 'usuario') { ronda = x.ronda; t.appendChild(h('div.ronda-sep', 'Ronda ' + ronda)); }
       var a = App.agente(x.agente), yo = x.agente === 'usuario';
       t.appendChild(h('div.turno' + (yo ? '.usuario' : ''),
-        yo ? h('div.retrato', { style: { width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 } }, (E.oficina.duenio || 'Yo').slice(0, 1).toUpperCase())
+        yo ? App.Yo.retrato('retrato', 64)
           : a ? App.retratoImg(a, 'retrato', 64) : h('div.retrato'),
-        h('div.turno-cuerpo', h('div.turno-quien', yo ? (E.oficina.duenio || 'Vos') : nombre(x.agente), h('small', a ? a.rol : '')),
+        h('div.turno-cuerpo', h('div.turno-quien', yo ? (App.Yo.nombre() || E.oficina.duenio || 'Vos') : nombre(x.agente), h('small', a ? a.rol : '')),
           yo ? h('div.turno-txt', x.texto) : App.htmlSeguro(h('div.turno-txt' + (x.error ? '.error-txt' : '')), App.markdown(x.texto)))));
     });
     if (r.estado === 'en_curso' && r.hablando) {

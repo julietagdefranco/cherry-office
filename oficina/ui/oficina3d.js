@@ -14,8 +14,8 @@ App.Oficina3D = (function () {
   var plano = null;                 // datos del armado (salas, pasillos, asientos de reunión)
   var animando = {};                // id -> true mientras camina, habla o trabaja en su escritorio
   var trabajo = {};                 // id -> {estado, herramienta, objetivo, tarea} (de /api/actividad; sobrevive a reconstruir)
-  var muroObj = null;               // muro de entregables (muro3d.js), se rearma en cada construir
-  var muroDatos = { entregas: [], n: 0 }, muroAgentes = {};   // último estado del muro (sobrevive a reconstruir)
+  var muroObj = null;               // bandeja de entregables en tu escritorio (bandeja3d.js), se rearma en cada construir
+  var muroDatos = { entregas: [], n: 0 }, muroAgentes = {};   // último estado de la bandeja (sobrevive a reconstruir)
   var pendiente = false, sombrasSucias = true, ultimo = 0, construyendo = 0, sombraAnim = false, soloLento = true;
   var hover = null, elegido = null, hablando = null;
   var orb = { az: 0.42, el: 0.78, d: 60, tx: 0, tz: 0, minD: 10, maxD: 200 };
@@ -278,7 +278,7 @@ App.Oficina3D = (function () {
     var l = lugares.filter(function (x) { return x.tipo === tipo; })[0];
     if (!l) return false;
     var c = l.caja.getCenter(new T.Vector3());
-    enfocar(c.x, c.z + 1, orb.minD * (tipo === 'entregables' ? 1.1 : 2));   // el muro es chico: más cerca
+    enfocar(c.x, c.z + 1, orb.minD * (tipo === 'entregables' ? 0.9 : 2));   // la bandeja es chica: más cerca
     return true;
   }
 
@@ -440,6 +440,7 @@ App.Oficina3D = (function () {
   function disenarSala(s) {
     if (s.tipo === 'reunion') { s.w = 20; s.d = 15; return; }
     if (s.tipo === 'biblioteca') { s.w = 17; s.d = 15; return; }
+    if (s.tipo === 'direccion') { s.w = 17; s.d = 15; return; }
     var n = Math.max(1, s.agentes.length);
     s.filasDesk = n <= 3 ? 1 : n <= 8 ? 2 : 3;
     s.cols = Math.ceil(n / s.filasDesk);
@@ -482,15 +483,18 @@ App.Oficina3D = (function () {
     return { alas: lista, W: RECEPCION + largo + 1, D: z, x0: -MARGEN, z0: -MARGEN, x1: RECEPCION + largo + 1 + MARGEN, z1: z + FRENTE, pasilloX: RECEPCION / 2 };
   }
 
-  function construir(oficina) {
+  /* perfil: {nombre, avatar} de quien dirige (YO); tiene su despacho con la bandeja de entregables */
+  function construir(oficina, perfil) {
     var token = ++construyendo;
+    perfil = perfil || {};
     var deps = oficina.departamentos || [], ags = oficina.agentes || [];
     var porDep = {};
     deps.forEach(function (d) { porDep[d.id] = []; });
     var sinDep = [];
     ags.forEach(function (a) { if (porDep[a.departamento]) porDep[a.departamento].push(a); else sinDep.push(a); });
     if (sinDep.length) { porDep.__sin = sinDep; deps = deps.concat([{ id: '__sin', nombre: 'Sin departamento', color: '#9a9a9a' }]); }
-    var salas = [{ tipo: 'reunion', nombre: 'Sala de reuniones' }, { tipo: 'biblioteca', nombre: 'Biblioteca' }]
+    var salas = [{ tipo: 'direccion', nombre: perfil.nombre ? 'Despacho de ' + perfil.nombre : 'Tu despacho' },
+                 { tipo: 'reunion', nombre: 'Sala de reuniones' }, { tipo: 'biblioteca', nombre: 'Biblioteca' }]
       .concat(deps.map(function (d) { return { tipo: 'depto', dep: d, nombre: d.nombre, agentes: porDep[d.id] || [] }; }));
     var nuevo = planificar(salas);
     nuevo.nombre = oficina.nombre || '';
@@ -533,8 +537,8 @@ App.Oficina3D = (function () {
     nuevo.alas.forEach(function (a) {
       pisoBaldosas(L, RECEPCION, a.z + a.df, nuevo.W - RECEPCION, PASILLO, '#d6d3cd');    // pasillo
       a.fondo.concat(a.frente).forEach(function (s) {
-        s.color = s.tipo === 'reunion' ? C.azul : s.tipo === 'biblioteca' ? C.verde : s.tipo === 'comun' ? C.naranja : (s.dep.color || '#999999');
-        var piso = s.tipo === 'reunion' ? '#d9d6d0' : s.tipo === 'biblioteca' ? '#cdbfa6' : s.tipo === 'comun' ? '#dcd9d3' : mezclar(s.color, '#dedbd5', 0.78);
+        s.color = s.tipo === 'reunion' ? C.azul : s.tipo === 'biblioteca' ? C.verde : s.tipo === 'comun' ? C.naranja : s.tipo === 'direccion' ? C.amarillo : (s.dep.color || '#999999');
+        var piso = s.tipo === 'reunion' ? '#d9d6d0' : s.tipo === 'biblioteca' ? '#cdbfa6' : s.tipo === 'comun' ? '#dcd9d3' : s.tipo === 'direccion' ? '#c7ae8c' : mezclar(s.color, '#dedbd5', 0.78);
         pisoBaldosas(L, s.x, s.z, s.w, s.d, piso);
         paredesSala(L, LV, s, nuevo);
         var alFondo = s.lado === 'fondo';
@@ -550,6 +554,11 @@ App.Oficina3D = (function () {
             var asiento = { x: cx, z: cz + 0.2, rot: 0, sala: s, salida: { x: cx + CELDA_X / 2, z: cz + 0.2 } };
             if (s.agentes[k]) asientosDesk[s.agentes[k].id] = asiento;
           }
+        } else if (s.tipo === 'direccion') {
+          nuevo.yo = despacho(L, s);
+          lugares.push({ tipo: 'direccion', caja: new T.Box3(new T.Vector3(s.x, 0, s.z), new T.Vector3(s.x + s.w, 0.6, s.z + s.d)), etiqueta: etq });
+          var ay = nuevo.yo.asiento;
+          lugares.push({ tipo: 'yo', caja: new T.Box3(new T.Vector3(ay.x - 1.1, 0, ay.z - 1), new T.Vector3(ay.x + 1.1, 4, ay.z + 1)) });
         } else if (s.tipo === 'reunion') {
           salaReunion(L, s, nuevo);
           lugares.push({ tipo: 'reunion', caja: new T.Box3(new T.Vector3(s.x, 0, s.z), new T.Vector3(s.x + s.w, 2.5, s.z + s.d)), etiqueta: etq });
@@ -569,10 +578,12 @@ App.Oficina3D = (function () {
     LP = null;
 
     var piezasListas = cerrarLDraw(grupo), autosListos = armarAutos(grupo, nuevo);
+    var figYo = P.figura(perfil.avatar || { semilla: 'yo' }, 'yo').catch(function () { return null; });
     return Promise.all(ags.map(function (a) {
       return P.figura(a.avatar, a.id).then(function (fig) { return { a: a, fig: fig }; });
-    }).concat([piezasListas, autosListos])).then(function (lista) {
+    }).concat([figYo, piezasListas, autosListos])).then(function (lista) {
       var autosNuevos = lista.pop(); lista.pop();
+      var yoFig = lista.pop();
       if (token !== construyendo) return;
       limpiarVuelos();
       if (mundo) { escena.remove(mundo); liberar(mundo); }
@@ -598,6 +609,7 @@ App.Oficina3D = (function () {
         figuras[x.a.id] = f;
         crearPantalla(f);
       });
+      if (yoFig && plano.yo) { sentar({ obj: yoFig }, plano.yo.asiento); mundo.add(yoFig); }
       muroAgentes = agentesMuro;
       armarMuro();
       actividad(trabajo);
@@ -610,19 +622,28 @@ App.Oficina3D = (function () {
     });
   }
 
-  /* muro de entregables: lo arma muro3d.js (cargado después) sobre el plano recién construido */
+  /* bandeja de entregables: la arma bandeja3d.js (cargado después) sobre tu escritorio, en el plano recién construido */
   function armarMuro() {
     muroObj = null;
-    if (!App.Muro3D || !plano || !mundo) return;
-    muroObj = App.Muro3D.construir({ T: T, P: P, plano: plano, geoBloque: geoBloque, PLACA: PLACA, LADRILLO: LADRILLO,
-                                     MADERA: MADERA, NEGRO: NEGRO, GRIS_OSCURO: GRIS_OSCURO });
+    if (!App.Bandeja3D || !plano || !plano.yo || !mundo) return;
+    var b = plano.yo.bandeja;
+    muroObj = App.Bandeja3D.construir({ T: T, P: P, geoBloque: geoBloque, PLACA: PLACA, x: b.x, y: b.y, z: b.z, GRIS_OSCURO: GRIS_OSCURO });
+    muroObj.etiqueta = etiqueta('sala', '', C.amarillo);
+    muroObj.etiqueta.el.classList.add('etq-bandeja');
+    muroObj.etiqueta.p = new T.Vector3(b.x - 1.4, b.y + 2.2, b.z);
     mundo.add(muroObj.grupo);
     lugares.push({ tipo: 'entregables', caja: muroObj.caja });
-    muroObj.actualizar(muroDatos.entregas, muroDatos.n, muroAgentes);
+    pintarBandeja();
   }
   function muro(entregas, sinRevisar) {
     muroDatos = { entregas: (entregas || []).slice(), n: sinRevisar || 0 };
-    if (muroObj) { muroObj.actualizar(muroDatos.entregas, muroDatos.n, muroAgentes); pedir(); }
+    if (muroObj) { pintarBandeja(); pedir(); }
+  }
+  function pintarBandeja() {
+    muroObj.actualizar(muroDatos.entregas, muroDatos.n, muroAgentes);
+    var n = muroDatos.n, el = muroObj.etiqueta.el;
+    el.querySelector('span').textContent = n ? (n === 1 ? '1 para revisar' : n + ' para revisar') : 'Bandeja al día';
+    el.classList.toggle('al-dia', !n);
   }
 
   var matVidrio = null;
@@ -1052,6 +1073,36 @@ App.Oficina3D = (function () {
         plantaGrande(L, xr1 - 1.2, alFondo ? zr0 + 0.8 : zr1 - 0.8, k + 1, false, cajaSala(s));
       }
     }
+  }
+
+  /* Despacho de Dirección (YO): escritorio grande de madera con tu silla, la bandeja de entregables a mano, dos sillas
+     para visitas, alfombra, un rincón con sillón y una planta. Devuelve dónde te sentás y dónde va la bandeja. */
+  function despacho(L, s) {
+    var y = PLACA, alFondo = s.lado === 'fondo', k = 3;
+    var cx = s.x + 6.5, cz = alFondo ? s.z + 3 : s.z + 5;
+    alfombra(L, cx - 4.5, cz - 1.5, cx + 4.5, cz + 7.5, '#9c8a6e');
+    pieza(L, 1, 3, LADRILLO * 2, cx - 2.5, y, cz + 2.7, MADERA, false);
+    pieza(L, 1, 3, LADRILLO * 2, cx + 2.5, y, cz + 2.7, MADERA, false);
+    ladrillo(L, 6, 3, PLACA, cx - 3, y + LADRILLO * 2, cz + 1.2, MADERA, false);
+    var tope = y + LADRILLO * 2 + PLACA;
+    monitor(L, cx + 1.2, tope, cz + 3.1, k, false);
+    ldraw('3069bpcc', cx + 0.6, tope, cz + 1.7, Math.PI, GRIS_CLARO);
+    ldraw('3899', cx + 2.5, tope, cz + 1.9, 2.4, NEGRO);
+    ldraw('6141', cx + 2.5, tope, cz + 3.6, 0, NEGRO);
+    poner(L, geoRedondo(0.1, 1.0), 'barra1', cx + 2.5, tope + PLACA, cz + 3.6, NEGRO);
+    ldraw('4589', cx + 2.5, tope + 1.4, cz + 3.6, 0, C.amarillo);
+    silla(L, cx, cz + 0.2, 0, NEGRO);
+    /* visitas: dos sillas del otro lado del escritorio, mirándote */
+    silla(L, cx - 1.6, cz + 5.8, Math.PI, GRIS_OSCURO);
+    silla(L, cx + 1.6, cz + 5.8, Math.PI, GRIS_OSCURO);
+    /* rincón: sillón y mesita contra la pared de atrás, planta en la esquina */
+    var paredAtras = alFondo ? s.z + 1 : s.z + s.d - 1, hacia = alFondo ? 1 : -1;
+    var xr = s.x + Math.min(s.w - 4, 14);
+    sillon(L, xr, paredAtras + hacia * 1.6, alFondo ? 0 : Math.PI, '#4a5560', 2);
+    mesita(L, xr, paredAtras + hacia * 4.2, MADERA);
+    plantaGrande(L, s.x + 2, paredAtras + hacia * 1.2, k, true, cajaSala(s));
+    archivero(L, s.x + 1.5, paredAtras + hacia * 4.5, C.amarillo);
+    return { asiento: { x: cx, z: cz + 0.2, rot: 0 }, bandeja: { x: cx - 1.6, y: tope, z: cz + 3.0 } };
   }
 
   function recepcion(L, pl, entradaX) {

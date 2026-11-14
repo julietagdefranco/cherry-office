@@ -14,7 +14,7 @@ struct RouterTests {
         let b = try sb.backend()
         let r = await llamar(b, "GET", "/api/estado")
         #expect(r.status == 200)
-        #expect(Set(r.obj.keys) == ["app", "version", "claude", "agentes", "auth", "claudePath", "oficina"])
+        #expect(Set(r.obj.keys) == ["app", "version", "claude", "agentes", "auth", "claudePath", "oficina", "perfil"])
         #expect(r.obj["app"] as? String == "prospera-hq")
         #expect(r.obj["version"] as? String == "1.0.0")
         #expect(r.obj["claude"] as? Bool == true)
