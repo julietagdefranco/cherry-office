@@ -47,11 +47,32 @@
     }).catch(function () {});
   }
 
-  /* crea la oficina vacía (como «Crear mi oficina» sin departamentos extra) y abre el Creador */
+  /* pide nombre, crea la oficina vacía (sin departamentos extra) y abre el Creador; sirve desde el inicio y con otra oficina abierta */
   function armarCharlando() {
-    api.post('/api/oficinas', { nombre: 'Mi oficina', duenio: '', departamentos: [] })
-      .then(function (r) { montar(r.carpeta, r.oficina); App.Creador.abrir(); })
-      .catch(App.fallo);
+    var hj = App.hoja({ titulo: 'Nueva oficina charlando', ancho: 460 });
+    var nombre = h('input.campo', { placeholder: 'Mi oficina', maxlength: 80, autofocus: true });
+    var duenio = h('input.campo', { placeholder: 'Cómo te llaman los agentes', maxlength: 80 });
+    var err = h('div.error-txt');
+    App.add(hj.cuerpo,
+      h('div.fila-campo', h('label.etiqueta-campo', 'Nombre de la oficina'), nombre),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Tu nombre'), duenio),
+      h('div.ayuda', 'Después le contás al Creador cómo trabajás (o le pegás un texto) y te propone departamentos, agentes y flujos para aprobar.'),
+      err);
+    var btn = h('button.btn.primario', { onclick: enviar }, 'Empezar a charlar');
+    App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), btn);
+    nombre.addEventListener('keydown', function (e) { if (e.key === 'Enter') enviar(); });
+    function enviar() {
+      err.textContent = '';
+      btn.disabled = true; btn.textContent = 'Creando…';
+      api.post('/api/oficinas', { nombre: nombre.value.trim() || 'Mi oficina', duenio: duenio.value.trim(), departamentos: [] })
+        .then(function (r) {
+          hj.cerrar();
+          if (App.Agente && E.oficina) App.Agente.cerrar();
+          montar(r.carpeta, r.oficina);
+          App.Creador.abrir();
+        })
+        .catch(function (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Empezar a charlar'; });
+    }
   }
 
   var SUGERIDOS = [['Dirección', '#26262b'], ['Marketing', '#e6c22e'], ['Ventas', '#3c6fb4'], ['Operaciones', '#2a9d8f'], ['Finanzas', '#4b7f52'], ['Producto', '#8e78c4'], ['Diseño', '#e58aa6'], ['Atención al cliente', '#e0644f']];
@@ -177,6 +198,7 @@
 
   App.abrirCarpetaOficina = abrirCarpeta;
   App.crearOficina = crearOficina;
+  App.armarCharlando = armarCharlando;
   App.abrirExistente = abrirExistente;
 
   /* ---------------- selector de color ---------------- */
@@ -311,6 +333,7 @@
       });
       items.push({ texto: 'Abrir otra oficina…', icono: 'carpeta', accion: abrirExistente });
       items.push({ texto: 'Crear oficina nueva…', icono: 'mas', accion: crearOficina });
+      items.push({ texto: 'Nueva oficina charlando…', icono: 'chispa', accion: armarCharlando });
       items.push({ texto: 'Importar oficina…', icono: 'importar', accion: importarOficina });
       items.push('-');
       items.push({ texto: 'Reglas de la oficina…', icono: 'regla', accion: function () { App.Ajustes.reglas(); } });

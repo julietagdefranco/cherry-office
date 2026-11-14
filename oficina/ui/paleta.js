@@ -52,6 +52,8 @@ App.Paleta = (function () {
      ['Revisar la próxima entrega', 'chispa', function () { if (!App.Entregables.siguiente()) App.aviso('No tenés entregas sin revisar.'); }],
      ['Exportar oficina', 'subir', function () { App.exportarOficina(); }],
      ['Importar oficina', 'importar', function () { App.importarOficina(); }],
+     ['Crear oficina nueva', 'mas', function () { App.crearOficina(); }],
+     ['Nueva oficina charlando', 'chispa', function () { App.armarCharlando(); }],
      ['Ver toda la oficina', 'edificio', function () { App.Oficina3D.encuadrar(); }]].forEach(function (x) {
       out.push({ tipo: 'Acción', icono: x[1], txt: x[0], buscar: x[0], hacer: x[2] });
     });
