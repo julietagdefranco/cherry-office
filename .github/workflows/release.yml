@@ -1,0 +1,85 @@
+# Build automático de los instaladores.
+#
+# - Al subir una etiqueta vX.Y.Z: corre los tests, arma el .dmg y lo adjunta a la release de esa etiqueta.
+#   Si la release ya existe (notas escritas a mano), solo sube o reemplaza el instalador, sin tocar las notas.
+#   Si no existe, la crea como borrador para completar las notas antes de publicarla.
+# - A mano (Actions → Release → Run workflow): arma el .dmg y lo deja como artefacto del run, sin release.
+#
+# Hoy solo Mac (app Swift). En la etapa 2 (carcasa Electron) se suma el job de Windows.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    name: macOS (arm64)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versión
+        id: version
+        run: |
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' app/Resources/Info.plist)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de Info.plist ($VERSION)."
+            exit 1
+          fi
+
+      - name: Tests del backend
+        run: app/Tests/run-tests.sh
+
+      - name: Compilar y empaquetar
+        run: app/make-dmg.sh --rebuild
+
+      - name: Renombrar instalador
+        id: dmg
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          NAME="Oficina-$VERSION-arm64.dmg"
+          mv "app/build/Oficina $VERSION.dmg" "app/build/$NAME"
+          SHA="$(shasum -a 256 "app/build/$NAME" | cut -d' ' -f1)"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "### $NAME"
+            echo
+            echo "SHA-256: \`$SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.dmg.outputs.name }}
+          path: app/build/${{ steps.dmg.outputs.name }}
+          retention-days: 14
+
+      - name: Adjuntar a la release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          FILE: app/build/${{ steps.dmg.outputs.name }}
+          SHA: ${{ steps.dmg.outputs.sha }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --clobber
+          else
+            gh release create "$TAG" "$FILE" --draft --title "Oficina $VERSION" \
+              --notes "Borrador generado por el build automático. Completar las notas antes de publicar.
+
+          SHA-256: \`$SHA\`"
+          fi

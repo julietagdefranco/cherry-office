@@ -6,7 +6,7 @@ import Backend
 //   cd app && swift run oficina-dev            → http://localhost:8765
 //
 // Variables: PORT (8765), HQ_DATA_DIR (base y logs; por defecto los de la app), HQ_OFICINAS_DIR, CLAUDE_BIN,
-// HQ_CONFIG y las demás de Config. HQ_UI_DIR apunta a otra carpeta `oficina/` (por defecto la del repo).
+// HQ_HOME, HQ_CONFIG y las demás de Config. HQ_UI_DIR apunta a otra carpeta `oficina/` (por defecto la del repo).
 
 let env = ProcessInfo.processInfo.environment
 let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()   // app/Sources/Dev
@@ -15,8 +15,16 @@ let ui = env["HQ_UI_DIR"].map { URL(fileURLWithPath: $0) } ?? repo.appendingPath
 let vendor = repo.appendingPathComponent("app/Resources/vendor")
 let puerto = UInt16(env["PORT"] ?? "") ?? 8765
 
+// HQ_HOME: carpeta personal alternativa (la usan los tests de paridad por HTTP para no tocar el HOME real;
+// en macOS NSHomeDirectory() ignora $HOME).
 let backend: Backend
-do { backend = try Backend.makeDefault() } catch {
+do {
+    if let h = env["HQ_HOME"], !h.isEmpty {
+        backend = try Backend(config: Config.load(home: h, env: env))
+    } else {
+        backend = try Backend.makeDefault()
+    }
+} catch {
     FileHandle.standardError.write(Data("oficina-dev: no pude arrancar el backend: \(error)\n".utf8))
     exit(1)
 }
