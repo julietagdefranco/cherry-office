@@ -281,7 +281,7 @@ La lista para `--tools` y `--allowedTools` sale de `HerramientasMCPAgente.lista(
   - `mcp_servers` con `source=="claudeai"`;
   - `tools` que empiezan con `mcp__claude_ai_`, agrupadas por prefijo (`mcp__claude_ai_` + nombre sin «claude.ai » con espacios cambiados por `_`).
 
-  Corre al pedirlo (`POST /api/conectores/actualizar`) y una vez al arrancar, en segundo plano. Los `needs-auth` se listan como no disponibles y no se pueden asignar.
+  Corre al pedirlo (`POST /api/conectores/actualizar`) y una sola vez en segundo plano con el primer `GET /api/conectores` (nunca al arrancar el backend, para no lanzar claude en los tests); mientras tanto el GET devuelve `detectando: true`. Los `needs-auth` se listan como no disponibles y no se pueden asignar.
 - **Clasificación** `Conectores.clasificar(corto)`: devuelve `leer` si empieza con `list|get|search|read|find|fetch|download|query|lookup|suggest`; si no, `actuar`. Ante la duda, actuar. La persona puede mover una herramienta al asignarla.
 - **Por agente**, `ConectoresAgente.herramientas(o, a, catalogo, actuar)`:
   - `permitidas` = todas las `leer` asignadas + (`actuar` pedido ∩ actuar asignadas).
