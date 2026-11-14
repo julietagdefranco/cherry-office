@@ -1,11 +1,13 @@
 # Build automático de los instaladores.
 #
-# - Al subir una etiqueta vX.Y.Z: corre los tests, arma el .dmg y lo adjunta a la release de esa etiqueta.
+# - Al subir una etiqueta vX.Y.Z: corre los tests, arma el .dmg (Mac) y el instalador .exe (Windows) y los adjunta
+#   a la release de esa etiqueta.
 #   Si la release ya existe (notas escritas a mano), solo sube o reemplaza el instalador, sin tocar las notas.
 #   Si no existe, la crea como borrador para completar las notas antes de publicarla.
-# - A mano (Actions → Release → Run workflow): arma el .dmg y lo deja como artefacto del run, sin release.
+# - A mano (Actions → Release → Run workflow): arma los instaladores y los deja como artefactos del run, sin release.
 #
-# Hoy solo Mac (app Swift). En la etapa 2 (carcasa Electron) se suma el job de Windows.
+# Mac: la app Swift (app/). Windows: la carcasa Electron (desktop/) con el backend TypeScript.
+# La versión sale siempre de app/Resources/Info.plist (el job de Windows se la pone a desktop/package.json).
 name: Release
 
 on:
@@ -84,11 +86,96 @@ jobs:
           FILE: app/build/${{ steps.dmg.outputs.name }}
           SHA: ${{ steps.dmg.outputs.sha }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$FILE" --clobber
-          else
-            gh release create "$TAG" "$FILE" --draft --title "Oficina $VERSION" \
-              --notes "Borrador generado por el build automático. Completar las notas antes de publicar.
-
-          SHA-256: \`$SHA\`"
+          # el job de Windows corre en paralelo: si la otra ya creó la release, solo se sube el archivo
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "Oficina $VERSION" \
+              --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true
           fi
+          gh release upload "$TAG" "$FILE" --clobber
+
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      # descargas de Electron y de las herramientas de electron-builder (NSIS, 7zip): van a la caché
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versión
+        id: version
+        run: |
+          VERSION="$(grep -A1 'CFBundleShortVersionString' app/Resources/Info.plist | grep -o '<string>[^<]*</string>' | head -1 | sed 's/<[^>]*>//g')"
+          [ -n "$VERSION" ] || { echo "::error::No pude leer la versión de Info.plist."; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de Info.plist ($VERSION)."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Caché de Electron
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: electron-${{ runner.os }}-${{ hashFiles('desktop/package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Dependencias
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix desktop
+
+      - name: Tipos
+        run: |
+          (cd backend && npx tsc --noEmit)
+          (cd desktop && npx tsc -p .)
+
+      - name: Compilar y empaquetar
+        working-directory: desktop
+        run: |
+          npm pkg set version="${{ steps.version.outputs.version }}"
+          node scripts/build.mjs --recursos
+          npx electron-builder --win --x64 --publish never
+
+      - name: Instalador
+        id: exe
+        run: |
+          NAME="Oficina-Setup-${{ steps.version.outputs.version }}.exe"
+          [ -f "desktop/release/$NAME" ] || { echo "::error::No se generó desktop/release/$NAME"; exit 1; }
+          SHA="$(sha256sum "desktop/release/$NAME" | cut -d' ' -f1)"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          { echo "### $NAME"; echo; echo "SHA-256: \`$SHA\`"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.exe.outputs.name }}
+          path: desktop/release/${{ steps.exe.outputs.name }}
+          retention-days: 14
+
+      - name: Adjuntar a la release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          FILE: desktop/release/${{ steps.exe.outputs.name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "Oficina $VERSION" \
+              --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true
+          fi
+          gh release upload "$TAG" "$FILE" --clobber

@@ -1,0 +1,68 @@
+# App de escritorio (Electron) para Windows: en cada cambio arma el instalador y lo deja como artefacto del run,
+# para probarlo en una Windows antes de sacar una release (la release la arma release.yml con la etiqueta).
+name: Desktop
+
+on:
+  push:
+    paths: ["desktop/**", "backend/src/**", "backend/package*.json", "oficina/**", "app/Resources/vendor/**", ".github/workflows/desktop.yml"]
+  pull_request:
+    paths: ["desktop/**", "backend/src/**", "backend/package*.json", "oficina/**", "app/Resources/vendor/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: instalador de Windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Caché de Electron
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: electron-${{ runner.os }}-${{ hashFiles('desktop/package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Dependencias
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix desktop
+
+      - name: Tipos
+        working-directory: desktop
+        run: npx tsc -p .
+
+      - name: Compilar y empaquetar
+        working-directory: desktop
+        run: |
+          node scripts/build.mjs --recursos
+          npx electron-builder --win --x64 --publish never
+
+      - name: Guardar instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: Oficina-Setup-windows
+          path: desktop/release/Oficina-Setup-*.exe
+          retention-days: 7
