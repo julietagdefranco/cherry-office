@@ -133,7 +133,9 @@ public actor Programador {
     private let automatico: Bool
     private let sistema: TimeZone
     private var reloj: @Sendable () -> Date = { Date() }
-    private var gancho: @Sendable (Ejecucion) async -> Void = { _ in }
+    private var ganchosTerminar: [@Sendable (Ejecucion) async -> Void] = []
+    private var ganchosEntregar: [@Sendable (Entrega, Ejecucion?) async -> Void] = []
+    private let mcp: MCPServidor?
     private var preparado = false
     private var cerrado = false
     private var revisando = false
@@ -144,17 +146,23 @@ public actor Programador {
 
     /// `env["HQ_PROGRAMADOR"] == "0"` deja el bucle apagado (los tests llaman a `revisar()` a mano).
     init(store: Store, runner: ClaudeRunner, oficinas: Oficinas, config: Config, log: HQLog,
+         mcp: MCPServidor? = nil,
          env: [String: String] = ProcessInfo.processInfo.environment, sistema: TimeZone = .current) {
         self.store = store; self.runner = runner; self.oficinas = oficinas; self.config = config; self.log = log
+        self.mcp = mcp
         self.sistema = sistema
         automatico = env["HQ_PROGRAMADOR"] != "0"
         intervalo = env["HQ_PROGRAMADOR_INTERVALO"].flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil } ?? Programador.intervaloPorDefecto
     }
 
     /// Hook para avisos y notificaciones: se llama cuando una ejecución termina (ok o error), con la fila ya guardada.
-    /// Por defecto no hace nada. Se llama también para las corridas de «Probar ahora». No debe bloquear mucho: corre en la
-    /// tarea de la ejecución, después de guardarla y de liberar el carril del agente.
-    public func alTerminar(_ f: @escaping @Sendable (Ejecucion) async -> Void) { gancho = f }
+    /// Cada llamada AGREGA un gancho (no reemplaza). Se llama también para las corridas de «Probar ahora». No debe bloquear
+    /// mucho: corre en la tarea de la ejecución, después de guardarla y de liberar el carril del agente.
+    public func alTerminar(_ f: @escaping @Sendable (Ejecucion) async -> Void) { ganchosTerminar.append(f) }
+
+    /// Hook para cuando se crea una entrega: con la ejecución que la produjo (`correr`) o con nil (`correrCambios`).
+    /// Cada llamada agrega un gancho.
+    public func alEntregar(_ f: @escaping @Sendable (Entrega, Ejecucion?) async -> Void) { ganchosEntregar.append(f) }
 
     /// Reloj inyectable (tests).
     func fijarReloj(_ r: @escaping @Sendable () -> Date) { reloj = r }
@@ -230,10 +238,10 @@ public actor Programador {
     }
 
     /// «Probar ahora»: crea la ejecución y devuelve enseguida (la corrida sigue en segundo plano).
-    func correrAhora(_ act: OficinaActiva, _ t: TareaProgramada, _ def: AgenteDef) async throws -> Ejecucion {
+    func correrAhora(_ act: OficinaActiva, _ t: TareaProgramada, _ def: AgenteDef, actuar: [String] = []) async throws -> Ejecucion {
         do { try runner.verificar(carpeta: act.carpeta) } catch let e as ClaudeError { throw ErrorAPI(500, e.mensaje) }
         await preparar()
-        return try await lanzar(act, t, def, programada: Date(), manual: true)
+        return try await lanzar(act, t, def, programada: Date(), manual: true, actuar: actuar)
     }
 
     /// Una tarea única que se crea «para ahora» (o con la hora ya pasada): corre enseguida como su corrida programada (no
@@ -259,9 +267,15 @@ public actor Programador {
     /// «Hacelo ahora» de un pendiente de reunión: una corrida única (no queda en `oficina.json`) con id de tarea
     /// `encargo:<reunión>:<n>`. Misma maquinaria que una tarea (carril, permisos, actividad, costo, ejecución y entrega).
     func encargar(_ act: OficinaActiva, _ def: AgenteDef, reunion: String, pendiente: Int, nombre: String, consigna: String) async throws -> Ejecucion {
-        let t = TareaProgramada(id: Programador.idEncargo(reunion, pendiente), agente: def.id, nombre: nombre, consigna: consigna,
-                                dias: [1], hora: "00:00", activa: false)
-        return try await correrAhora(act, t, def)
+        try await encargarLibre(act, def, id: Programador.idEncargo(reunion, pendiente), nombre: nombre, consigna: consigna)
+    }
+
+    /// Una corrida única con un id de tarea cualquiera (`encargo:`, `flujo:`, `accion:`, `coord:`, `parte:`): misma maquinaria
+    /// que una tarea. `actuar`: herramientas de conectores de actuar que esta corrida puede usar (solo las de una acción aprobada).
+    func encargarLibre(_ act: OficinaActiva, _ def: AgenteDef, id: String, nombre: String, consigna: String,
+                       actuar: [String] = []) async throws -> Ejecucion {
+        let t = TareaProgramada(id: id, agente: def.id, nombre: nombre, consigna: consigna, dias: [1], hora: "00:00", activa: false)
+        return try await correrAhora(act, t, def, actuar: actuar)
     }
 
     // MARK: pedir cambios (E4)
@@ -287,19 +301,28 @@ public actor Programador {
 
     private func correrCambios(_ act: OficinaActiva, _ def: AgenteDef, _ e: Entrega, _ texto: String) async {
         let store = self.store, runner = self.runner
-        let ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
+        var ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
+        let mcpUrl = await mcp?.url()
+        ctx.mcpUrl = mcpUrl
+        let ctxFinal = ctx, mcp = self.mcp
         let carpeta = act.carpeta, agente = def.id, sid = e.sid
         let caja = CajaCosto(), escritos = CajaArchivos()
         let pedido = "Cambios que te pide \(act.oficina.duenio.isEmpty ? "la persona" : act.oficina.duenio) sobre lo que entregaste («\(e.titulo)»):\n\n\(texto)"
         struct Fin: Sendable { var texto: String?; var error: String? }
         let r: Fin = await runner.conCarril(oficina: carpeta, agente: agente) {
+            var envExtra: [String: String] = [:]
+            if mcpUrl != nil, let mcp {
+                envExtra[Permisos.variableTokenMCP] = mcp.tokens.emitir(oficina: carpeta, agente: agente, sid: sid, perfil: ctxFinal.perfilMCP)
+            }
+            defer { if let t = envExtra[Permisos.variableTokenMCP] { mcp?.tokens.revocar(t) } }
             do {
                 try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
                 try await store.agregar(sid: sid, rol: "u", texto: pedido)
                 let activa = await store.estaActiva(sid)
                 let t = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "cambios", tarea: "Cambios: " + e.titulo,
                                                           extra: caja.observador(escritos.observador())) { obs, _ in
-                    try await runner.ejecutarChat(agente: agente, mensaje: pedido, sid: sid, activa: activa, oficina: ctx, obs: obs)
+                    try await runner.ejecutarChat(agente: agente, mensaje: pedido, sid: sid, activa: activa, oficina: ctxFinal, obs: obs,
+                                                  envExtra: envExtra)
                 }
                 try await store.marcarActiva(sid)
                 try await store.agregar(sid: sid, rol: "a", texto: t.isEmpty ? "(sin respuesta)" : t)
@@ -315,9 +338,11 @@ public actor Programador {
         if let t = r.texto {
             let nuevos = ArchivosEntrega.relativos(escritos.valor, carpeta: carpeta)
             let arch = nuevos.isEmpty ? e.archivos : nuevos + e.archivos.filter { !nuevos.contains($0) }
-            if await RegistroEntregas.registrar(store, runner.canalAvisos, oficina: carpeta, agente: agente, nombre: def.nombre, origen: "cambios",
-                                                ref: sid, titulo: e.titulo, texto: t, sid: sid, archivos: arch, padre: e.id, costo: caja.valor) != nil {
+            if let nueva = await RegistroEntregas.registrar(store, runner.canalAvisos, oficina: carpeta, agente: agente, nombre: def.nombre,
+                                                            origen: "cambios", ref: sid, titulo: e.titulo, texto: t, sid: sid, archivos: arch,
+                                                            padre: e.id, costo: caja.valor) {
                 await store.entregaMarcar(oficina: carpeta, id: e.id, estado: "cambios")
+                for g in ganchosEntregar { await g(nueva, nil) }
             }
             log.info("cambios entrega=\(e.id) agente=\(agente) estado=ok")
         } else {
@@ -327,6 +352,28 @@ public actor Programador {
             }
             log.info("cambios entrega=\(e.id) agente=\(agente) estado=error")
         }
+    }
+
+    static let prefijoFlujo = "flujo:", prefijoAccion = "accion:", prefijoCoordinador = "coord:", prefijoParte = "parte:"
+
+    /// Origen de la entrega, la actividad y el costo de una corrida, según el prefijo de su id de tarea.
+    static func origenEntrega(_ id: String) -> String {
+        if id.hasPrefix(prefijoEncargo) || id.hasPrefix(prefijoCoordinador) { return "encargo" }
+        if id.hasPrefix(prefijoFlujo) { return "flujo" }
+        if id.hasPrefix(prefijoAccion) { return "accion" }
+        if id.hasPrefix(prefijoParte) { return "parte" }
+        return "tarea"
+    }
+
+    /// Id de tarea de un paso de flujo: `flujo:<corrida>:<paso>:<intento>`.
+    static func idFlujo(corrida: Int64, paso: Int, intento: Int) -> String { "\(prefijoFlujo)\(corrida):\(paso):\(intento)" }
+
+    /// (corrida, paso, intento) de un id de paso de flujo; nil si no lo es.
+    static func deFlujo(_ id: String) -> (Int64, Int, Int)? {
+        guard id.hasPrefix(prefijoFlujo) else { return nil }
+        let p = id.dropFirst(prefijoFlujo.count).split(separator: ":", omittingEmptySubsequences: false)
+        guard p.count == 3, let c = Int64(p[0]), let i = Int(p[1]), let n = Int(p[2]) else { return nil }
+        return (c, i, n)
     }
 
     static func idEncargo(_ reunion: String, _ pendiente: Int) -> String { "\(prefijoEncargo)\(reunion):\(pendiente)" }
@@ -341,7 +388,8 @@ public actor Programador {
 
     // MARK: corrida
 
-    private func lanzar(_ act: OficinaActiva, _ t: TareaProgramada, _ def: AgenteDef, programada: Date, manual: Bool) async throws -> Ejecucion {
+    private func lanzar(_ act: OficinaActiva, _ t: TareaProgramada, _ def: AgenteDef, programada: Date, manual: Bool,
+                         actuar: [String] = []) async throws -> Ejecucion {
         guard !cerrado else { throw ErrorAPI(409, "La app se está cerrando.") }
         let clave = Programador.clave(act.carpeta, t.id)
         guard reservadas.insert(clave).inserted else { throw ErrorAPI(409, "Esa tarea ya se está corriendo.") }
@@ -358,7 +406,7 @@ public actor Programador {
         let ej = Ejecucion(id: id, oficina: act.carpeta, tarea: t.id, agente: def.id, programada: programada.timeIntervalSince1970,
                            inicio: inicio, fin: nil, estado: "corriendo", sid: sid, resultado: "", error: nil, costo: nil, manual: manual)
         corridas[id] = Task { [self] in
-            await correr(ej, act, t, def)
+            await correr(ej, act, t, def, actuar: actuar)
             termino(id, clave)
         }
         return ej
@@ -371,20 +419,31 @@ public actor Programador {
 
     /// Lo mismo que `Router.chat`: carril del agente, permisos de la oficina, actividad (origen «tarea») y costo (origen «tarea»,
     /// ref = id de la tarea), en una sesión nueva donde quedan el pedido y la respuesta como un chat más.
-    private func correr(_ ej: Ejecucion, _ act: OficinaActiva, _ t: TareaProgramada, _ def: AgenteDef) async {
+    private func correr(_ ej: Ejecucion, _ act: OficinaActiva, _ t: TareaProgramada, _ def: AgenteDef, actuar: [String] = []) async {
         let store = self.store, runner = self.runner
-        let ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
+        var ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra, actuar: actuar)
+        // MCP también fuera del chat: token con el perfil del agente, que vive lo que dura la corrida
+        let mcpUrl = await mcp?.url()
+        ctx.mcpUrl = mcpUrl
+        let ctxFinal = ctx, mcp = self.mcp
+        let origen = Programador.origenEntrega(ej.tarea)
         let carpeta = act.carpeta, agente = def.id, sid = ej.sid, consigna = t.consigna, nombre = t.nombre
         let caja = CajaCosto()
         let escritos = CajaArchivos()
         struct Resultado: Sendable { var texto: String; var error: String? }
         let r: Resultado = await runner.conCarril(oficina: carpeta, agente: agente) {
+            var envExtra: [String: String] = [:]
+            if mcpUrl != nil, let mcp {
+                envExtra[Permisos.variableTokenMCP] = mcp.tokens.emitir(oficina: carpeta, agente: agente, sid: sid, perfil: ctxFinal.perfilMCP)
+            }
+            defer { if let t = envExtra[Permisos.variableTokenMCP] { mcp?.tokens.revocar(t) } }
             do {
                 try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
                 try await store.agregar(sid: sid, rol: "u", texto: consigna)
-                let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "tarea", tarea: nombre,
+                let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: origen, tarea: nombre,
                                                               extra: caja.observador(escritos.observador())) { obs, _ in
-                    try await runner.ejecutarChat(agente: agente, mensaje: consigna, sid: sid, activa: false, oficina: ctx, obs: obs)
+                    try await runner.ejecutarChat(agente: agente, mensaje: consigna, sid: sid, activa: false, oficina: ctxFinal, obs: obs,
+                                                  envExtra: envExtra)
                 }
                 try await store.marcarActiva(sid)
                 try await store.agregar(sid: sid, rol: "a", texto: texto.isEmpty ? "(sin respuesta)" : texto)
@@ -398,16 +457,18 @@ public actor Programador {
                 return Resultado(texto: "", error: m)
             }
         }
-        await store.registrarCosto(oficina: carpeta, agente: agente, origen: "tarea", ref: ej.tarea, costo: caja.valor)
+        await store.registrarCosto(oficina: carpeta, agente: agente, origen: origen, ref: ej.tarea, costo: caja.valor)
         try? await store.terminarEjecucion(ej.id, estado: r.error == nil ? "ok" : "error", resultado: r.texto, error: r.error, costo: caja.valor)
         log.info("tarea \(ej.tarea) agente=\(agente) estado=\(r.error == nil ? "ok" : "error")")
         if r.error == nil {
-            await RegistroEntregas.registrar(store, runner.canalAvisos, oficina: carpeta, agente: agente, nombre: def.nombre,
-                                             origen: ej.tarea.hasPrefix(Programador.prefijoEncargo) ? "encargo" : "tarea", ref: ej.tarea,
-                                             titulo: nombre, texto: r.texto, sid: sid,
-                                             archivos: ArchivosEntrega.relativos(escritos.valor, carpeta: carpeta), costo: caja.valor)
+            let entrega = await RegistroEntregas.registrar(store, runner.canalAvisos, oficina: carpeta, agente: agente, nombre: def.nombre,
+                                                           origen: origen, ref: ej.tarea, titulo: nombre, texto: r.texto, sid: sid,
+                                                           archivos: ArchivosEntrega.relativos(escritos.valor, carpeta: carpeta), costo: caja.valor)
             await marcarHecha(carpeta, t)
+            if let entrega, let fin = await store.ejecucion(ej.id) {
+                for g in ganchosEntregar { await g(entrega, fin) }
+            }
         }
-        if let fin = await store.ejecucion(ej.id) { await gancho(fin) }
+        if let fin = await store.ejecucion(ej.id) { for g in ganchosTerminar { await g(fin) } }
     }
 }

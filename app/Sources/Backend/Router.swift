@@ -18,6 +18,10 @@ final class SubRouterBox: @unchecked Sendable {
     private var valorExplorador: SubRouter?
     private var valorTareas: SubRouter?
     private var valorEntregas: SubRouter?
+    private var valorExtras: [SubRouter] = []
+    /// Routers extra: se prueban ANTES que cualquier otro prefijo (flujos, creador, gobierno, parte).
+    var extras: [SubRouter] { lock.lock(); defer { lock.unlock() }; return valorExtras }
+    func registrarExtra(_ r: SubRouter) { lock.lock(); valorExtras.append(r); lock.unlock() }
     var reuniones: SubRouter? {
         get { lock.lock(); defer { lock.unlock() }; return valor }
         set { lock.lock(); valor = newValue; lock.unlock() }
@@ -57,8 +61,11 @@ public final class Router: APIHandler {
     private let mcp: MCPServidor?
     let subrouters = SubRouterBox()
 
+    private let servicios: ServiciosHQ?
+
     init(config: Config, store: Store, runner: ClaudeRunner, log: HQLog, oficinas: Oficinas, mcp: MCPServidor? = nil,
-         listo: @escaping @Sendable () async -> Void) {
+         servicios: ServiciosHQ? = nil, listo: @escaping @Sendable () async -> Void) {
+        self.servicios = servicios
         self.config = config; self.store = store; self.runner = runner; self.log = log; self.oficinas = oficinas
         self.mcp = mcp
         self.listo = listo
@@ -79,6 +86,9 @@ public final class Router: APIHandler {
         await listo()
         var p = path
         if let i = p.firstIndex(where: { $0 == "?" || $0 == "#" }) { p = String(p[..<i]) }
+        for extra in subrouters.extras {
+            if let res = await extra.handle(method: method.uppercased(), path: p, query: query, body: body) { return res }
+        }
         if p == "/api/reuniones" || p.hasPrefix("/api/reuniones/") {
             if let r = subrouters.reuniones, let res = await r.handle(method: method.uppercased(), path: p, query: query, body: body) {
                 return res
@@ -129,11 +139,14 @@ public final class Router: APIHandler {
             case ("actividad", 2):
                 guard method == "GET" else { return no }
                 guard let act = await oficinas.activa() else {
-                    return (200, ["agentes": [String: Any](), "version": 0, "avisos": [Any](), "entregasSinRevisar": 0])
+                    return (200, ["agentes": [String: Any](), "version": 0, "avisos": [Any](), "entregasSinRevisar": 0,
+                                  "corridas": [Any](), "creadorVersion": 0])
                 }
                 var r = runner.actividad.json(oficina: act.carpeta)
                 r["avisos"] = await store.avisosPendientes(oficina: act.carpeta).map(\.json)
                 r["entregasSinRevisar"] = await store.entregasSinRevisar(oficina: act.carpeta)
+                r["corridas"] = await servicios?.motor.resumenActividad(oficina: act.carpeta) ?? [[String: Any]]()
+                r["creadorVersion"] = VersionCreador.compartida.valor(act.carpeta)
                 return (200, r)
             case ("avisos", 2):
                 guard method == "GET" else { return no }
@@ -429,7 +442,7 @@ public final class Router: APIHandler {
         let resultado: (Int, [String: String]) = await runner.conCarril(oficina: carpeta, agente: agente) {
             var envExtra: [String: String] = [:]
             if mcpUrl != nil, let mcp {
-                envExtra[Permisos.variableTokenMCP] = mcp.tokens.emitir(oficina: carpeta, agente: agente, sid: sid)
+                envExtra[Permisos.variableTokenMCP] = mcp.tokens.emitir(oficina: carpeta, agente: agente, sid: sid, perfil: ctxFinal.perfilMCP)
             }
             defer { if let t = envExtra[Permisos.variableTokenMCP] { mcp?.tokens.revocar(t) } }
             do {
