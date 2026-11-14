@@ -48,6 +48,7 @@ public struct EntregasRouter: SubRouter {
             guard method == "POST" else { return no }
             switch partes[3] {
             case "revisada":
+                if e.estado == "cambios" { throw ErrorAPI(409, "Esa entrega ya tiene una versión nueva.") }
                 guard let n = await store.entregaMarcar(oficina: a.carpeta, id: id, estado: "revisada") else { throw ErrorAPI(500, "No pude guardar.") }
                 await alRevisar(n, a)
                 return (200, ["entrega": n.json, "sinRevisar": await store.entregasSinRevisar(oficina: a.carpeta)])

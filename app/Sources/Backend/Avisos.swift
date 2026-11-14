@@ -5,8 +5,8 @@ import Foundation
 /// - calculados al leer: una reunión que espera tu intervención, propuestas de la biblioteca sin resolver. Desaparecen
 ///   solos cuando se resuelve lo que los causa (no hay que marcarlos).
 public struct Aviso: Sendable, Equatable {
-    public var id: String          // "a<n>" guardado | "reunion:<id>" | "propuestas"
-    public var tipo: String        // respuesta | error | tarea | reunion | propuestas
+    public var id: String          // "a<n>" guardado | "reunion:<id>" | "flujo:<corrida>" | "propuestas"
+    public var tipo: String        // respuesta | error | tarea | reunion | flujo | propuestas
     public var agente: String
     public var texto: String
     public var ref: String
@@ -52,6 +52,10 @@ extension Store {
     @discardableResult
     public func avisosVistos(oficina: String, id: String? = nil, agente: String? = nil) -> Int {
         try? prepararAvisos()
+        if let id, id.hasPrefix("flujo:") {
+            guard let n = Int64(id.dropFirst("flujo:".count)) else { return 0 }
+            return corridaVista(oficina: oficina, id: n) ? 1 : 0
+        }
         if let id, id.hasPrefix("reunion:") {
             try? prepararVistaReuniones()
             return (try? db.run("UPDATE reuniones SET vista=1 WHERE oficina=? AND id=? AND estado='esperando'",
@@ -81,6 +85,12 @@ extension Store {
         for (id, tema, creada) in reus {
             out.append(Aviso(id: "reunion:\(id)", tipo: "reunion", agente: "", texto: "La reunión «\(tema)» te espera",
                              ref: id, creado: creada))
+        }
+        // corridas de flujos que esperan a la persona y todavía no vio
+        for c in corridasEsperandoPersona(oficina: oficina) {
+            let paso = (c.json["pasoNombre"] as? String) ?? ""
+            out.append(Aviso(id: "flujo:\(c.id)", tipo: "flujo", agente: "", texto: "«\(c.nombre)» te necesita: \(paso)",
+                             ref: String(c.id), creado: c.actualizada))
         }
         if let (n, desde) = (try? db.query("SELECT COUNT(*), MIN(creada) FROM propuestas WHERE oficina=? AND estado='pendiente'",
                                            [.text(oficina)]) { ($0.int(0), $0.double(1)) })?.first, n > 0 {
