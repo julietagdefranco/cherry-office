@@ -1,0 +1,297 @@
+// Modelo de oficina.json (versión 1) y su lectura/escritura (Oficina.swift: Oficina, AgenteDef, Departamento, Avatar,
+// Vinculo, BibliotecaCfg, Validar.oficina, OficinaStore).
+//
+// La decodificación imita a Codable: tipos estrictos en los campos conocidos (un tipo equivocado = oficina.json
+// inválido), claves desconocidas descartadas, opcionales ausentes = undefined (no se escriben).
+// `tareas`, `flujos` y `reglas` se conservan tal cual hasta que se porten sus módulos (paso 4): ahí se tipan y validan.
+import fs from 'node:fs'
+import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { ErrorAPI } from './errores.js'
+import { esObjeto, type Obj } from './json.js'
+import { jsonSwift } from './json-swift.js'
+import { Slug, Validar, largo } from './validar.js'
+
+export type Avatar = Partial<Record<(typeof clavesAvatar)[number], string>>
+export const clavesAvatar = ['semilla', 'pelo', 'colorPelo', 'cara', 'torso', 'colorTorso', 'colorPiernas', 'colorPiel',
+  'colorBrazos', 'colorAccesorio', 'piernas', 'sombrero', 'cuello'] as const
+
+export type Departamento = { id: string; nombre: string; color: string; mision?: string }
+export type LimitesAgente = { solo?: string[]; proponer?: string[] }
+export type ConectorAsignado = { servidor: string; leer: string[]; actuar: string[] }
+
+export type AgenteDef = {
+  id: string
+  nombre: string
+  rol: string
+  departamento: string
+  brief?: string
+  modelo?: string
+  chips?: string[]
+  avatar?: Avatar
+  creado?: string
+  /** Rutas extra dentro de `conocimiento/` donde puede escribir (las pone el importador). */
+  escritura?: string[]
+  limites?: LimitesAgente
+  conectores?: ConectorAsignado[]
+  /** Hoy el único valor válido es "coordinador". */
+  permisos?: string[]
+}
+
+/** Quién puede leer una carpeta vinculada: "oficina", {departamentos: [...]} o {agentes: [...]}. */
+export type AlcanceVinculo = 'oficina' | { departamentos: string[] } | { agentes: string[] }
+export type Vinculo = { id: string; ruta: string; alcance: AlcanceVinculo }
+export type BibliotecaCfg = { lecturaAutomatica?: boolean; maxMB?: number; maxArchivos?: number; maxTotalMB?: number }
+
+export type Oficina = {
+  version: number
+  nombre: string
+  duenio: string
+  avatarDuenio?: Avatar
+  departamentos: Departamento[]
+  agentes: AgenteDef[]
+  vinculos?: Vinculo[]
+  biblioteca?: BibliotecaCfg
+  tareas?: unknown[]
+  flujos?: unknown[]
+  reglas?: unknown[]
+}
+
+// MARK: - decodificación (como Codable)
+
+class ErrorFormato extends Error {}
+const falla = (): never => { throw new ErrorFormato() }
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : falla())
+const optStr = (v: unknown): string | undefined => (v === undefined || v === null ? undefined : str(v))
+const strs = (v: unknown): string[] => (Array.isArray(v) ? v.map(str) : falla())
+const optStrs = (v: unknown): string[] | undefined => (v === undefined || v === null ? undefined : strs(v))
+const obj = (v: unknown): Obj => (esObjeto(v) ? v : falla())
+const optInt = (v: unknown): number | undefined => (v === undefined || v === null ? undefined : Number.isInteger(v) ? (v as number) : falla())
+const optBool = (v: unknown): boolean | undefined => (v === undefined || v === null ? undefined : typeof v === 'boolean' ? v : falla())
+function opt<T>(v: unknown, f: (x: unknown) => T): T | undefined { return v === undefined || v === null ? undefined : f(v) }
+function sinUndefined<T extends object>(o: T): T {
+  for (const k of Object.keys(o) as (keyof T)[]) if (o[k] === undefined) delete o[k]
+  return o
+}
+
+export function decodificarAvatar(v: unknown): Avatar {
+  const o = obj(v)
+  const a: Avatar = {}
+  for (const k of clavesAvatar) {
+    const s = optStr(o[k])
+    if (s !== undefined) a[k] = s
+  }
+  return a
+}
+
+function decodificarDepartamento(v: unknown): Departamento {
+  const o = obj(v)
+  return sinUndefined({ id: str(o.id), nombre: str(o.nombre), color: str(o.color), mision: optStr(o.mision) })
+}
+
+function decodificarAgente(v: unknown): AgenteDef {
+  const o = obj(v)
+  return sinUndefined({
+    id: str(o.id), nombre: str(o.nombre), rol: str(o.rol), departamento: str(o.departamento),
+    brief: optStr(o.brief), modelo: optStr(o.modelo), chips: optStrs(o.chips),
+    avatar: opt(o.avatar, decodificarAvatar), creado: optStr(o.creado), escritura: optStrs(o.escritura),
+    limites: opt(o.limites, (x) => { const l = obj(x); return sinUndefined({ solo: optStrs(l.solo), proponer: optStrs(l.proponer) }) }),
+    conectores: opt(o.conectores, (x) => (Array.isArray(x) ? x : falla()).map((c) => {
+      const d = obj(c)
+      return { servidor: str(d.servidor), leer: optStrs(d.leer) ?? [], actuar: optStrs(d.actuar) ?? [] }
+    })),
+    permisos: optStrs(o.permisos),
+  })
+}
+
+export function decodificarAlcance(v: unknown): AlcanceVinculo {
+  if (typeof v === 'string') return v === 'oficina' ? 'oficina' : falla()
+  const o = obj(v)
+  if (o.departamentos !== undefined) return { departamentos: strs(o.departamentos) }
+  if (o.agentes !== undefined) return { agentes: strs(o.agentes) }
+  return falla()
+}
+
+/** JSON (ya parseado) → Oficina. Lanza ErrorFormato si no respeta los tipos. */
+function decodificarOficina(v: unknown): Oficina {
+  const o = obj(v)
+  const lista = (x: unknown) => (x === undefined || x === null ? undefined : Array.isArray(x) ? x : falla())
+  return sinUndefined({
+    version: optInt(o.version) ?? 1,
+    nombre: str(o.nombre),
+    duenio: optStr(o.duenio) ?? '',
+    avatarDuenio: opt(o.avatarDuenio, decodificarAvatar),
+    departamentos: (lista(o.departamentos) ?? []).map(decodificarDepartamento),
+    agentes: (lista(o.agentes) ?? []).map(decodificarAgente),
+    vinculos: lista(o.vinculos)?.map((x) => { const d = obj(x); return { id: str(d.id), ruta: str(d.ruta), alcance: decodificarAlcance(d.alcance) } }),
+    biblioteca: opt(o.biblioteca, (x) => {
+      const b = obj(x)
+      return sinUndefined({ lecturaAutomatica: optBool(b.lecturaAutomatica), maxMB: optInt(b.maxMB), maxArchivos: optInt(b.maxArchivos), maxTotalMB: optInt(b.maxTotalMB) })
+    }),
+    tareas: lista(o.tareas),
+    flujos: lista(o.flujos),
+    reglas: lista(o.reglas),
+  })
+}
+
+// MARK: - validación (Validar.oficina y ValidarAgenteExtra)
+
+export const ValidarAgenteExtra = {
+  permisoCoordinador: 'coordinador',
+  maxItemsLimites: 12,
+  maxLargoLimite: 300,
+  maxServidores: 12,
+  maxHerramientas: 80,
+  maxLargoServidor: 80,
+  maxLargoHerramienta: 200,
+  maxMision: 600,
+
+  limites(l: LimitesAgente) {
+    for (const [campo, items] of [['solo', l.solo ?? []], ['proponer', l.proponer ?? []]] as const) {
+      if (items.length > this.maxItemsLimites) throw new ErrorAPI(400, `«limites.${campo}» admite hasta ${this.maxItemsLimites} ítems.`)
+      for (const t of items) {
+        if (t.trim() === '' || largo(t) > this.maxLargoLimite) {
+          throw new ErrorAPI(400, `Cada ítem de «limites.${campo}» tiene que tener entre 1 y ${this.maxLargoLimite} caracteres.`)
+        }
+      }
+    }
+  },
+
+  conectores(cs: ConectorAsignado[]) {
+    if (cs.length > this.maxServidores) throw new ErrorAPI(400, `Máximo ${this.maxServidores} conectores por agente.`)
+    for (const c of cs) {
+      const n = c.servidor.trim()
+      if (n === '' || largo(n) > this.maxLargoServidor) {
+        throw new ErrorAPI(400, `El nombre de un conector tiene que tener entre 1 y ${this.maxLargoServidor} caracteres.`)
+      }
+      for (const [campo, hs] of [['leer', c.leer], ['actuar', c.actuar]] as const) {
+        if (hs.length > this.maxHerramientas) throw new ErrorAPI(400, `«${c.servidor}»: máximo ${this.maxHerramientas} herramientas en «${campo}».`)
+        for (const h of hs) {
+          if (!h.startsWith('mcp__') || h.startsWith('mcp__hq__') || largo(h) > this.maxLargoHerramienta) {
+            throw new ErrorAPI(400, `«${c.servidor}»: «${[...h].slice(0, 60).join('')}» no es una herramienta válida (tiene que empezar con mcp__, no con mcp__hq__, y tener hasta ${this.maxLargoHerramienta} caracteres).`)
+          }
+        }
+      }
+    }
+  },
+
+  permisos(ps: string[]) {
+    const vistos = new Set<string>()
+    for (const p of ps) {
+      if (p !== this.permisoCoordinador) throw new ErrorAPI(400, `Permiso inválido: «${p}» (el único permiso es «coordinador»).`)
+      if (vistos.has(p)) throw new ErrorAPI(400, `Permiso repetido: «${p}».`)
+      vistos.add(p)
+    }
+  },
+
+  mision(m: string | undefined) {
+    if (m !== undefined && largo(m) > this.maxMision) throw new ErrorAPI(400, `La misión es demasiado larga (máximo ${this.maxMision} caracteres).`)
+  },
+}
+
+/** Validaciones extra de secciones que se portan después (tareas, flujos, reglas): se registran al portarlas. */
+export const validacionesExtra: ((o: Oficina) => void)[] = []
+
+/** Oficina completa: slugs, unicidad, departamentos existentes, colores. */
+export function validarOficina(o: Oficina) {
+  if (o.version !== 1) throw new ErrorAPI(400, `oficina.json: versión no soportada (${o.version}).`)
+  if (o.nombre.trim() === '') throw new ErrorAPI(400, 'oficina.json: falta el nombre.')
+  const deps = new Set<string>()
+  for (const d of o.departamentos) {
+    if (!Slug.valido(d.id)) throw new ErrorAPI(400, `Departamento con id inválido: ${d.id}.`)
+    if (deps.has(d.id)) throw new ErrorAPI(400, `Departamento repetido: ${d.id}.`)
+    deps.add(d.id)
+    if (d.nombre.trim() === '') throw new ErrorAPI(400, `Departamento sin nombre: ${d.id}.`)
+    if (!Validar.colorHex(d.color)) throw new ErrorAPI(400, `Color inválido en el departamento ${d.id}: ${d.color}.`)
+    ValidarAgenteExtra.mision(d.mision)
+  }
+  const ids = new Set<string>()
+  for (const a of o.agentes) {
+    if (!Slug.valido(a.id)) throw new ErrorAPI(400, `Agente con id inválido: ${a.id}.`)
+    if (ids.has(a.id)) throw new ErrorAPI(400, `Agente repetido: ${a.id}.`)
+    ids.add(a.id)
+    if (!deps.has(a.departamento)) throw new ErrorAPI(400, `El agente ${a.id} está en un departamento que no existe (${a.departamento}).`)
+    for (const r of a.escritura ?? []) if (!Validar.rutaEscrituraValida(r)) throw new ErrorAPI(400, `Ruta de escritura inválida en ${a.id}: ${r}.`)
+    if (a.limites) ValidarAgenteExtra.limites(a.limites)
+    if (a.conectores) ValidarAgenteExtra.conectores(a.conectores)
+    if (a.permisos) ValidarAgenteExtra.permisos(a.permisos)
+  }
+  const vins = new Set<string>()
+  for (const v of o.vinculos ?? []) {
+    if (!Slug.valido(v.id) || vins.has(v.id)) throw new ErrorAPI(400, `Carpeta vinculada con id inválido o repetido: ${v.id}.`)
+    vins.add(v.id)
+    if (!path.isAbsolute(v.ruta)) throw new ErrorAPI(400, `La carpeta vinculada ${v.id} tiene que tener una ruta absoluta.`)
+  }
+  for (const f of validacionesExtra) f(o)
+}
+
+// MARK: - lectura y escritura
+
+export const OficinaStore = {
+  archivo: 'oficina.json',
+
+  ruta(carpeta: string) { return path.join(carpeta, this.archivo) },
+
+  existe(carpeta: string) { return fs.existsSync(this.ruta(carpeta)) },
+
+  /** Texto de oficina.json con el formato de Swift. */
+  codificar(o: Oficina): string { return jsonSwift(o) },
+
+  leer(carpeta: string): Oficina {
+    let texto: string
+    try {
+      texto = fs.readFileSync(this.ruta(carpeta), 'utf8')
+    } catch {
+      throw new ErrorAPI(404, 'No hay una oficina en esa carpeta (falta oficina.json).')
+    }
+    let o: Oficina
+    try {
+      o = decodificarOficina(JSON.parse(texto))
+    } catch {
+      throw new ErrorAPI(400, 'oficina.json no se puede leer: tiene un formato inválido.')
+    }
+    validarOficina(o)
+    return o
+  },
+
+  /** Valida y escribe de forma atómica (archivo temporal en la misma carpeta + rename). */
+  escribir(o: Oficina, carpeta: string) {
+    validarOficina(o)
+    escribirAtomico(this.codificar(o), this.ruta(carpeta))
+  },
+}
+
+/** Escritura atómica: temporal + rename. En Windows el rename falla si otro proceso tiene el destino abierto: reintenta. */
+export function escribirAtomico(datos: string | Buffer, destino: string) {
+  const tmp = `${destino}.tmp-${randomUUID().slice(0, 8)}`
+  try {
+    fs.writeFileSync(tmp, datos)
+    for (let intento = 0; ; intento++) {
+      try {
+        fs.renameSync(tmp, destino)
+        break
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code
+        if (intento >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw e
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (intento + 1))
+      }
+    }
+  } catch {
+    try {
+      fs.rmSync(tmp, { force: true })
+    } catch {}
+    throw new ErrorAPI(500, 'No pude guardar el archivo.')
+  }
+}
+
+// MARK: - JSON de respuesta
+
+/** Lo que devuelve la API: la oficina tal como se escribe (sin opcionales ausentes). */
+export function oficinaJSON(o: Oficina): Obj { return JSON.parse(JSON.stringify(o)) }
+export const agenteJSON = (a: AgenteDef): Obj => JSON.parse(JSON.stringify(a))
+export function departamentoJSON(d: Departamento): Obj {
+  const r: Obj = { id: d.id, nombre: d.nombre, color: d.color }
+  if (d.mision !== undefined) r.mision = d.mision
+  return r
+}

@@ -17,8 +17,8 @@ La app Swift sigue siendo la que se publica hasta que la etapa 2 la reemplace. M
 
 ## Decisiones
 - **Ubicación:** carpeta nueva `backend/` en la raíz (`package.json`, `tsconfig.json`, `src/`, `test/`). `oficina/` no se toca salvo bugs.
-- **Runtime:** Node 22 LTS, TypeScript estricto, ESM. Tests con vitest.
-- **SQLite:** `better-sqlite3` (síncrono como el wrapper Swift, trae FTS5, tiene prebuilds para Electron) detrás de una interfaz de tres métodos (`exec/run/query`), así se puede cambiar por `node:sqlite` sin tocar el resto. Mismos PRAGMA: WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `busy_timeout=5000`.
+- **Runtime:** Node ≥ 22.13, TypeScript estricto, ESM. Tests con vitest.
+- **SQLite:** `node:sqlite` (viene con Node ≥ 22.13, trae FTS5 con `remove_diacritics`, sin dependencias nativas: nada que recompilar para Electron ni Windows) detrás de una interfaz de tres métodos (`exec/run/query`, `src/sqlite.ts`). Mismos PRAGMA: WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `busy_timeout=5000`.
 - **Dependencias externas** (solo donde Node no alcanza): zip con `yauzl`/`yazl` (o `fflate`), PDF con `unpdf`, docx con `mammoth`, fechas con el polyfill de `Temporal`. `rtf` y `odt` con parsers chicos propios; `doc` y `pages` siguen usando `textutil` en Mac y dan "formato no soportado" en Windows.
 - **Contrato:** el mismo de Swift, `handle(method, path, query, body) → {status, json}`. Todo es JSON, sin streaming. El servidor HTTP y, después, Electron son adaptadores finos encima.
 - **API para la etapa 2:** `createBackend({datosDir, claudePath?, env})` devuelve `{handle, shutdown, avisos (EventEmitter), validarRutaAbrir}`. Sin `process.exit` ni estado global adentro del backend.

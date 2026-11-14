@@ -2,7 +2,7 @@
 // Diferencias por HTTP: el servidor dev pone sus propias guardas (Host/Origin/Content-Type, 40 MB) antes del router;
 // ninguna de las aserciones de este archivo queda detrás de ellas.
 import net from 'node:net'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, inject, test } from 'vitest'
 import { Sandbox, U, chat, historial, llamar, msgs, type Backend, type Obj } from '../support/sandbox.js'
 
 const invalido = 'pedido inválido'
@@ -62,7 +62,9 @@ describe('Router', () => {
     // interno (unit test del port): `version` no tiene clave en config.json (solo se pisa desde Config en memoria o el bundle).
   })
 
-  test('estado: método en minúsculas se acepta', async () => {
+  // Solo Swift: su HTTP propio mayusculiza el método. El parser de node:http rechaza un método en minúsculas antes de
+  // llegar al router (que igual lo mayusculiza: unit test del port).
+  test.skipIf(inject('servidor').nombre === 'ts')('estado: método en minúsculas se acepta', async () => {
     const sb = new Sandbox()
     const b = await sb.backend()
     const r = await pedirCrudo(b, 'get', '/api/estado')
