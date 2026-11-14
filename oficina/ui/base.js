@@ -31,6 +31,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     get: function (r, q) { return pedido('GET', r + qs(q)); },
     post: function (r, c) { return pedido('POST', r, c === undefined ? {} : c); },
     patch: function (r, c) { return pedido('PATCH', r, c); },
+    put: function (r, c) { return pedido('PUT', r, c); },
     del: function (r, c) { return pedido('DELETE', r, c); }
   };
 
@@ -118,7 +119,9 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     regla: 'M4 6h16M4 12h10M4 18h6M17 14l2 2 3-4',
     enchufe: 'M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4',
     escudo: 'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6zM9 12l2 2 4-4',
-    parte: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7'
+    parte: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
+    lapiz: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
+    bandeja: 'M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z'
   };
   /* «hace 5 min»: acepta segundos epoch, milisegundos, un Date o una fecha ISO */
   App.hace = function (fecha) {

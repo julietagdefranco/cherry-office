@@ -103,6 +103,8 @@ Objetivo: cerrar el ciclo **reunión → pendiente → tarea o encargo → entre
 - Tecla **N**: recorre los avisos y después las entregas sin revisar.
 
 ## Fase E3: muro en el 3D
+> **Reemplazado:** el corcho de la recepción ya no existe. Ahora las entregas sin revisar son una pila de hojas en la bandeja de tu escritorio, en el despacho de quien dirige (`oficina/ui/bandeja3d.js`, perfil global en `/api/perfil`). Lo de abajo queda como historia.
+
 - `oficina/ui/muro3d.js`, archivo aparte, porque `oficina3d.js` ya tiene 1597 líneas. Exporta `construirMuro(escena, plano)` y `actualizarMuro(entregas)`.
 - Es un tablero de corcho LEGO en una pared libre cerca de la entrada. Se elige por plano; si no hay lugar, va en la pared de la sala de reuniones.
 - Muestra las 6 a 8 entregas más recientes como hojas (`CanvasTexture`), con título corto, inicial y color del agente. Las sin revisar llevan una chincheta roja.

@@ -59,7 +59,7 @@
   /* Campos comunes a «Crear una oficina» y «Armar una oficina charlando»: nombre, tu nombre y dónde se guarda. */
   function camposOficina() {
     var nombre = h('input.campo', { placeholder: 'Ej.: Estudio Cherry', maxlength: 80, autofocus: true });
-    var duenio = h('input.campo', { placeholder: 'Cómo te llaman los agentes', maxlength: 80 });
+    var duenio = h('input.campo', { placeholder: 'Cómo te llaman los agentes', maxlength: 80, value: App.Yo.nombre() });
     var carpeta = null, dondeTxt = h('span', { style: { color: 'var(--suave)' } });
     function pintarDonde() { dondeTxt.textContent = carpeta || ('Oficinas / ' + (nombre.value.trim() || '…') + ' (en tu carpeta de usuario)'); }
     nombre.addEventListener('input', pintarDonde);
@@ -77,6 +77,10 @@
   /* Monta la oficina recién creada (o abierta), cerrando lo que hubiera abierto de la anterior. */
   function montarNueva(r) {
     if (E.oficina && App.Agente) App.Agente.cerrar();
+    /* la primera oficina: «Tu nombre» pasa a ser tu perfil (quien dirige todas) */
+    if (!App.Yo.nombre() && r.oficina.duenio) {
+      api.put('/api/perfil', { nombre: r.oficina.duenio }).then(function (p) { E.estado = E.estado || {}; E.estado.perfil = p.perfil; pintarEquipo(); }).catch(function () {});
+    }
     montar(r.carpeta, r.oficina);
   }
 
@@ -250,7 +254,7 @@
           h('button.nav-item', { onclick: function () { App.Flujos.abrir(); } }, App.icono('flujo'), 'Flujos', dom.navFlu),
           h('button.nav-item', { onclick: function () { App.Reunion.abrir(); } }, App.icono('reunion'), 'Reuniones', dom.navReu),
           h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib),
-          h('button.nav-item', { onclick: function () { App.Entregables.abrir(); } }, App.icono('chispa'), 'Entregables', dom.navEnt),
+          h('button.nav-item', { onclick: function () { App.Yo.irAlDespacho(); App.Entregables.abrir(); } }, App.icono('bandeja'), 'Tu bandeja', dom.navEnt),
           h('button.nav-item', { onclick: function () { App.Deptos.abrir(); } }, App.icono('capas'), 'Departamentos'))),
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu,
           h('div.herramientas',
@@ -266,7 +270,8 @@
       App.Oficina3D.alElegirLugar(function (t, id) {
         if (t === 'reunion') App.Reunion.abrir();
         else if (t === 'biblioteca') App.Biblioteca.abrir();
-        else if (t === 'entregables') App.Entregables.abrir();
+        else if (t === 'entregables' || t === 'direccion') App.Entregables.abrir();
+        else if (t === 'yo') App.Yo.abrir();
         else if (t === 'entrega') App.Entregables.abrir(id);
         else if (t === 'creador') App.Creador.abrir();
         else if (t === 'flujos') App.Flujos.abrir();
@@ -299,7 +304,7 @@
     pintarEquipo();
     var t0 = performance.now();
     dom.carga.classList.remove('oculto');
-    App.Oficina3D.construir(o).then(function () { dom.carga.classList.add('oculto'); if (App.Agente.actual()) App.Oficina3D.elegir(App.Agente.actual()); })
+    App.Oficina3D.construir(o, App.Yo.perfil()).then(function () { dom.carga.classList.add('oculto'); if (App.Agente.actual()) App.Oficina3D.elegir(App.Agente.actual()); })
       .catch(function (e) { dom.carga.textContent = 'No pude armar la oficina en 3D: ' + e.message; console.error(e); });
   }
 
@@ -308,6 +313,7 @@
 
   function pintarEquipo() {
     var o = E.oficina, c = App.vaciar(dom.equipo);
+    c.appendChild(App.Yo.fila());
     if (!o.agentes.length) {
       c.appendChild(h('div.vacio', h('p', 'Todavía no hay nadie en la oficina.'), h('button.btn.primario', { style: { marginTop: '12px' }, onclick: function () { App.Contratar.abrir(); } }, App.icono('mas'), 'Contratar al primero')));
     }
@@ -354,7 +360,8 @@
       items.push({ texto: 'Reglas de la oficina…', icono: 'regla', accion: function () { App.Ajustes.reglas(); } });
       items.push({ texto: 'Conectores…', icono: 'enchufe', accion: function () { App.Ajustes.conectores(); } });
       items.push('-');
-      items.push({ texto: 'Nombre y dueño…', icono: 'edificio', accion: editarOficina });
+      items.push({ texto: 'Nombre de la oficina…', icono: 'edificio', accion: editarOficina });
+      items.push({ texto: 'Quién dirige…', icono: 'personas', accion: function () { App.Yo.abrir(); } });
       items.push({ texto: 'Exportar oficina…', icono: 'subir', accion: exportarOficina });
       items.push({ texto: App.nativo.hay ? 'Mostrar carpeta en Finder' : 'Ver archivos de la oficina', icono: 'carpeta', accion: function () { if (App.nativo.hay) App.nativo.revelar(E.carpeta); else App.verArchivosOficina(); } });
       if (App.nativo.hay) items.push({ texto: 'Acerca de', icono: 'chispa', accion: App.nativo.acerca });
@@ -364,12 +371,15 @@
 
   function editarOficina() {
     var hj = App.hoja({ titulo: 'Oficina', ancho: 440 });
-    var n = h('input.campo', { value: E.oficina.nombre, maxlength: 80, autofocus: true }), d = h('input.campo', { value: E.oficina.duenio || '', maxlength: 80 });
+    var n = h('input.campo', { value: E.oficina.nombre, maxlength: 80, autofocus: true });
     var err = h('div.error-txt');
-    App.add(hj.cuerpo, h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), n), h('div.fila-campo', h('label.etiqueta-campo', 'Tu nombre'), d), h('div.ayuda', E.carpeta), err);
+    var quien = h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, App.Yo.retrato('retrato', 96), h('b', App.Yo.nombre() || 'Sin nombre todavía'),
+      h('button.btn.chico', { style: { marginLeft: 'auto' }, onclick: function () { hj.cerrar(); App.Yo.abrir(); } }, 'Cambiar…'));
+    App.add(hj.cuerpo, h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), n),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Quién la dirige'), quien, h('div.ayuda', 'Sos vos en todas tus oficinas.')), h('div.ayuda', E.carpeta), err);
     App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), h('button.btn.primario', {
       onclick: function () {
-        api.patch('/api/oficina', { nombre: n.value.trim(), duenio: d.value.trim() }).then(function (r) { hj.cerrar(); actualizar(r.oficina); }).catch(function (e) { err.textContent = e.message; });
+        api.patch('/api/oficina', { nombre: n.value.trim() }).then(function (r) { hj.cerrar(); actualizar(r.oficina); }).catch(function (e) { err.textContent = e.message; });
       }
     }, 'Guardar'));
   }

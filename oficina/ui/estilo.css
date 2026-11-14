@@ -371,3 +371,12 @@ select.campo { padding-right: 26px; }
 .tarjeta { background: var(--panel); border: 1px solid var(--linea); border-radius: var(--radio); padding: 12px; }
 .tarjeta.tenue { background: var(--panel-2); color: var(--suave); }
 .insignia.info { color: var(--suave); background: var(--panel-2); border-color: var(--linea-fuerte); }
+
+/* YO: tu fila en la barra lateral (grupo Dirección) */
+.persona.yo .yo-editar { border: 0; background: none; color: var(--tenue); padding: 4px; border-radius: 6px; cursor: pointer; opacity: 0; display: flex; }
+.persona.yo:hover .yo-editar, .persona.yo .yo-editar:focus-visible { opacity: 1; }
+.persona.yo .yo-editar:hover { color: var(--texto); background: var(--linea); }
+.persona.yo .yo-editar svg { width: 15px; height: 15px; }
+.etq-bandeja .etq-in { background: #2a2b2e; color: #f5cd2f; }
+.etq-bandeja.al-dia .etq-in { background: rgba(255, 255, 255, .9); color: var(--suave, #6b7078); }
+.etq-bandeja.al-dia .etq-in i { display: none; }

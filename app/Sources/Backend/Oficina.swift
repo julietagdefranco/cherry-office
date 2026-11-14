@@ -369,6 +369,31 @@ public struct OficinaActiva: Sendable {
 
 struct Reciente: Sendable, Equatable { var carpeta: String; var nombre: String; var abierta: Double }
 
+/// Quien dirige la app (YO): uno solo para todas las oficinas. Se guarda en config.json (clave `perfil`).
+/// Si tiene nombre, es el dueño de cada oficina que se abre: `Oficinas.activa()` lo copia a `duenio`.
+public struct Perfil: Sendable, Equatable {
+    public var nombre: String
+    public var avatar: Avatar?
+    public init(nombre: String = "", avatar: Avatar? = nil) { self.nombre = nombre; self.avatar = avatar }
+
+    public var json: [String: Any] {
+        var a: [String: Any] = [:]
+        if let av = avatar {
+            for (k, v) in [("semilla", av.semilla), ("pelo", av.pelo), ("colorPelo", av.colorPelo), ("cara", av.cara),
+                           ("torso", av.torso), ("colorTorso", av.colorTorso), ("colorPiernas", av.colorPiernas)] {
+                if let v { a[k] = v }
+            }
+        }
+        return ["nombre": nombre, "avatar": avatar == nil ? NSNull() : a as Any]
+    }
+
+    static func desde(_ o: Any?) -> Perfil {
+        guard let d = o as? [String: Any] else { return Perfil() }
+        let n = ((d["nombre"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return Perfil(nombre: n.count <= 80 ? n : "", avatar: try? NuevoAgente.avatarValido(d["avatar"]))
+    }
+}
+
 /// Gestiona la oficina activa, los recientes (`config.json` de la app) y todas las escrituras de
 /// `oficina.json`. Es un actor: lee-modifica-escribe sin intercalaciones.
 public actor Oficinas {
@@ -382,6 +407,7 @@ public actor Oficinas {
     let estadoPath: String
     private var activaCarpeta: String?
     private var recientes: [Reciente] = []
+    private var perfil = Perfil()
 
     public init(config: Config, log: HQLog) {
         self.config = config
@@ -390,6 +416,7 @@ public actor Oficinas {
         if let d = FileManager.default.contents(atPath: estadoPath),
            let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] {
             activaCarpeta = (o["oficina_activa"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            perfil = Perfil.desde(o["perfil"])
             for r in (o["oficinas_recientes"] as? [[String: Any]]) ?? [] {
                 if let c = r["carpeta"] as? String, let n = r["nombre"] as? String {
                     recientes.append(Reciente(carpeta: c, nombre: n, abierta: (r["abierta"] as? Double) ?? 0))
@@ -402,8 +429,32 @@ public actor Oficinas {
 
     /// Oficina activa leída del disco, o nil (ninguna abierta, o su carpeta/oficina.json ya no es válida).
     public func activa() -> OficinaActiva? {
-        guard let c = activaCarpeta, let o = try? OficinaStore.leer(carpeta: c) else { return nil }
+        guard let c = activaCarpeta, var o = try? OficinaStore.leer(carpeta: c) else { return nil }
+        if sincronizarDuenio(&o) { try? OficinaStore.escribir(o, carpeta: c) }
         return OficinaActiva(carpeta: c, oficina: o)
+    }
+
+    // MARK: perfil (YO)
+
+    public func perfilActual() -> Perfil { perfil }
+
+    /// Guarda el perfil y lo pasa como dueño a la oficina activa (las demás se sincronizan al abrirlas).
+    public func guardarPerfil(_ p: Perfil) throws -> Perfil {
+        let n = p.nombre.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard n.count <= 80 else { throw ErrorAPI(400, "El nombre es demasiado largo (hasta 80 caracteres).") }
+        var av = p.avatar
+        if av != nil, av?.semilla == nil { av?.semilla = "yo" }
+        perfil = Perfil(nombre: n, avatar: av)
+        guardarEstado()
+        _ = activa()
+        return perfil
+    }
+
+    /// Con perfil cargado, el dueño de toda oficina es quien la dirige. Devuelve true si cambió algo.
+    private func sincronizarDuenio(_ o: inout Oficina) -> Bool {
+        guard !perfil.nombre.isEmpty, o.duenio != perfil.nombre else { return false }
+        o.duenio = perfil.nombre
+        return true
     }
 
     /// Igual que `activa()` pero lanza 409 «No hay una oficina abierta».
@@ -451,7 +502,7 @@ public actor Oficinas {
         } else {
             dir = Oficinas.carpetaLibre(base: config.oficinasDir, nombre: n)
         }
-        let of = Oficina(nombre: n, duenio: d, departamentos: deps, agentes: [])
+        let of = Oficina(nombre: n, duenio: perfil.nombre.isEmpty ? d : perfil.nombre, departamentos: deps, agentes: [])
         try Validar.oficina(of)
         do { try Plantillas.crearEstructura(carpeta: dir, oficina: of) }
         catch let e as ErrorAPI { throw e }
@@ -498,6 +549,7 @@ public actor Oficinas {
             obj = o
         }
         obj["oficina_activa"] = activaCarpeta ?? NSNull()
+        if perfil != Perfil() { obj["perfil"] = perfil.json } else { obj.removeValue(forKey: "perfil") }
         obj["oficinas_recientes"] = recientes.map { ["carpeta": $0.carpeta, "nombre": $0.nombre, "abierta": $0.abierta] as [String: Any] }
         do {
             try fm.createDirectory(atPath: config.datosDir, withIntermediateDirectories: true)

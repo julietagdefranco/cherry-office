@@ -48,6 +48,7 @@ App.Entregables = (function () {
     if (b) { b.textContent = sinRevisar; b.classList.toggle('oculto', !sinRevisar); }
     if (App.Oficina3D && App.Oficina3D.muro) App.Oficina3D.muro(ultimas, sinRevisar);
     if (App.Avisos && App.Avisos.insignia) App.Avisos.insignia();
+    if (App.Yo && App.Yo.refrescar) App.Yo.refrescar();
   }
 
   /* ---------------- panel: lista ---------------- */

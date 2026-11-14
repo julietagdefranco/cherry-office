@@ -33,9 +33,11 @@ App.Paleta = (function () {
       hacer: function () { App.Oficina3D.enfocarLugar('reunion'); App.Reunion.abrir(); } });
     out.push({ tipo: 'Sala', icono: 'libro', txt: 'Biblioteca', buscar: 'biblioteca archivos documentos',
       hacer: function () { App.Oficina3D.enfocarLugar('biblioteca'); App.Biblioteca.abrir(); } });
-    out.push({ tipo: 'Sala', icono: 'chispa', txt: 'Entregables', sub: App.Entregables && App.Entregables.sinRevisar() ? App.Entregables.sinRevisar() + ' sin revisar' : '',
-      buscar: 'entregables entregas muro revisar',
+    out.push({ tipo: 'Sala', icono: 'bandeja', txt: 'Tu bandeja', sub: App.Entregables && App.Entregables.sinRevisar() ? App.Entregables.sinRevisar() + ' sin revisar' : '',
+      buscar: 'bandeja entregables entregas revisar despacho direccion',
       hacer: function () { App.Oficina3D.enfocarLugar('entregables'); App.Entregables.abrir(); } });
+    out.push({ tipo: 'Vos', icono: 'personas', txt: 'Quién dirige', sub: App.Yo.nombre(), buscar: 'yo perfil quien dirige mi nombre dueño minifig',
+      hacer: function () { App.Yo.abrir(); } });
     o.departamentos.forEach(function (d) {
       out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Deptos.abrir(); } });
     });
@@ -126,7 +128,9 @@ App.Paleta = (function () {
       if (act) t += ' · ' + (VERBO[act.estado] || act.estado) + (act.objetivo ? ' ' + act.objetivo : '');
     } else if (hov.tipo === 'reunion') t = 'Clic: abrir la sala de reuniones';
     else if (hov.tipo === 'biblioteca') t = 'Clic: abrir la biblioteca';
-    else if (hov.texto) t = hov.texto;   // muro de entregables: el 3D ya arma el texto
+    else if (hov.tipo === 'direccion') t = 'Clic: abrir tu bandeja de entregables';
+    else if (hov.tipo === 'yo') t = 'Sos vos' + (App.Yo.nombre() ? ', ' + App.Yo.nombre() : '') + ' · clic: cambiar tu nombre o tu minifig';
+    else if (hov.texto) t = hov.texto;   // bandeja de entregables: el 3D ya arma el texto
     el.textContent = t || BASE;
     el.classList.toggle('viva', !!t);
   }
