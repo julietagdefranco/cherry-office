@@ -384,7 +384,7 @@ struct CasoProsperaTests {
         // la acción propuesta por el coordinador y el encargo que repartió
         let token = f.b.mcp.tokens.emitir(oficina: f.carpeta, agente: "coordi", sid: U.a, perfil: "coordinador")
         let ident = IdentidadMCP(oficina: f.carpeta, agente: "coordi", sid: U.a, perfil: "coordinador")
-        let h = try #require(f.b.mcp.consultas.herramientas(token: token, identidad: ident))
+        let h = f.b.mcp.consultas.herramientas(token: token, identidad: ident)
         let nombres = h.definiciones.compactMap { $0["name"] as? String }
         #expect(nombres.contains("proponer_accion") && nombres.contains("encargar"))
         let acc = try #require(await h.llamar("proponer_accion", argumentos: ["herramienta": crear, "resumen": "Crear la reunión", "detalle": ["titulo": "Reunión"]]))
