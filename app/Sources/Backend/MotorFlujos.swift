@@ -37,8 +37,9 @@ enum FlujoTexto {
         return ConsultasMCP.sanear(s)
     }
 
-    /// Carpeta (dentro de `archivos/entregables/`) donde un paso deja sus archivos.
-    static func carpetaEntrega(_ p: PasoCorrida) -> String { "flujo-\(p.corrida)-\(p.paso)-\(p.intento)" }
+    /// Carpeta (dentro de `archivos/entregables/`) donde un paso deja sus archivos: la del agente, que es la única donde
+    /// `Permisos.entregables` le deja escribir.
+    static func carpetaEntrega(_ p: PasoCorrida) -> String { p.quien }
 }
 
 extension Store {

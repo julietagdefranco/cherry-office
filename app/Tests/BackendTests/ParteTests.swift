@@ -105,7 +105,8 @@ struct ParteTests {
         let desde = try #require(Programacion.fecha(str(o["desde"]))), hasta = try #require(Programacion.fecha(str(o["hasta"])))
         #expect(abs(hasta.timeIntervalSince(desde) - 86400) < 5)      // sin meta: las últimas 24 h
         // te necesita
-        #expect(lista(o["teNecesita"]).map { str($0["texto"]) } == ["Marce te respondió"])
+        // el aviso calculado de la corrida que espera a la persona (MotorFlujos) y el guardado, del más viejo al más nuevo
+        #expect(lista(o["teNecesita"]).map { str($0["texto"]) } == ["«Clase 7» te necesita: Grabación", "Marce te respondió"])
         // para revisar (el parte viejo también es una entrega sin revisar de la bandeja)
         let rev = dict(o["paraRevisar"])
         #expect((rev["total"] as? Int) == 3 && lista(rev["entregas"]).count == 3)

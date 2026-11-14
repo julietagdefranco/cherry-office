@@ -76,7 +76,7 @@ struct FlujosTests {
         // la consigna llevó el flujo, el paso y el contexto, y termina con la carpeta de entrega
         let consigna = try #require(f.sb.prompts.first)
         #expect(consigna.contains("Paso 1 de 3: Diseño") && consigna.contains("Diseñá la clase") && consigna.contains("Tema: fracciones"))
-        #expect(consigna.hasSuffix("Dejá lo que entregues en archivos/entregables/flujo-\(c)-0-1/."))
+        #expect(consigna.hasSuffix("Dejá lo que entregues en archivos/entregables/sofia/."))
         // la entrega aparece al filtrar las corridas por entrega
         let porEntrega = lista((await f.get("/api/flujos/corridas", ["entrega": String(a1)])).obj["corridas"])
         #expect(porEntrega.map { str($0["nombre"]) } == ["Clase 7"])
@@ -234,7 +234,7 @@ struct FlujosTests {
         let i = await intentos(f, c, 0)
         #expect(i.count == 2 && str(i[1]["estado"]) == "listo" && str(i[1]["nota"]) == "Hacelo más corto")
         #expect(f.sb.prompts.last?.contains("Hacelo más corto") == true)
-        #expect(f.sb.prompts.last?.contains("Dejá lo que entregues en archivos/entregables/flujo-\(c)-0-2/.") == true)
+        #expect(f.sb.prompts.last?.contains("Dejá lo que entregues en archivos/entregables/sofia/.") == true)
         // el paso de la persona quedó con dos intentos (el reabierto y el nuevo)
         #expect((await intentos(f, c, 1)).count >= 2)
     }
@@ -349,6 +349,6 @@ struct FlujosTests {
         #expect(s.contains("Con más ritmo"))
         #expect(!s.contains("\u{0007}") && !s.contains("\u{202E}"))
         #expect(!s.contains(String(repeating: "x", count: 3001)) && s.contains(String(repeating: "x", count: 2900)))
-        #expect(s.hasSuffix("Dejá lo que entregues en archivos/entregables/flujo-5-1-2/."))
+        #expect(s.hasSuffix("Dejá lo que entregues en archivos/entregables/armando/."))
     }
 }
