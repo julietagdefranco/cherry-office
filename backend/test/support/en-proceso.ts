@@ -1,6 +1,5 @@
 // Backend en proceso (createBackend + claude falso) para los unit tests de flujos, coordinador y parte.
 import fs from 'node:fs'
-import { onTestFinished } from 'vitest'
 import { createBackend, type Backend } from '../../src/backend.js'
 import { Config } from '../../src/config.js'
 import type { Sandbox } from './sandbox.js'
@@ -12,7 +11,8 @@ export function arrancar(sb: Sandbox, env: Record<string, string> = {}): Backend
   const e = { ...process.env, HOME: sb.home, HQ_HOME: sb.home, HQ_DATA_DIR: sb.datos, HQ_OFICINAS_DIR: sb.oficinasDir, HQ_PROGRAMADOR: '0', ...env } as NodeJS.ProcessEnv
   fs.mkdirSync(sb.datos, { recursive: true })
   const b = createBackend({ config: Config.load(sb.home, e), claudePath: sb.bin, env: e })
-  onTestFinished(() => b.shutdown())
+  // lo cierra el sandbox antes de borrar su temporal (onTestFinished no garantiza el orden)
+  sb.antesDeBorrar(() => b.shutdown())
   return b
 }
 

@@ -2,6 +2,7 @@
 // Agentes de una oficina: borrador (claude -p sin agente), contratar, PATCH, despedir, GET con prompt.
 // Sin acceso a internals: `Plantillas.yamlLinea/valorFrontmatter` (ida y vuelta del YAML) queda para los unit tests del port.
 import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 import {
   Fix, Sandbox, U, chat, contratar, dict, escribir, historial, leerTexto, lista, listar, llamar, msgs, sinPrivate, str, ruta, regla,
@@ -677,7 +678,7 @@ describe('Agentes', () => {
     // oficinaDirsExtra de la config se suma
     const g = await Fix.crear({ agentes: [{ id: 'marce', depto: 'redes' }], config: { oficina_dirs_extra: ['/extra/uno'] } })
     await chat(g.b, { agent: 'marce', session: U.a })
-    expect(Sandbox.valores(g.sb.llamadas.at(-1) ?? [], '--add-dir')).toEqual(['/extra/uno'])
+    expect(Sandbox.valores(g.sb.llamadas.at(-1) ?? [], '--add-dir')).toEqual([path.resolve('/extra/uno')]) // en Windows, C:\\extra\\uno
   })
 
   test('crear oficina: «vacia» arranca sin departamentos; sin lista van los sugeridos', async () => {

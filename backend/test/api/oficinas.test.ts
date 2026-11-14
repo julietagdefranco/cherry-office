@@ -143,7 +143,7 @@ describe('Oficinas y departamentos', () => {
   test('crear: carpeta explícita (absoluta, con ~ del HOME temporal), relativa -> 400, 409 si ya hay oficina.json', async () => {
     const sb = new Sandbox()
     const b = await sb.backend({ oficina: false })
-    const abs = sb.root + '/elegida/Mi Oficina'
+    const abs = ruta(sb.root, 'elegida/Mi Oficina')
     const r = await nueva(b, { nombre: 'X', carpeta: abs })
     expect(r.status).toBe(200)
     expect(str(r.obj.carpeta)).toBe(abs)
@@ -221,7 +221,7 @@ describe('Oficinas y departamentos', () => {
   test('abrir: una oficina válida queda activa y se completan las carpetas que falten (sin pisar nada)', async () => {
     const sb = new Sandbox()
     const b = await sb.backend({ oficina: false })
-    const dir = sb.root + '/mia'
+    const dir = ruta(sb.root, 'mia')
     escribir('{"version":1,"nombre":"Mía","duenio":"Eva","departamentos":[{"id":"d","nombre":"D","color":"#ffffff"}],"agentes":[]}', dir + '/oficina.json')
     escribir('catálogo propio', dir + '/conocimiento/archivos.md')
     const r = await llamar(b, 'POST', '/api/oficinas/abrir', { body: { carpeta: dir } })

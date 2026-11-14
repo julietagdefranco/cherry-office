@@ -60,6 +60,7 @@ export class Sandbox {
   readonly datos: string
   readonly bin: string
   private servidores: Backend[] = []
+  private antes: (() => Promise<void>)[] = []
 
   get binDir() { return path.dirname(this.bin) }
   /** Carpeta donde la API crea las oficinas (en vez de ~/Oficinas). */
@@ -193,12 +194,16 @@ export class Sandbox {
     return args.slice(i + 1, fin >= 0 ? fin : args.length)
   }
 
+  /** Algo que hay que cerrar antes de borrar el temporal (un backend en proceso: en Windows tiene carpetas tomadas). */
+  antesDeBorrar(f: () => Promise<void>) { this.antes.push(f) }
+
   private async cerrar() {
     await Promise.all(this.servidores.map((s) => s.cerrar()))
+    for (const f of this.antes) { try { await f() } catch {} }
     const pid = this.childPid
     if (pid) { try { process.kill(pid, 'SIGKILL') } catch {} }
     // En Windows un archivo recién cerrado (o que está mirando el antivirus) puede dar EBUSY un instante: reintentar.
-    fs.rmSync(this.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    fs.rmSync(this.root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
   }
 }
 

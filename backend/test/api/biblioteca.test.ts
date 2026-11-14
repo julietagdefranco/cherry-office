@@ -124,7 +124,7 @@ async function prepararBusqueda(f: Fix) {
 
 /** Carpeta externa con material variado. */
 function externa(f: Fix, nombre = 'externa'): string {
-  const d = f.sb.root + '/' + nombre
+  const d = path.join(f.sb.root, nombre)
   escribir('alfa uno', d + '/a.txt')
   escribir('beta dos', d + '/sub/b.md')
   escribir('oculto', d + '/.oculto.txt')
@@ -997,7 +997,7 @@ describe('Biblioteca', () => {
     const md = f.leer('conocimiento/fuentes/a.md')
     expect(md).toContain('- **Origen:** carpeta vinculada «ext»')
     expect(md).toContain('- **Carpeta:** Carpeta vinculada')
-    expect(md.includes('- **Ubicación del original:** /') && md.includes('/externa/a.txt')).toBe(true)
+    expect(md.includes('- **Ubicación del original:** ' + ruta(ext, 'a.txt'))).toBe(true)
     const p = fichas(f)[0]!.at(-1)!
     expect(p).toContain('carpeta: Carpeta vinculada')
     // los originales no se tocaron

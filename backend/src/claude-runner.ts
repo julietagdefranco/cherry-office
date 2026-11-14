@@ -2,7 +2,7 @@
 // un carril por agente (sus mensajes no se pisan), un tope global de procesos y el cierre ordenado.
 //
 // Windows:
-// - No hay SIGTERM: se mata el árbol con `taskkill /T` (sin /F primero, con /F después de la gracia).
+// - No hay SIGTERM: se mata el árbol con `taskkill /T /F` (sin /F, taskkill no cierra procesos de consola).
 // - Un shim `.cmd` (instalación por npm) se resuelve a `node …/cli.js` para no pasar los argumentos por cmd.exe,
 //   que rompe el quoting del JSON de --mcp-config y de los saltos de línea.
 // - El mensaje viaja por la entrada estándar (`claude -p` lo lee de ahí si no hay `--`; probado con el claude real:
@@ -67,7 +67,8 @@ class Proceso {
     const h = this.hijo
     if (!h || !this.vivo || h.pid === undefined) return
     if (esWindows) {
-      spawnSync(taskkill, ['/PID', String(h.pid), '/T', ...(forzar ? ['/F'] : [])], { stdio: 'ignore', windowsHide: true })
+      // sin /F, taskkill solo le pide cerrar a las ventanas: claude (consola, sin ventana) no se entera. Siempre /F.
+      spawnSync(taskkill, ['/PID', String(h.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
       return
     }
     // el hijo es líder de su grupo (detached): señal a todo el grupo, así caen también las herramientas que lanzó
@@ -383,6 +384,9 @@ export class ClaudeRunner {
     const limite = Date.now() + this.grace * 1000
     while (Date.now() < limite && vivos.some((p) => p.vivo)) await new Promise((r) => setTimeout(r, 50))
     for (const p of vivos) if (p.vivo) p.matar(true)
+    // que terminen de verdad: en Windows su carpeta de trabajo queda tomada hasta que el proceso sale
+    const fin = Date.now() + 2000
+    while (Date.now() < fin && vivos.some((p) => p.vivo)) await new Promise((r) => setTimeout(r, 25))
     this.log.info(`shutdown: ${vivos.length} proceso(s) terminados`)
   }
 
