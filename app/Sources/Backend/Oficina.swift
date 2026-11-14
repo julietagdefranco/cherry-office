@@ -29,7 +29,11 @@ public struct Departamento: Codable, Sendable, Equatable {
     public var id: String
     public var nombre: String
     public var color: String
-    public init(id: String, nombre: String, color: String) { self.id = id; self.nombre = nombre; self.color = color }
+    /// Para qué existe el departamento (hasta 600 caracteres).
+    public var mision: String?
+    public init(id: String, nombre: String, color: String, mision: String? = nil) {
+        self.id = id; self.nombre = nombre; self.color = color; self.mision = mision
+    }
 }
 
 public struct AgenteDef: Codable, Sendable, Equatable {
@@ -45,9 +49,17 @@ public struct AgenteDef: Codable, Sendable, Equatable {
     /// Rutas extra (relativas a la oficina, dentro de `conocimiento/`) donde este agente puede escribir,
     /// además de `conocimiento/agentes/<id>.md`. Solo las pone el importador (p. ej. Betty en Próspera).
     public var escritura: [String]?
+    /// Qué hace solo y qué solo propone.
+    public var limites: LimitesAgente?
+    /// Servidores MCP asignados, con herramientas de lectura y de acción.
+    public var conectores: [ConectorAsignado]?
+    /// Hoy el único valor válido es `"coordinador"`.
+    public var permisos: [String]?
     public init(id: String, nombre: String, rol: String, departamento: String, brief: String? = nil,
                 modelo: String? = nil, chips: [String]? = nil, avatar: Avatar? = nil, creado: String? = nil,
-                escritura: [String]? = nil) {
+                escritura: [String]? = nil, limites: LimitesAgente? = nil, conectores: [ConectorAsignado]? = nil,
+                permisos: [String]? = nil) {
+        self.limites = limites; self.conectores = conectores; self.permisos = permisos
         self.id = id; self.nombre = nombre; self.rol = rol; self.departamento = departamento; self.brief = brief
         self.modelo = modelo; self.chips = chips; self.avatar = avatar; self.creado = creado; self.escritura = escritura
     }
@@ -132,15 +144,21 @@ public struct Oficina: Codable, Sendable, Equatable {
     public var biblioteca: BibliotecaCfg?
     /// Tareas programadas por agente (opcional; ausente = ninguna). Ver Tareas.swift.
     public var tareas: [TareaProgramada]?
+    /// Flujos de trabajo (opcional; ausente = ninguno). Ver ModeloFlujos.swift.
+    public var flujos: [FlujoDef]?
+    /// Reglas de la oficina (opcional; ausente = ninguna).
+    public var reglas: [Regla]?
 
     public init(version: Int = 1, nombre: String, duenio: String, departamentos: [Departamento] = [], agentes: [AgenteDef] = [],
-                vinculos: [Vinculo]? = nil, biblioteca: BibliotecaCfg? = nil, tareas: [TareaProgramada]? = nil) {
+                vinculos: [Vinculo]? = nil, biblioteca: BibliotecaCfg? = nil, tareas: [TareaProgramada]? = nil,
+                flujos: [FlujoDef]? = nil, reglas: [Regla]? = nil) {
+        self.flujos = flujos; self.reglas = reglas
         self.version = version; self.nombre = nombre; self.duenio = duenio
         self.departamentos = departamentos; self.agentes = agentes
         self.vinculos = vinculos; self.biblioteca = biblioteca; self.tareas = tareas
     }
 
-    enum CodingKeys: String, CodingKey { case version, nombre, duenio, departamentos, agentes, vinculos, biblioteca, tareas }
+    enum CodingKeys: String, CodingKey { case version, nombre, duenio, departamentos, agentes, vinculos, biblioteca, tareas, flujos, reglas }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -152,6 +170,8 @@ public struct Oficina: Codable, Sendable, Equatable {
         vinculos = try c.decodeIfPresent([Vinculo].self, forKey: .vinculos)
         biblioteca = try c.decodeIfPresent(BibliotecaCfg.self, forKey: .biblioteca)
         tareas = try c.decodeIfPresent([TareaProgramada].self, forKey: .tareas)
+        flujos = try c.decodeIfPresent([FlujoDef].self, forKey: .flujos)
+        reglas = try c.decodeIfPresent([Regla].self, forKey: .reglas)
     }
 
     public func agente(_ id: String) -> AgenteDef? { agentes.first { $0.id == id } }
@@ -174,7 +194,11 @@ public extension AgenteDef {
 }
 
 public extension Departamento {
-    var json: [String: Any] { ["id": id, "nombre": nombre, "color": color] }
+    var json: [String: Any] {
+        var d: [String: Any] = ["id": id, "nombre": nombre, "color": color]
+        if let mision { d["mision"] = mision }
+        return d
+    }
 }
 
 // MARK: - slugs y validaciones
@@ -219,7 +243,7 @@ public enum Slug {
 }
 
 public enum Validar {
-    static let reservados: Set<String> = ["general-purpose", "explore", "plan", "statusline-setup", "claude-code-guide", "claude"]
+    static let reservados: Set<String> = ["general-purpose", "explore", "plan", "statusline-setup", "claude-code-guide", "claude", "persona", "creador"]
 
     public static func colorHex(_ s: String) -> Bool {
         let u = Array(s.utf8)
@@ -255,6 +279,7 @@ public enum Validar {
             guard deps.insert(d.id).inserted else { throw ErrorAPI(400, "Departamento repetido: \(d.id).") }
             guard !d.nombre.trimmingCharacters(in: .whitespaces).isEmpty else { throw ErrorAPI(400, "Departamento sin nombre: \(d.id).") }
             guard colorHex(d.color) else { throw ErrorAPI(400, "Color inválido en el departamento \(d.id): \(d.color).") }
+            try ValidarAgenteExtra.mision(d.mision)
         }
         var ids = Set<String>()
         for a in o.agentes {
@@ -262,6 +287,9 @@ public enum Validar {
             guard ids.insert(a.id).inserted else { throw ErrorAPI(400, "Agente repetido: \(a.id).") }
             guard deps.contains(a.departamento) else { throw ErrorAPI(400, "El agente \(a.id) está en un departamento que no existe (\(a.departamento)).") }
             for r in a.escritura ?? [] where !rutaEscrituraValida(r) { throw ErrorAPI(400, "Ruta de escritura inválida en \(a.id): \(r).") }
+            if let l = a.limites { try ValidarAgenteExtra.limites(l) }
+            if let c = a.conectores { try ValidarAgenteExtra.conectores(c) }
+            if let p = a.permisos { try ValidarAgenteExtra.permisos(p) }
         }
         var vins = Set<String>()
         for v in o.vinculos ?? [] {
@@ -269,6 +297,8 @@ public enum Validar {
             guard v.ruta.hasPrefix("/") else { throw ErrorAPI(400, "La carpeta vinculada \(v.id) tiene que tener una ruta absoluta.") }
         }
         try ValidarTareas.validar(o)
+        try ValidarFlujos.validar(o)
+        try ValidarReglas.validar(o)
     }
 
     /// Relativa, dentro de `conocimiento/`, sin `..`.
@@ -394,7 +424,7 @@ public actor Oficinas {
 
     // MARK: crear y abrir
 
-    public struct DepartamentoNuevo: Sendable { public var id: String?; public var nombre: String; public var color: String? }
+    public struct DepartamentoNuevo: Sendable { public var id: String?; public var nombre: String; public var color: String?; public var mision: String? = nil }
 
     public func crear(nombre: String, duenio: String, carpeta: String? = nil,
                       departamentos: [DepartamentoNuevo]? = nil) throws -> OficinaActiva {
@@ -504,7 +534,9 @@ public actor Oficinas {
         } else {
             id = Slug.unico(n, usados: usados, respaldo: "depto")
         }
-        return Departamento(id: id, nombre: n, color: color.lowercased())
+        let mision = p.mision?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try ValidarAgenteExtra.mision(mision)
+        return Departamento(id: id, nombre: n, color: color.lowercased(), mision: (mision?.isEmpty ?? true) ? nil : mision)
     }
 
     // MARK: oficina y departamentos
@@ -545,7 +577,7 @@ public actor Oficinas {
         }
     }
 
-    public func editarDepartamento(_ id: String, nombre: String?, color: String?) throws -> (Departamento, OficinaActiva) {
+    public func editarDepartamento(_ id: String, nombre: String?, color: String?, mision: String? = nil) throws -> (Departamento, OficinaActiva) {
         try modificar { o in
             guard let i = o.departamentos.firstIndex(where: { $0.id == id }) else { throw ErrorAPI(404, "No existe ese departamento.") }
             if let nombre {
@@ -556,6 +588,11 @@ public actor Oficinas {
             if let color {
                 guard Validar.colorHex(color) else { throw ErrorAPI(400, "El color tiene que ser tipo #a88bdc.") }
                 o.departamentos[i].color = color.lowercased()
+            }
+            if let mision {
+                let m = mision.trimmingCharacters(in: .whitespacesAndNewlines)
+                try ValidarAgenteExtra.mision(m)
+                o.departamentos[i].mision = m.isEmpty ? nil : m
             }
             return o.departamentos[i]
         }
