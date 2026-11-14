@@ -234,7 +234,7 @@ select.campo { padding-right: 26px; }
 .galeria-cab img { width: 44px; height: 44px; border-radius: 6px; background: var(--fondo); flex: none; }
 .galeria-nombre { flex: 1; min-width: 0; }
 .galeria-flecha { color: var(--suave); font-size: 11px; }
-.galeria-grilla { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; max-height: 260px; overflow-y: auto; padding: 2px; }
+.galeria-grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; margin-top: 8px; max-height: min(400px, 55vh); overflow-y: auto; padding: 2px; }
 .galeria-grilla button { padding: 0; border: 1px solid var(--linea); border-radius: 8px; background: var(--fondo); cursor: pointer; aspect-ratio: 1; overflow: hidden; }
 .galeria-grilla button img { width: 100%; height: 100%; display: block; }
 .galeria-grilla button.sel { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--texto); }
