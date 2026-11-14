@@ -333,5 +333,113 @@ struct CasoProsperaTests {
         #expect((await f.patch("/api/departamentos/ventas", ["mision": 5])).status == 400)
         #expect(lista(f.oficinaJSON()["departamentos"]).first { str($0["id"]) == "ventas" }?["mision"] as? String == justo)
     }
+
+    // MARK: cruces de la ola 2
+
+    @Test("/api/actividad sigue rápido con 100 corridas abiertas de flujos largos")
+    func actividadConMuchasCorridas() async throws {
+        let f = try await Fix.crear(deps: ["Dirección"], env: ["HQ_PROGRAMADOR": "0"])
+        // 20 pasos de la persona, con textos largos (el tope de cada campo): el peor caso para la definición guardada
+        let largo = String(repeating: "texto ", count: 90)
+        let pasos: [[String: Any]] = (1...20).map {
+            ["id": "p\($0)", "nombre": "Paso \($0)", "quien": "persona", "consigna": String(repeating: "c", count: 3000),
+             "recibe": largo, "entrega": largo, "aprobacion": false]
+        }
+        let r = await f.post("/api/flujos", ["id": "largo", "nombre": "Largo", "pasos": pasos])
+        try #require(r.status == 200, "\(r.obj)")
+        for i in 1...100 {
+            let c = await f.post("/api/flujos/largo/correr", ["nombre": "Corrida \(i)"])
+            try #require(c.status == 200, "\(c.obj)")
+        }
+        let inicio = Date()
+        let veces = 10
+        var ultimo: Resp = (0, [:])
+        for _ in 0..<veces { ultimo = await f.get("/api/actividad") }
+        let promedio = Date().timeIntervalSince(inicio) / Double(veces)
+        #expect(ultimo.status == 200 && lista(ultimo.obj["corridas"]).count == 100)
+        #expect(lista(ultimo.obj["avisos"]).filter { str($0["tipo"]) == "flujo" }.count == 100)
+        #expect(promedio < 0.15, "GET /api/actividad tardó \(promedio) s en promedio con 100 corridas")
+    }
+
+    @Test("flujo, acción propuesta y encargo del coordinador a la vez: cada gancho toca solo lo suyo")
+    func ganchosCruzados() async throws {
+        let crear = "mcp__claude_ai_Google_Calendar__create_event", leer = "mcp__claude_ai_Google_Calendar__list_events"
+        CatalogoConectores.compartido.fijar([ServidorConector(nombre: "Google Calendar", prefijo: "mcp__claude_ai_Google_Calendar",
+                                                              estado: "connected", herramientas: [leer, crear])])
+        defer { CatalogoConectores.compartido.limpiar() }
+        let f = try await Fix.crear(deps: ["Dirección"], agentes: [("coordi", "direccion", "Chief of Staff"), ("sofia", "direccion", "Académica"),
+                                                                     ("nico", "direccion", "Analista")],
+                                    env: ["HQ_PROGRAMADOR": "0"])
+        let p = await f.patch("/api/agentes/coordi", ["permisos": ["coordinador"],
+                                                       "conectores": [["servidor": "Google Calendar", "leer": [leer], "actuar": [crear]]]])
+        try #require(p.status == 200, "\(p.obj)")
+        let fl = await f.post("/api/flujos", ["nombre": "Clase", "pasos": [
+            ["id": "diseno", "nombre": "Diseño", "quien": "sofia", "entrega": "Ficha", "aprobacion": true],
+            ["id": "grabacion", "nombre": "Grabación", "quien": "persona", "entrega": "Archivo"]]])
+        try #require(fl.status == 200, "\(fl.obj)")
+        let cid = Int(dict((await f.post("/api/flujos/clase/correr", ["nombre": "Clase 7"])).obj["corrida"])["id"] as? Int ?? 0)
+        func estado() async -> String { str(dict((await f.get("/api/flujos/corridas/\(cid)")).obj["corrida"])["estado"]) }
+        #expect(await esperarAsync(hasta: 15) { await estado() == "esperando_aprobacion" })
+
+        // la acción propuesta por el coordinador y el encargo que repartió
+        let token = f.b.mcp.tokens.emitir(oficina: f.carpeta, agente: "coordi", sid: U.a, perfil: "coordinador")
+        let ident = IdentidadMCP(oficina: f.carpeta, agente: "coordi", sid: U.a, perfil: "coordinador")
+        let h = try #require(f.b.mcp.consultas.herramientas(token: token, identidad: ident))
+        let nombres = h.definiciones.compactMap { $0["name"] as? String }
+        #expect(nombres.contains("proponer_accion") && nombres.contains("encargar"))
+        let acc = try #require(await h.llamar("proponer_accion", argumentos: ["herramienta": crear, "resumen": "Crear la reunión", "detalle": ["titulo": "Reunión"]]))
+        #expect(!acc.esError, "\(acc.texto)")
+        let enc = try #require(await h.llamar("encargar", argumentos: ["agente": "nico", "consigna": "Preparame el informe"]))
+        #expect(!enc.esError, "\(enc.texto)")
+        #expect(await esperarAsync(hasta: 15) { await f.b.store.entregas(oficina: f.carpeta, origen: "encargo").count == 1 })
+        let todas = lista((await f.get("/api/entregas")).obj["entregas"])
+        func entrega(_ origen: String) -> [String: Any]? { todas.first { str($0["origen"]) == origen } }
+        let eFlujo = try #require(entrega("flujo")), eProp = try #require(entrega("propuesta")), eEnc = try #require(entrega("encargo"))
+        func idDe(_ e: [String: Any]) -> Int { e["id"] as? Int ?? 0 }
+
+        // revisar el encargo y la propuesta no mueve la corrida ni ejecuta la acción
+        #expect((await f.post("/api/entregas/\(idDe(eEnc))/revisada")).status == 200)
+        #expect((await f.post("/api/entregas/\(idDe(eProp))/revisada")).status == 200)
+        #expect(await estado() == "esperando_aprobacion")
+        let accion = dict((await f.get("/api/acciones", ["entrega": String(idDe(eProp))])).obj["accion"])
+        #expect(str(accion["estado"]) == "pendiente")
+        // revisar la entrega del flujo avanza la corrida y no toca la acción
+        #expect((await f.post("/api/entregas/\(idDe(eFlujo))/revisada")).status == 200)
+        #expect(await esperarAsync(hasta: 15) { await estado() == "esperando_persona" })
+        #expect(str(dict((await f.get("/api/acciones", ["entrega": String(idDe(eProp))])).obj["accion"])["estado"]) == "pendiente")
+        // aprobar la acción (aunque ya se la hubiera marcado «Listo») la ejecuta con esa sola herramienta y no mueve la corrida
+        let ej = await f.post("/api/entregas/\(idDe(eProp))/ejecutar")
+        #expect(ej.status == 202, "\(ej.obj)")
+        #expect(await esperarAsync(hasta: 15) { str(dict((await f.get("/api/acciones", ["entrega": String(idDe(eProp))])).obj["accion"])["estado"]) == "hecha" })
+        #expect(await estado() == "esperando_persona")
+        let correAccion = try #require(f.sb.llamadas(conPrompt: "exactamente esto").last)
+        #expect(Sandbox.reglas(correAccion).contains(crear))
+        // la corrida del paso de flujo, en cambio, no tenía la herramienta de actuar
+        let correPaso = try #require(f.sb.llamadas(conPrompt: "Paso 1 de 2").first)
+        #expect(!Sandbox.reglas(correPaso).contains(crear))
+        // tres cosas distintas, tres orígenes y una sola corrida abierta
+        let origenes = Set(lista((await f.get("/api/entregas")).obj["entregas"]).map { str($0["origen"]) })
+        #expect(origenes.isSuperset(of: ["flujo", "propuesta", "encargo", "accion"]))
+        #expect(lista((await f.get("/api/actividad")).obj["corridas"]).count == 1)
+    }
+
+    @Test("GobiernoRouter atiende ejecutar y deja pasar el resto de /api/entregas")
+    func ordenDeRouters() async throws {
+        let f = try await Fix.crear(deps: ["Dirección"], agentes: [("sofia", "direccion", nil)], env: ["HQ_PROGRAMADOR": "0"])
+        let act = try #require(await f.b.oficinas.activa())
+        _ = try await f.b.programador.encargarLibre(act, try #require(act.oficina.agente("sofia")), id: "coord:abcd1234", nombre: "Algo", consigna: "Hacé algo")
+        #expect(await esperarAsync(hasta: 15) { !lista((await f.get("/api/entregas")).obj["entregas"]).isEmpty })
+        let e = try #require(lista((await f.get("/api/entregas")).obj["entregas"]).first)
+        let id = e["id"] as? Int ?? 0
+        // las rutas de entregas que no son del gobierno siguen andando
+        #expect((await f.get("/api/entregas/\(id)")).status == 200)
+        #expect((await f.post("/api/entregas/\(id)/revisada")).status == 200)
+        #expect((await f.post("/api/entregas/\(id)/sin-revisar")).status == 200)
+        #expect((await f.get("/api/entregas", ["estado": "sin_revisar"])).status == 200)
+        // y las del gobierno las atiende el gobierno: una entrega sin acción da 404 propio, no el genérico de entregas
+        let sin = await f.post("/api/entregas/\(id)/ejecutar")
+        #expect(sin.status == 404 && str(sin.obj["error"]).contains("acción"), "\(sin.obj)")
+        #expect((await f.post("/api/entregas/\(id)/descartar-accion")).status == 404)
+    }
 }
 }
