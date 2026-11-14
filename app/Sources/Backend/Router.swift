@@ -192,7 +192,8 @@ public final class Router: APIHandler {
                     let d = try objeto(body)
                     let (dep, a) = try await oficinas.editarDepartamento(
                         id, nombre: try Validar.texto(d["nombre"], "nombre", max: 60, obligatorio: false),
-                        color: try Validar.texto(d["color"], "color", max: 7, obligatorio: false))
+                        color: try Validar.texto(d["color"], "color", max: 7, obligatorio: false),
+                        mision: try Router.misionPatch(d))
                     return (200, ["departamento": dep.json, "oficina": a.oficina.json])
                 case "DELETE":
                     let d = try objetoOpcional(body)
@@ -327,11 +328,20 @@ public final class Router: APIHandler {
         if let n = try? await store.reclamarLegacy(oficina: carpeta), n > 0 { log.info("chats anteriores asignados a la oficina importada: \(n)") }
     }
 
+    /// `mision` en un PATCH: si la clave no viene, nil (no se toca); null o texto vacío la borran.
+    static func misionPatch(_ d: [String: Any]) throws -> String? {
+        guard let v = d["mision"] else { return nil }
+        if v is NSNull { return "" }
+        guard v is String else { throw ErrorAPI(400, "«mision» tiene que ser texto.") }
+        return try Validar.texto(v, "mision", max: ValidarAgenteExtra.maxMision, obligatorio: false) ?? ""
+    }
+
     private func crearDepartamento(_ body: Data?) async throws -> Resp {
         let d = try objeto(body)
         let nuevo = Oficinas.DepartamentoNuevo(id: try Validar.texto(d["id"], "id", max: 41, obligatorio: false),
                                                nombre: try Validar.texto(d["nombre"], "nombre", max: 60)!,
-                                               color: try Validar.texto(d["color"], "color", max: 7, obligatorio: false))
+                                               color: try Validar.texto(d["color"], "color", max: 7, obligatorio: false),
+                                               mision: try Validar.texto(d["mision"], "mision", max: ValidarAgenteExtra.maxMision, obligatorio: false))
         let (dep, a) = try await oficinas.crearDepartamento(nuevo)
         return (200, ["departamento": dep.json, "oficina": a.oficina.json])
     }

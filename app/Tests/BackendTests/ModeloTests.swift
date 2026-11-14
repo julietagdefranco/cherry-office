@@ -318,6 +318,26 @@ struct ModeloTests {
         }
     }
 
+    @Test("POST y PATCH /api/departamentos con mision; null o vacío la borran")
+    func misionDepartamentoHTTP() async throws {
+        let f = try await Fix.crear()
+        let c = await f.post("/api/departamentos", ["nombre": "Educación", "mision": "Enseñar"])
+        #expect(c.status == 200, "\(c.obj)")
+        let id = try #require(dict(c.obj["departamento"])["id"] as? String)
+        #expect(dict(c.obj["departamento"])["mision"] as? String == "Enseñar")
+        let p = await f.patch("/api/departamentos/\(id)", ["mision": "Enseñar mejor"])
+        #expect(p.status == 200 && dict(p.obj["departamento"])["mision"] as? String == "Enseñar mejor")
+        let otro = await f.patch("/api/departamentos/\(id)", ["nombre": "Edu"])
+        #expect(dict(otro.obj["departamento"])["mision"] as? String == "Enseñar mejor")
+        let v = await f.patch("/api/departamentos/\(id)", ["mision": ""])
+        #expect(v.status == 200 && dict(v.obj["departamento"])["mision"] == nil)
+        _ = await f.patch("/api/departamentos/\(id)", ["mision": "X"])
+        let n = await f.patch("/api/departamentos/\(id)", ["mision": NSNull()])
+        #expect(dict(n.obj["departamento"])["mision"] == nil)
+        #expect((await f.patch("/api/departamentos/\(id)", ["mision": 3])).status == 400)
+        #expect((await f.patch("/api/departamentos/\(id)", ["mision": String(repeating: "x", count: 601)])).status == 400)
+    }
+
     @Test("después de despedir a un agente nombrado en un flujo, la oficina sigue abriendo")
     func despedirConFlujo() async throws {
         let f = try await Fix.crear(agentes: [("sofia", "direccion", "Directora"), ("armando", "redes", "Editor")])
