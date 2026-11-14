@@ -1,1 +1,69 @@
-/* Parte del día: estilos propios de la sección. */
+/* Parte del día: panel derecho en modo «parte» y, abajo, las hojas de reglas y conectores, la pestaña Permisos y el bloque de acción de las entregas. */
+.parte-sec { padding: 0 14px; margin-top: 14px; }
+.parte-ico { display: flex; align-items: center; justify-content: center; color: var(--suave); background: var(--panel-2); border: 1px solid var(--linea); }
+.parte-ico.aviso { color: var(--aviso); }
+.parte-vos { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; background: var(--acento); color: var(--sobre-acento); }
+.parte-narrado { padding: 12px 14px 0; }
+.parte-pedir { padding: 12px 14px 0; }
+.parte-filas { display: flex; flex-direction: column; }
+.parte-fila { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 6px; border: 0; border-bottom: 1px solid var(--linea); background: none; cursor: pointer; border-radius: 0; }
+.parte-fila:hover { background: var(--panel-2); }
+.parte-fila.quieta { cursor: default; }
+.parte-fila.quieta:hover { background: none; }
+.parte-fila .retrato { width: 34px; height: 34px; flex: none; border-radius: 9px; }
+.parte-txt { flex: 1; min-width: 0; }
+.parte-tit { font-weight: 550; overflow-wrap: anywhere; }
+.parte-sub { font-size: 12px; color: var(--suave); }
+.parte-lista { margin: 0; padding-left: 18px; }
+.parte-sec .btn.chico { margin-top: 6px; }
+
+/* reglas */
+.regla-fila { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+.regla-fila .regla-cuerpo { flex: 1; min-width: 0; }
+.regla-fila textarea.campo { min-height: 54px; }
+.regla-cita { font-size: 12px; color: var(--tenue); margin-top: 3px; overflow-wrap: anywhere; }
+
+/* conectores */
+.cx-serv { border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 10px 12px; margin-bottom: 10px; background: var(--panel); }
+.cx-serv.no { opacity: .6; }
+.cx-serv-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; }
+.cx-serv-cab .ayuda { margin: 0; font-weight: 400; }
+.cx-herr { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; }
+.cx-herr span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--suave); }
+.cx-tabla-caja { overflow-x: auto; border: 1px solid var(--linea); border-radius: var(--radio-chico); }
+.cx-tabla { border-collapse: collapse; width: 100%; font-size: 12px; }
+.cx-tabla th, .cx-tabla td { padding: 6px 8px; border-bottom: 1px solid var(--linea); text-align: center; white-space: nowrap; }
+.cx-tabla th:first-child, .cx-tabla td:first-child { text-align: left; position: sticky; left: 0; background: var(--panel); }
+.cx-tabla thead th { font-weight: 600; color: var(--suave); }
+.cx-tabla .cx-sub th { font-weight: 500; color: var(--tenue); }
+.cx-tabla tr:last-child td { border-bottom: 0; }
+.cx-agente { display: inline-flex; align-items: center; gap: 8px; }
+.cx-agente .retrato { width: 24px; height: 24px; border-radius: 6px; }
+.insignia.leer, .insignia.actuar { height: 18px; font-size: 11px; }
+.insignia.actuar { color: var(--aviso); }
+
+/* pestaña Permisos del agente */
+.perm { padding: 14px; }
+.perm-rutas { display: grid; gap: 4px; }
+.perm-rutas div { font: 12px ui-monospace, Menlo, monospace; color: var(--suave); background: var(--panel-2); border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 5px 8px; overflow-wrap: anywhere; }
+.perm-lista .fila-ed { margin-bottom: 6px; }
+.perm-srv { border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 8px 10px; margin-bottom: 8px; }
+.perm-srv.no { opacity: .6; }
+.perm-checks { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.perm-checks label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.insignia.coord { color: var(--acento); border-color: var(--acento); }
+
+/* entregables: flujo y acción */
+.entrega-accion { margin: 12px 14px 0; padding: 10px 12px; border: 1px solid var(--linea-fuerte); border-radius: var(--radio-chico); background: var(--panel-2); }
+.entrega-accion h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--tenue); margin-bottom: 4px; }
+.entrega-accion .acc-res { font-weight: 600; margin-bottom: 4px; }
+.entrega-accion pre { font: 12px ui-monospace, Menlo, monospace; background: var(--panel); border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 8px; margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
+
+/* departamentos: misión bajo cada fila */
+.dep-bloque { margin-bottom: 8px; }
+.dep-bloque textarea.campo { min-height: 44px; margin-top: 4px; font-size: 12px; }
+
+/* insignia clicable (flujo del detalle de una entrega) */
+.insignia-link { cursor: pointer; font: inherit; font-size: 11px; gap: 5px; }
+.insignia-link:hover { border-color: var(--suave); }
+.insignia-link svg { width: 12px; height: 12px; }

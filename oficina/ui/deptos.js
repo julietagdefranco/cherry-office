@@ -23,9 +23,23 @@
           var guardarNombre = function () { var v = inp.value.trim(); if (v && v !== d.nombre) guardar(d.id, { nombre: v }); else inp.value = d.nombre; };
           inp.addEventListener('blur', guardarNombre);
           inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') inp.blur(); });
-          lista.appendChild(h('div.fila-ed', muestra, inp,
-            h('span.insignia', n + (n === 1 ? ' agente' : ' agentes')),
-            h('button.btn.fantasma.icono', { title: 'Borrar', onclick: function () { borrar(d, n); } }, App.icono('papelera'))));
+          /* misión: una línea que dice para qué existe el departamento; se guarda al salir del campo.
+             Si el backend la ignora, el campo simplemente queda vacío al reabrir. */
+          var ultima = d.mision || '';
+          var mis = h('textarea.campo', { rows: 2, maxlength: 600, placeholder: 'Misión: para qué existe este departamento', 'aria-label': 'Misión de ' + d.nombre });
+          mis.value = ultima;
+          mis.addEventListener('blur', function () {
+            var v = mis.value.trim();
+            if (v === ultima) return;
+            api.patch('/api/departamentos/' + encodeURIComponent(d.id), { mision: v }).then(function (r) {
+              ultima = v; if (r && r.oficina) App.actualizar(r.oficina);
+            }).catch(function (e) { App.fallo(e); });
+          });
+          lista.appendChild(h('div.dep-bloque',
+            h('div.fila-ed', muestra, inp,
+              h('span.insignia', n + (n === 1 ? ' agente' : ' agentes')),
+              h('button.btn.fantasma.icono', { title: 'Borrar', onclick: function () { borrar(d, n); } }, App.icono('papelera'))),
+            mis));
         });
       }
       function guardar(id, cambios) {

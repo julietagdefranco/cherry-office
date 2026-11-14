@@ -10,9 +10,12 @@ App.Entregables = (function () {
   var sinRevisar = 0, ultimas = [], firma = null;
   var filtro = { estado: 'sin_revisar', agente: '', origen: '' };
   var abierta = null;          // id de la entrega que muestra el panel (null = lista)
-  var ORIGEN = { tarea: 'Tarea programada', encargo: 'Pendiente de reunión', reunion: 'Acta de reunión', chat: 'Chat', cambios: 'Con cambios' };
+  var ORIGEN = { tarea: 'Tarea programada', encargo: 'Pendiente de reunión', reunion: 'Acta de reunión', chat: 'Chat', cambios: 'Con cambios',
+    flujo: 'Paso de un flujo', persona: 'Hecho por vos', propuesta: 'Propuesta', accion: 'Acción aprobada', parte: 'Parte del día' };
   var ESTADO = { sin_revisar: 'Sin revisar', revisada: 'Revisada', cambios: 'Reemplazada' };
 
+  /* quién la hizo: en una entrega tuya (paso de persona) no hay agente */
+  function nombreDe(e) { return e.origen === 'persona' && !e.agente ? 'Vos' : nombre(e.agente); }
   function nombre(id) { var a = id && App.agente(id); return a ? a.nombre : (id ? id : 'Reunión'); }
   function hace(iso) {
     var s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -102,6 +105,9 @@ App.Entregables = (function () {
 
   function marcaAgente(e) {
     var a = e.agente && App.agente(e.agente), d = a && App.depto(a.departamento);
+    if (!a && (e.origen === 'persona' || e.origen === 'propuesta' || e.origen === 'accion' || e.origen === 'parte' || e.origen === 'flujo')) {
+      return h('div.retrato', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--panel-2)', color: 'var(--suave)', border: '1px solid var(--linea)' } }, App.icono(e.origen === 'flujo' ? 'flujo' : 'libro'));
+    }
     return a ? App.retratoImg(a, 'retrato', 64) : h('div.retrato', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', background: d ? d.color : '#0a5fb4' } }, App.icono('reunion'));
   }
 
@@ -111,7 +117,7 @@ App.Entregables = (function () {
       marcaAgente(e),
       h('div.entrega-txt',
         h('div.entrega-tit', e.titulo),
-        h('div.entrega-sub', nombre(e.agente) + ' · ' + (ORIGEN[e.origen] || e.origen) + ' · ' + hace(e.creada) +
+        h('div.entrega-sub', nombreDe(e) + ' · ' + (ORIGEN[e.origen] || e.origen) + ' · ' + hace(e.creada) +
           (e.archivos && e.archivos.length ? ' · ' + e.archivos.length + (e.archivos.length === 1 ? ' archivo' : ' archivos') : '')),
         e.resumen ? h('div.entrega-res', e.resumen) : null),
       est);
@@ -142,11 +148,13 @@ App.Entregables = (function () {
   function pintarDetalle(e) {
     if (!abiertoPanel() || abierta !== e.id) return;
     var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
+    var bloqueAccion = h('div');
     var volver = h('button.btn.fantasma.icono', { title: 'Volver a la lista', onclick: function () { pintarLista(); } }, '←');
-    var sub = nombre(e.agente) + ' · ' + (ORIGEN[e.origen] || e.origen) + ' · ' + hace(e.creada) + (typeof e.costo === 'number' && e.costo > 0 ? ' · ≈ US$ ' + e.costo.toFixed(2) : '');
+    var sub = nombreDe(e) + ' · ' + (ORIGEN[e.origen] || e.origen) + ' · ' + hace(e.creada) + (typeof e.costo === 'number' && e.costo > 0 ? ' · ≈ US$ ' + e.costo.toFixed(2) : '');
     App.add(App.vaciar(der), cabecera(e.titulo, sub, volver), cuerpo, pie);
     var est = e.estado === 'sin_revisar' ? h('span.insignia.aviso', 'Sin revisar') : e.estado === 'revisada' ? h('span.insignia.ok', 'Revisada') : h('span.insignia', 'Reemplazada por una versión nueva');
-    App.add(cuerpo, h('div.entrega-meta', est, e.padre ? h('span.insignia', 'Versión con cambios') : null, linkOrigen(e)));
+    var meta = h('div.entrega-meta', est, e.padre ? h('span.insignia', 'Versión con cambios') : null, linkOrigen(e));
+    App.add(cuerpo, meta, bloqueAccion);
     if (e.enCambios) {
       App.add(cuerpo, h('div.entrega-meta', h('span.insignia.aviso', h('span.giro'), ' ' + nombre(e.agente) + ' está haciendo los cambios…')));
       vigilarCambios(e.id);
@@ -157,18 +165,92 @@ App.Entregables = (function () {
       })));
     }
     App.add(cuerpo, App.htmlSeguro(h('div.msg.a.entrega-texto', { style: { maxWidth: 'none' } }), App.markdown(e.texto || '(sin texto)')));
+    /* flujo y acción llegan aparte: hasta entonces el pie queda vacío, para no ofrecer «Listo» sobre una propuesta sin resolver */
+    var extra = { corrida: null, accion: null };
+    Promise.all([
+      api().get('/api/flujos/corridas', { entrega: e.id, estado: 'todas' }).then(function (r) { return (r.corridas || [])[0] || null; }).catch(function () { return null; }),
+      api().get('/api/acciones', { entrega: e.id }).then(function (r) { return r.accion || null; }).catch(function () { return null; })
+    ]).then(function (r) {
+      if (!abiertoPanel() || abierta !== e.id) return;
+      extra.corrida = r[0]; extra.accion = r[1];
+      if (extra.corrida) {
+        var c = extra.corrida;
+        meta.appendChild(h('button.insignia.info.insignia-link', { title: 'Ver el flujo', onclick: function () { if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(c.id); } },
+          App.icono('flujo'), 'Flujo · ' + (c.pasoNombre || ('paso ' + (c.paso + 1)))));
+      }
+      pintarAccion(e, extra.accion, bloqueAccion);
+      pintarPie(e, extra, pie);
+      if (extra.accion && extra.accion.estado === 'ejecutando') vigilarAccion(e.id);
+    });
+  }
+
+  /* ---------------- acción hacia afuera (plan §8) ---------------- */
+  var TEXTO_ACCION = { send_message: 'Mandar el mail', create_event: 'Crear el evento' };
+  function cortoHerramienta(h2) { return String(h2 || '').replace(/^mcp__.*__/, ''); }
+  function textoAprobar(ac) { return TEXTO_ACCION[cortoHerramienta(ac.herramienta)] || 'Aprobar y ejecutar'; }
+
+  function pintarAccion(e, ac, caja) {
+    App.vaciar(caja);
+    if (!ac) return;
+    var estado = {
+      pendiente: h('span.insignia.aviso', 'Esperando tu aprobación'),
+      ejecutando: h('span.insignia.aviso', h('span.giro'), ' Ejecutando…'),
+      hecha: h('span.insignia.ok', 'Hecha'),
+      error: h('span.insignia.error', 'Con error'),
+      descartada: h('span.insignia', 'Descartada')
+    }[ac.estado] || h('span.insignia', ac.estado);
+    var detalle = ac.detalle && Object.keys(ac.detalle).length ? JSON.stringify(ac.detalle, null, 2) : '';
+    App.add(caja, h('div.entrega-accion',
+      h('h4', 'Acción propuesta'),
+      h('div.acc-res', ac.resumen),
+      h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+        h('span.insignia', { title: ac.herramienta }, cortoHerramienta(ac.herramienta)), estado),
+      detalle ? h('pre', detalle) : null,
+      ac.resultado && ac.estado !== 'pendiente' ? App.htmlSeguro(h('div.msg.a', { style: { maxWidth: 'none', marginTop: '8px' } }), App.markdown(ac.resultado)) : null));
+  }
+
+  function vigilarAccion(id) {
+    clearTimeout(relojAccion);
+    relojAccion = setTimeout(function () {
+      if (abierta !== id || !abiertoPanel()) return;
+      api().get('/api/acciones', { entrega: id }).then(function (r) {
+        if (r.accion && r.accion.estado === 'ejecutando') vigilarAccion(id);
+        else { refrescarUltimas(); verEntrega(id); }
+      }).catch(function () { vigilarAccion(id); });
+    }, 3000);
+  }
+  var relojAccion = null;
+
+  function pintarPie(e, extra, pie) {
+    var ac = extra.accion, pendiente = !!(ac && ac.estado === 'pendiente');
+    var pasoAprobacion = !!(extra.corrida && extra.corrida.pasoEstado === 'esperando_aprobacion' && extra.corrida.entrega === e.id);
     var botones = [];
     if (e.sid && e.agente && App.Agente.abrirSesion) botones.push(h('button.btn', { onclick: function () { App.Agente.abrirSesion(e.agente, e.sid); } }, 'Abrir en el chat'));
-    if (e.estado !== 'cambios' && e.sid && e.agente && !e.enCambios) botones.push(h('button.btn', { onclick: function () { pedirCambios(e); } }, 'Pedir cambios'));
+    if (e.estado !== 'cambios' && e.sid && e.agente && !e.enCambios && !pendiente) botones.push(h('button.btn', { onclick: function () { pedirCambios(e); } }, 'Pedir cambios'));
     botones.push(h('span', { style: { flex: 1 } }));
     if (e.enCambios) {
       // mientras trabaja no se marca: la versión nueva llega como otra entrega
-    } else if (e.estado === 'sin_revisar') {
-      botones.push(h('button.btn.primario', { onclick: function () { marcar(e, 'revisada'); } }, 'Listo'));
+    } else if (pendiente) {
+      var ok = h('button.btn.primario', { onclick: function () {
+        ok.disabled = true;
+        api().post('/api/entregas/' + e.id + '/ejecutar').then(function () {
+          App.aviso('Aprobado: ya se está ejecutando.');
+          refrescarUltimas(); if (App.Actividad) App.Actividad.ya();
+          verEntrega(e.id);
+        }).catch(function (x) { App.fallo(x); ok.disabled = false; });
+      } }, textoAprobar(ac));
+      botones.push(h('button.btn', { onclick: function () {
+        api().post('/api/entregas/' + e.id + '/descartar-accion').then(function () {
+          App.aviso('Acción descartada.');
+          refrescarUltimas(); verEntrega(e.id);
+        }).catch(App.fallo);
+      } }, 'Descartar'), ok);
+    } else if (e.estado === 'sin_revisar' && !(ac && ac.estado === 'ejecutando')) {
+      botones.push(h('button.btn.primario', { onclick: function () { marcar(e, 'revisada', pasoAprobacion); } }, pasoAprobacion ? 'Listo, seguí' : 'Listo'));
     } else if (e.estado === 'revisada') {
       botones.push(h('button.btn.fantasma', { onclick: function () { marcar(e, 'sin-revisar'); } }, 'Marcar sin revisar'));
     }
-    App.add(pie, h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, botones));
+    App.add(App.vaciar(pie), h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, botones));
   }
 
   /* ---------------- pedir cambios (E4) ---------------- */
@@ -212,12 +294,12 @@ App.Entregables = (function () {
     }, 3000);
   }
 
-  function marcar(e, como) {
+  function marcar(e, como, sigueFlujo) {
     api().post('/api/entregas/' + e.id + '/' + como).then(function (r) {
       sinRevisar = r.sinRevisar | 0;
       refrescarUltimas();
       if (como === 'revisada') {
-        App.aviso('Marcada como revisada.');
+        App.aviso(sigueFlujo ? 'Listo: el flujo sigue.' : 'Marcada como revisada.');
         siguienteOLista(e.id);
       } else verEntrega(e.id);
     }).catch(App.fallo);
@@ -247,7 +329,7 @@ App.Entregables = (function () {
     abrir: abrir, siguiente: siguiente,
     sinRevisar: function () { return sinRevisar; },
     refrescar: refrescarUltimas,
-    alCerrarPanel: function () { abierta = null; },
+    alCerrarPanel: function () { abierta = null; clearTimeout(relojAccion); },
     _verEntrega: verEntrega
   };
 })();
