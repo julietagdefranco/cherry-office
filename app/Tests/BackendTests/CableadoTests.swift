@@ -211,14 +211,14 @@ struct CableadoTests {
         #expect(await HerramientasVacias().llamar("a", argumentos: [:]) == nil)
     }
 
-    @Test("el servidor compone por perfil: agente -> hq; creador -> vacías mientras no exista el Creador")
+    @Test("el servidor compone por perfil: agente -> hq; creador -> las del Creador")
     func perfiles() async throws {
         let f = try await fix()
         let c = f.b.mcp.consultas
         let ag = c.herramientas(token: "t", identidad: IdentidadMCP(oficina: f.carpeta, agente: "marce", sid: U.a))
         #expect(ag.definiciones.compactMap { $0["name"] as? String } == ["colegas", "consultar"])
         let cr = c.herramientas(token: "t", identidad: IdentidadMCP(oficina: f.carpeta, agente: "creador", sid: U.a, perfil: "creador"))
-        #expect(cr.definiciones.isEmpty)
+        #expect(cr.definiciones.compactMap { $0["name"] as? String }.map { "mcp__hq__" + $0 } == Creador.nombresMCP)
     }
 
     @Test("lista de herramientas MCP del agente: sin duplicados, empieza por las propias de hq")

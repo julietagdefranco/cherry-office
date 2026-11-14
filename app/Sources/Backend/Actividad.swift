@@ -5,11 +5,11 @@ import Foundation
 /// Clase con lock (no actor) para que los eventos se apliquen en el orden en que llegan del pipe.
 public final class ActividadRegistro: @unchecked Sendable {
     public struct Estado: Sendable, Equatable {
-        public var estado: String          // pensando | leyendo | escribiendo | buscando | consultando | trabajando
+        public var estado: String          // pensando | leyendo | escribiendo | buscando | consultando | armando | trabajando
         public var herramienta: String?
         public var objetivo: String?
         public var tarea: String?          // resumen corto del pedido (Haiku) o el pedido recortado
-        public var origen: String          // chat | reunion | biblioteca | tarea | consulta
+        public var origen: String          // chat | reunion | biblioteca | tarea | consulta | creador
         public var desde: Date
     }
 
@@ -30,8 +30,18 @@ public final class ActividadRegistro: @unchecked Sendable {
         case "Read", "Glob", "Grep", "LS", "NotebookRead": return "leyendo"
         case "Edit", "Write", "MultiEdit", "NotebookEdit": return "escribiendo"
         case "WebSearch", "WebFetch": return "buscando"
-        default: return n.hasPrefix("mcp__hq__consultar") ? "consultando" : "trabajando"
+        default:
+            if n.hasPrefix("mcp__hq__consultar") { return "consultando" }
+            return tipoCreador(n) != nil || n == "mcp__hq__marcar_faltante" ? "armando" : "trabajando"
         }
+    }
+
+    /// `mcp__hq__proponer_<tipo>` del Creador -> el tipo de tarjeta (`proponer_accion` es de los agentes, no del Creador).
+    static func tipoCreador(_ herramienta: String) -> String? {
+        let pref = "mcp__hq__proponer_"
+        guard herramienta.hasPrefix(pref) else { return nil }
+        let t = String(herramienta.dropFirst(pref.count))
+        return Tarjeta.tipos.contains(t) ? t : nil
     }
 
     /// Recorta un pedido para mostrarlo mientras llega el resumen.
@@ -79,7 +89,8 @@ public final class ActividadRegistro: @unchecked Sendable {
         case .pensando, .texto:
             est.estado = "pensando"; est.herramienta = nil; est.objetivo = nil
         case .herramienta(let n, let obj):
-            est.estado = Self.estado(herramienta: n); est.herramienta = n; est.objetivo = obj
+            est.estado = Self.estado(herramienta: n); est.herramienta = n
+            est.objetivo = Self.tipoCreador(n) ?? obj
         case .inicio, .resultado, .archivo:
             return
         }
