@@ -678,7 +678,7 @@ describe('Agentes', () => {
     // oficinaDirsExtra de la config se suma
     const g = await Fix.crear({ agentes: [{ id: 'marce', depto: 'redes' }], config: { oficina_dirs_extra: ['/extra/uno'] } })
     await chat(g.b, { agent: 'marce', session: U.a })
-    expect(Sandbox.valores(g.sb.llamadas.at(-1) ?? [], '--add-dir')).toEqual([path.resolve('/extra/uno')]) // en Windows, C:\\extra\\uno
+    expect(Sandbox.valores(g.sb.llamadas.at(-1) ?? [], '--add-dir')).toEqual([path.resolve(g.sb.root, '/extra/uno')]) // en Windows, la unidad del servidor (C:\\extra\\uno)
   })
 
   test('crear oficina: «vacia» arranca sin departamentos; sin lista van los sugeridos', async () => {

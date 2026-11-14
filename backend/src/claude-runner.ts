@@ -61,11 +61,14 @@ class Proceso {
   hijo?: ChildProcess
   cancelado = false
   vivo = false
+  /** Ya salió (o no pudo arrancar). Mientras no, cuenta como en curso: también entre spawn() y el evento 'spawn'. */
+  termino = false
 
   matar(forzar: boolean) {
     this.cancelado = true
     const h = this.hijo
-    if (!h || !this.vivo || h.pid === undefined) return
+    // el pid existe apenas vuelve spawn(): no esperar al evento 'spawn' (un shutdown en ese instante lo dejaba suelto)
+    if (!h || this.termino || h.pid === undefined) return
     if (esWindows) {
       // sin /F, taskkill solo le pide cerrar a las ventanas: claude (consola, sin ventana) no se entera. Siempre /F.
       spawnSync(taskkill, ['/PID', String(h.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
@@ -98,13 +101,14 @@ class Proceso {
           cwd: op.cwd, env: op.env, stdio: [entrada === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], detached: !esWindows, windowsHide: true,
         })
       } catch (e) {
+        this.termino = true
         return reject(e)
       }
+      this.hijo = h
       if (entrada !== undefined) {
         h.stdin!.on('error', () => {})
         h.stdin!.end(entrada)
       }
-      this.hijo = h
       const so: Buffer[] = []
       const se: Buffer[] = []
       const cortador = op.alLinea ? new CortadorLineas(op.alLinea) : undefined
@@ -117,6 +121,7 @@ class Proceso {
       const fin = (rc: number) => {
         if (terminado) return
         terminado = true
+        this.termino = true
         clearTimeout(temporizador)
         clearTimeout(rematar)
         this.vivo = false
@@ -141,6 +146,7 @@ class Proceso {
       h.once('error', (e) => {
         if (!this.vivo) {
           terminado = true
+          this.termino = true
           clearTimeout(temporizador)
           reject(e)
         }
@@ -365,12 +371,15 @@ export class ClaudeRunner {
     await this.limite.adquirir()
     try {
       if (this.cerrado) throw new ClaudeError('cerrando')
+      // a la lista antes de lanzarlo (sin await en el medio): shutdown() lo ve aunque todavía no haya llegado 'spawn'
+      this.vivos.add(p)
       return await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea, stdin: this.mensajePorStdin },
-        () => this.vivos.add(p), () => this.vivos.delete(p))
+        () => {}, () => this.vivos.delete(p))
     } catch (e) {
       if (e instanceof ClaudeError) throw e
       throw new ClaudeError('no_ejecuta', e instanceof Error ? e.message : String(e))
     } finally {
+      this.vivos.delete(p)
       this.limite.liberar()
     }
   }
@@ -382,11 +391,11 @@ export class ClaudeRunner {
     if (vivos.length === 0) return
     for (const p of vivos) p.matar(false)
     const limite = Date.now() + this.grace * 1000
-    while (Date.now() < limite && vivos.some((p) => p.vivo)) await new Promise((r) => setTimeout(r, 50))
-    for (const p of vivos) if (p.vivo) p.matar(true)
+    while (Date.now() < limite && vivos.some((p) => !p.termino)) await new Promise((r) => setTimeout(r, 50))
+    for (const p of vivos) if (!p.termino) p.matar(true)
     // que terminen de verdad: en Windows su carpeta de trabajo queda tomada hasta que el proceso sale
     const fin = Date.now() + 2000
-    while (Date.now() < fin && vivos.some((p) => p.vivo)) await new Promise((r) => setTimeout(r, 25))
+    while (Date.now() < fin && vivos.some((p) => !p.termino)) await new Promise((r) => setTimeout(r, 25))
     this.log.info(`shutdown: ${vivos.length} proceso(s) terminados`)
   }
 
