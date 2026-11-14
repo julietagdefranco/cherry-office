@@ -166,7 +166,8 @@ App.Flujos = (function () {
     pasos.forEach(function (p, i) { linea.appendChild(pasoItem(c, p, i)); });
     cuerpo.appendChild(linea);
     var botones = [];
-    if (c.estado !== 'cancelada' && pasos.length) botones.push(h('button.btn', { onclick: function () { volverAPaso(c, pasos); } }, 'Volver a un paso…'));
+    /* el backend solo deja volver en corridas abiertas (una terminada o cancelada da 409) */
+    if (abiertaC && pasos.length) botones.push(h('button.btn', { onclick: function () { volverAPaso(c, pasos); } }, 'Volver a un paso…'));
     botones.push(h('span', { style: { flex: 1 } }));
     if (abiertaC) botones.push(h('button.btn.peligro-suave', { onclick: function () { cancelar(c); } }, 'Cancelar la corrida'));
     App.add(pie, h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, botones));
@@ -588,7 +589,9 @@ App.Flujos = (function () {
       cs.forEach(function (c) {
         var antes = conocidas[c.id];
         if (antes && antes.paso === c.paso) return;
-        var desde = antes ? (c.anterior && c.anterior !== 'persona' ? c.anterior : null) : null;
+        /* sale de quien la tenía (así «volver» y «saltar» también salen del lugar correcto); si no se sabe, del paso anterior */
+        var prev = antes ? (antes.quien || c.anterior) : null;
+        var desde = prev && prev !== 'persona' ? prev : null;
         var hacia = c.quien && c.quien !== 'persona' ? c.quien : null;
         try { App.Oficina3D.pieza(desde, hacia); } catch (e) { /* la animación nunca rompe nada */ }
       });
