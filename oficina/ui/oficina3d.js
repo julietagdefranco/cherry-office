@@ -241,6 +241,7 @@ App.Oficina3D = (function () {
     var hayAnim = false;
     sombraAnim = false; soloLento = true;
     for (var id in animando) { if (animar(id, dt)) hayAnim = true; else delete animando[id]; }
+    if (animarVuelos(dt)) { hayAnim = true; soloLento = false; }
     if (camara(dt)) { hayAnim = true; soloLento = false; }
     var amb = AMBIENTE && mundo ? ambiente(dt) : false;
     posCam();
@@ -517,6 +518,13 @@ App.Oficina3D = (function () {
     /* recepción */
     pisoBaldosas(L, 0, 0, RECEPCION, nuevo.D, '#b9b3aa');
     recepcion(L, nuevo, entradaX);
+    /* mostrador de la recepción: «Armar con el Creador» */
+    (function () {
+      var mx = RECEPCION / 2, mz = nuevo.D - 9;
+      var etqC = etiqueta('sala', 'Armar con el Creador', C.amarillo);
+      etqC.p = new T.Vector3(mx, PLACA + LADRILLO * 2 + PLACA + 1.6, mz + 0.4);
+      lugares.push({ tipo: 'creador', caja: new T.Box3(new T.Vector3(mx - 3, 0, mz - 0.6), new T.Vector3(mx + 3, LADRILLO * 2 + PLACA * 2 + 1, mz + 1.6)), etiqueta: etqC });
+    })();
     cartelNombre(grupo, nuevo.nombre);
     var etqR = etiqueta('sala', nuevo.nombre ? nuevo.nombre + ' · Recepción' : 'Recepción', null);
     etqR.p = new T.Vector3(1, PLACA, nuevo.D - 1.2);
@@ -566,6 +574,7 @@ App.Oficina3D = (function () {
     }).concat([piezasListas, autosListos])).then(function (lista) {
       var autosNuevos = lista.pop(); lista.pop();
       if (token !== construyendo) return;
+      limpiarVuelos();
       if (mundo) { escena.remove(mundo); liberar(mundo); }
       mundo = grupo; escena.add(mundo);
       autos = autosNuevos || [];
@@ -1614,6 +1623,84 @@ App.Oficina3D = (function () {
     });
   }
 
+  /* ---------------- pieza que viaja (flujos) ----------------
+     Una teja que va de escritorio a escritorio (o desde/hacia el mostrador de la recepción cuando el id es null)
+     siguiendo los pasillos; tarda entre 1,5 y 3 s, al llegar se desvanece y se borra. */
+  var vuelos = [];
+  var PIEZA_ALTO = 3.6;
+  function limpiarVuelos() {
+    vuelos.forEach(function (v) { if (v.g.parent) v.g.parent.remove(v.g); v.mat.dispose(); });
+    vuelos = [];
+  }
+  function puntoPieza(id) {
+    if (id === null || id === undefined || id === '') return { x: RECEPCION / 2, z: plano.D - 9 };
+    var f = figuras[id];
+    return f && f.asiento ? { x: f.asiento.x, z: f.asiento.z } : null;
+  }
+  /* de la recepción al escritorio de g, por el pasillo central y el de su ala */
+  function rutaDesdeRecepcion(g) {
+    var d = g.asiento.sala, b = g.asiento.salida, pl = plano, m = { x: RECEPCION / 2, z: pl.D - 9 };
+    return [m, { x: pl.pasilloX, z: pl.D - 9 }, { x: pl.pasilloX, z: d.ala.pasilloZ }, { x: d.puertaX, z: d.ala.pasilloZ },
+      { x: d.puertaX, z: d.puertaZ }, { x: b.x, z: d.puertaZ }, { x: g.asiento.x, z: g.asiento.z }];
+  }
+  function rutaPieza(desdeId, haciaId) {
+    var vacioD = desdeId === null || desdeId === undefined || desdeId === '', vacioH = haciaId === null || haciaId === undefined || haciaId === '';
+    if (vacioD && vacioH) return null;
+    if (!vacioD && !vacioH && desdeId === haciaId) return null;
+    var f = vacioD ? null : figuras[desdeId], g = vacioH ? null : figuras[haciaId];
+    if (!vacioD && !vacioH && f && g) {
+      var r = (f.asiento && g.asiento) ? rutaHaciaColega(f, g, 0) : null;
+      if (r) return [{ x: f.asiento.x, z: f.asiento.z }].concat(r, [{ x: g.asiento.x, z: g.asiento.z }]);
+    } else if (vacioD && g && g.asiento && g.asiento.sala && g.asiento.sala.ala) {
+      return rutaDesdeRecepcion(g);
+    } else if (vacioH && f && f.asiento && f.asiento.sala && f.asiento.sala.ala) {
+      return rutaDesdeRecepcion(f).reverse();
+    }
+    /* sin ruta por pasillos: recta entre los dos puntos (un agente sin escritorio cuenta como el mostrador) */
+    var a = puntoPieza(desdeId) || puntoPieza(null), b = puntoPieza(haciaId) || puntoPieza(null);
+    if (a.x === b.x && a.z === b.z) return null;
+    return [a, b];
+  }
+  function piezaViaje(desdeId, haciaId, color) {
+    if (!plano || !mundo || !T) return false;
+    var ruta = rutaPieza(desdeId, haciaId);
+    if (!ruta || ruta.length < 2) return false;
+    var largo = 0, tramos = [];
+    for (var i = 1; i < ruta.length; i++) { var d = Math.hypot(ruta[i].x - ruta[i - 1].x, ruta[i].z - ruta[i - 1].z); tramos.push(d); largo += d; }
+    var dur = lim(largo / 16, 1.5, 3);
+    var mat = P.plastico(color || C.amarillo).clone();
+    mat.transparent = true; mat.depthWrite = false;
+    var g = new T.Group();
+    var base = new T.Mesh(geoCaja(2.4, 1.6, 0.22), mat); g.add(base);
+    var tapa = new T.Mesh(geoCaja(1.5, 0.9, 0.08), mat); tapa.position.y = 0.22; g.add(tapa);
+    g.position.set(ruta[0].x, PIEZA_ALTO, ruta[0].z);
+    mundo.add(g);
+    vuelos.push({ g: g, mat: mat, ruta: ruta, tramos: tramos, largo: largo, dur: dur, t: 0, fade: 0 });
+    pedir();
+    return true;
+  }
+  function animarVuelos(dt) {
+    if (!vuelos.length) return false;
+    for (var k = vuelos.length - 1; k >= 0; k--) {
+      var v = vuelos[k];
+      if (v.t < v.dur) {
+        v.t = Math.min(v.dur, v.t + dt);
+        var e = v.t / v.dur; e = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
+        var rec = e * v.largo, j = 0;
+        while (j < v.tramos.length - 1 && rec > v.tramos[j]) { rec -= v.tramos[j]; j++; }
+        var u = v.tramos[j] > 0 ? Math.min(1, rec / v.tramos[j]) : 1, a = v.ruta[j], b = v.ruta[j + 1];
+        v.g.position.set(a.x + (b.x - a.x) * u, PIEZA_ALTO + Math.sin(v.t * 6) * 0.15, a.z + (b.z - a.z) * u);
+        v.g.rotation.y += dt * 2;
+      } else {
+        v.fade += dt / 0.4;
+        v.mat.opacity = Math.max(0, 1 - v.fade);
+        v.g.position.y += dt * 1.2;
+        if (v.fade >= 1) { if (v.g.parent) v.g.parent.remove(v.g); v.mat.dispose(); vuelos.splice(k, 1); }
+      }
+    }
+    return vuelos.length > 0;
+  }
+
   /* ---------------- API ---------------- */
   return {
     iniciar: iniciar,
@@ -1632,6 +1719,7 @@ App.Oficina3D = (function () {
     enfocarAgente: enfocarAgente,
     enfocarLugar: enfocarLugar,
     muro: muro,
+    pieza: piezaViaje,
     pedir: pedir,
     _estado: function () { return { figuras: Object.keys(figuras).length, animando: Object.keys(animando), orb: orb, plano: plano && { w: plano.x1, d: plano.z1 }, autos: autos.map(function (a) { return Math.round(a.g.position.x * 10) / 10; }), post: !!post, info: renderer.info.render }; }
   };
