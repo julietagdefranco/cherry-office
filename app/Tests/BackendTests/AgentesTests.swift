@@ -704,6 +704,19 @@ struct AgentesTests {
         #expect(Sandbox.valores(g.sb.llamadas.last ?? [], "--add-dir") == ["/extra/uno"])
     }
 
+    @Test("crear oficina: «vacia» arranca sin departamentos; sin lista van los sugeridos")
+    func crearOficinaVacia() async throws {
+        let f = try await Fix.crear(nombre: "Uno", agentes: [])
+        let v = await llamar(f.b, "POST", "/api/oficinas", body: json(["nombre": "Charlando", "vacia": true]))
+        #expect(v.status == 200)
+        #expect(((v.obj["oficina"] as? [String: Any])?["departamentos"] as? [Any])?.isEmpty == true)
+        let s = await llamar(f.b, "POST", "/api/oficinas", body: json(["nombre": "Clasica"]))
+        #expect(((s.obj["oficina"] as? [String: Any])?["departamentos"] as? [Any])?.count == 3)
+        // la vacía vuelve a abrir bien
+        let r = await llamar(f.b, "POST", "/api/oficinas/abrir", body: json(["carpeta": str(v.obj["carpeta"])]))
+        #expect(r.status == 200)
+    }
+
     @Test("chat: sesiones aisladas entre oficinas (mismo id de agente en dos oficinas)")
     func chatSesionesAisladas() async throws {
         let f = try await Fix.crear(nombre: "Uno", agentes: [("marce", "redes", nil)])

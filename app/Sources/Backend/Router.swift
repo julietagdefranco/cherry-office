@@ -301,7 +301,8 @@ public final class Router: APIHandler {
                                                   color: try Validar.texto(o["color"], "color", max: 7, obligatorio: false))
             }
         }
-        let a = try await oficinas.crear(nombre: nombre, duenio: duenio, carpeta: carpeta, departamentos: deps)
+        let vacia = (d["vacia"] as? Bool) ?? false
+        let a = try await oficinas.crear(nombre: nombre, duenio: duenio, carpeta: carpeta, departamentos: deps, vacia: vacia)
         return (200, Router.sobreOficina(a))
     }
 

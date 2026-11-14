@@ -19,6 +19,16 @@
   }
 
   /* ---------------- inicio ---------------- */
+  /* Las mismas cuatro opciones, con los mismos textos e íconos, en la pantalla de inicio, en el menú de la oficina y en ⌘K. */
+  function opcionesOficina() {
+    return [
+      { icono: 'edificio', texto: 'Crear una oficina', bajada: 'Ponele nombre y elegí los departamentos.', accion: crearOficina },
+      { icono: 'chispa', texto: 'Armar una oficina charlando', bajada: 'Contale al Creador cómo trabajás y te propone departamentos, agentes y flujos.', accion: armarCharlando },
+      { icono: 'carpeta', texto: 'Abrir una oficina existente', bajada: 'Buscá la carpeta de una oficina que ya tengas.', accion: abrirExistente },
+      { icono: 'importar', texto: 'Importar una oficina', bajada: 'Abrí un archivo .zip que alguien exportó desde Oficina.', accion: importarOficina },
+    ];
+  }
+
   function inicio() {
     App.Oficina3D.finReunion && E.oficina && App.Oficina3D.finReunion();
     E.oficina = null; E.carpeta = null;
@@ -31,10 +41,9 @@
       h('h1', 'Armá tu oficina'),
       h('p.bajada', 'Un equipo de agentes de Claude que trabaja para vos: los contratás contándoles qué necesitás, les hablás y los juntás a debatir.'),
       E.estado && !E.estado.claude ? h('p.error-txt', { style: { marginBottom: '14px' } }, 'No encontré Claude Code en esta compu. Vas a poder armar la oficina, pero los agentes no van a responder hasta instalarlo.') : null,
-      h('button.opcion', { onclick: crearOficina }, App.icono('edificio'), h('div', h('b', 'Crear mi oficina'), h('span', 'Ponele nombre y elegí los departamentos.'))),
-      h('button.opcion', { onclick: abrirExistente }, App.icono('carpeta'), h('div', h('b', 'Abrir una oficina existente'), h('span', 'Buscá la carpeta de una oficina que ya tengas.'))),
-      h('button.opcion', { onclick: importarOficina }, App.icono('importar'), h('div', h('b', 'Importar una oficina'), h('span', 'Abrí un archivo .zip que alguien exportó desde Oficina.'))),
-      h('button.opcion', { onclick: armarCharlando }, App.icono('chispa'), h('div', h('b', 'Armarla charlando'), h('span', 'Contale al Creador cómo trabajás y te ayuda a armar la oficina.'))),
+      opcionesOficina().map(function (o) {
+        return h('button.opcion', { onclick: o.accion }, App.icono(o.icono), h('div', h('b', o.texto), h('span', o.bajada)));
+      }),
       recientes
     ))));
     api.get('/api/oficinas').then(function (r) {
@@ -47,30 +56,62 @@
     }).catch(function () {});
   }
 
-  /* crea la oficina vacía (como «Crear mi oficina» sin departamentos extra) y abre el Creador */
+  /* Campos comunes a «Crear una oficina» y «Armar una oficina charlando»: nombre, tu nombre y dónde se guarda. */
+  function camposOficina() {
+    var nombre = h('input.campo', { placeholder: 'Ej.: Estudio Cherry', maxlength: 80, autofocus: true });
+    var duenio = h('input.campo', { placeholder: 'Cómo te llaman los agentes', maxlength: 80 });
+    var carpeta = null, dondeTxt = h('span', { style: { color: 'var(--suave)' } });
+    function pintarDonde() { dondeTxt.textContent = carpeta || ('Oficinas / ' + (nombre.value.trim() || '…') + ' (en tu carpeta de usuario)'); }
+    nombre.addEventListener('input', pintarDonde);
+    pintarDonde();
+    return {
+      nombre: nombre, duenio: duenio,
+      carpeta: function () { return carpeta || undefined; },
+      cabecera: h('div.dos', h('div.fila-campo', h('label.etiqueta-campo', 'Nombre de la oficina'), nombre), h('div.fila-campo', h('label.etiqueta-campo', 'Tu nombre'), duenio)),
+      donde: h('div.fila-campo', h('label.etiqueta-campo', 'Dónde se guarda'), h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, App.icono('carpeta'), dondeTxt,
+        h('button.btn.chico', { style: { marginLeft: 'auto' }, onclick: function () { App.elegirCarpeta('Elegí dónde crear la oficina', { crear: true }).then(function (r) { if (r) { carpeta = r.replace(/\/$/, '') + '/' + (nombre.value.trim() || 'Oficina'); pintarDonde(); } }); } }, 'Cambiar…')),
+        h('div.ayuda', 'Es una carpeta común: ahí quedan los agentes, su conocimiento, las actas y los archivos.')),
+    };
+  }
+
+  /* Monta la oficina recién creada (o abierta), cerrando lo que hubiera abierto de la anterior. */
+  function montarNueva(r) {
+    if (E.oficina && App.Agente) App.Agente.cerrar();
+    montar(r.carpeta, r.oficina);
+  }
+
+  /* La oficina arranca sin departamentos y se abre el Creador para armarla. */
   function armarCharlando() {
-    api.post('/api/oficinas', { nombre: 'Mi oficina', duenio: '', departamentos: [] })
-      .then(function (r) { montar(r.carpeta, r.oficina); App.Creador.abrir(); })
-      .catch(App.fallo);
+    var hj = App.hoja({ titulo: 'Armar una oficina charlando', ancho: 560 });
+    var c = camposOficina(), err = h('div.error-txt');
+    hj.cuerpo.appendChild(h('div', c.cabecera,
+      h('div.fila-campo', h('label.etiqueta-campo', 'Cómo sigue'), h('div.ayuda', 'Se abre el Creador: le contás cómo trabajás, de a poco o pegando un texto, y te propone departamentos, agentes y flujos. No se crea nada hasta que lo apruebes.')),
+      c.donde, err));
+    var btn = h('button.btn.primario', { onclick: enviar }, 'Empezar a charlar');
+    App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), btn);
+    function enviar() {
+      err.textContent = '';
+      if (!c.nombre.value.trim()) { err.textContent = 'Ponele un nombre a la oficina.'; c.nombre.focus(); return; }
+      btn.disabled = true; btn.textContent = 'Creando…';
+      api.post('/api/oficinas', { nombre: c.nombre.value.trim(), duenio: c.duenio.value.trim(), vacia: true, carpeta: c.carpeta() })
+        .then(function (r) { hj.cerrar(); montarNueva(r); App.Creador.abrir(); })
+        .catch(function (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Empezar a charlar'; });
+    }
   }
 
   var SUGERIDOS = [['Dirección', '#26262b'], ['Marketing', '#e6c22e'], ['Ventas', '#3c6fb4'], ['Operaciones', '#2a9d8f'], ['Finanzas', '#4b7f52'], ['Producto', '#8e78c4'], ['Diseño', '#e58aa6'], ['Atención al cliente', '#e0644f']];
   App.PALETA = ['#c4372f', '#e0644f', '#e6a23c', '#e6c22e', '#4b7f52', '#2a9d8f', '#5aa9d6', '#3c6fb4', '#8e78c4', '#e58aa6', '#8a6a4f', '#6b7078'];
 
   function crearOficina() {
-    var hj = App.hoja({ titulo: 'Crear oficina', ancho: 560 });
+    var hj = App.hoja({ titulo: 'Crear una oficina', ancho: 560 });
     var deps = [['Marketing', '#e6c22e'], ['Ventas', '#3c6fb4'], ['Operaciones', '#2a9d8f']];
-    var nombre = h('input.campo', { placeholder: 'Ej.: Estudio Cherry', maxlength: 80, autofocus: true });
-    var duenio = h('input.campo', { placeholder: 'Cómo te llaman los agentes', maxlength: 80 });
+    var c = camposOficina();
     var lista = h('div.lista-ed'), sug = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' } });
-    var carpeta = null, dondeTxt = h('span', { style: { color: 'var(--suave)' } });
     var err = h('div.error-txt');
-    function pintarDonde() { dondeTxt.textContent = carpeta || ('Oficinas / ' + (nombre.value.trim() || '…') + ' (en tu carpeta de usuario)'); }
-    nombre.addEventListener('input', pintarDonde);
     function pintar() {
       App.vaciar(lista); App.vaciar(sug);
       deps.forEach(function (d, i) {
-        var muestra = h('button.muestra', { style: { background: d[1] }, title: 'Color', onclick: function () { elegirColor(muestra, d[1], function (c) { d[1] = c; pintar(); }); } });
+        var muestra = h('button.muestra', { style: { background: d[1] }, title: 'Color', onclick: function () { elegirColor(muestra, d[1], function (col) { d[1] = col; pintar(); }); } });
         var inp = h('input.campo', { value: d[0], maxlength: 60, oninput: function () { d[0] = inp.value; } });
         lista.appendChild(h('div.fila-ed', muestra, inp, h('button.btn.fantasma.icono', { title: 'Quitar', onclick: function () { deps.splice(i, 1); pintar(); } }, App.icono('cerrar'))));
       });
@@ -79,24 +120,20 @@
       });
       sug.appendChild(h('button.chip', { onclick: function () { if (deps.length < 12) { deps.push(['Nuevo departamento', App.PALETA[deps.length % App.PALETA.length]]); pintar(); var u = lista.querySelectorAll('input'); u[u.length - 1].select(); } } }, App.icono('mas'), 'Otro'));
     }
-    pintar(); pintarDonde();
-    hj.cuerpo.appendChild(h('div',
-      h('div.dos', h('div.fila-campo', h('label.etiqueta-campo', 'Nombre de la oficina'), nombre), h('div.fila-campo', h('label.etiqueta-campo', 'Tu nombre'), duenio)),
+    pintar();
+    hj.cuerpo.appendChild(h('div', c.cabecera,
       h('div.fila-campo', h('label.etiqueta-campo', 'Departamentos'), lista, sug, h('div.ayuda', 'Cada departamento es una sala del edificio. Podés cambiarlos después.')),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Dónde se guarda'), h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, App.icono('carpeta'), dondeTxt,
-        h('button.btn.chico', { style: { marginLeft: 'auto' }, onclick: function () { App.elegirCarpeta('Elegí dónde crear la oficina', { crear: true }).then(function (r) { if (r) { carpeta = r.replace(/\/$/, '') + '/' + (nombre.value.trim() || 'Oficina'); pintarDonde(); } }); } }, 'Cambiar…')),
-        h('div.ayuda', 'Es una carpeta común: ahí quedan los agentes, su conocimiento, las actas y los archivos.')),
-      err));
+      c.donde, err));
     var btn = h('button.btn.primario', { onclick: enviar }, 'Crear oficina');
     App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), btn);
     function enviar() {
       err.textContent = '';
-      if (!nombre.value.trim()) { err.textContent = 'Ponele un nombre a la oficina.'; nombre.focus(); return; }
+      if (!c.nombre.value.trim()) { err.textContent = 'Ponele un nombre a la oficina.'; c.nombre.focus(); return; }
       var lis = deps.filter(function (d) { return d[0].trim(); }).map(function (d) { return { nombre: d[0].trim(), color: d[1] }; });
       if (!lis.length) { err.textContent = 'Agregá al menos un departamento.'; return; }
       btn.disabled = true; btn.textContent = 'Creando…';
-      api.post('/api/oficinas', { nombre: nombre.value.trim(), duenio: duenio.value.trim(), departamentos: lis, carpeta: carpeta || undefined })
-        .then(function (r) { hj.cerrar(); montar(r.carpeta, r.oficina); App.aviso('Oficina creada. Ya podés contratar a tu primer agente.'); })
+      api.post('/api/oficinas', { nombre: c.nombre.value.trim(), duenio: c.duenio.value.trim(), departamentos: lis, carpeta: c.carpeta() })
+        .then(function (r) { hj.cerrar(); montarNueva(r); App.aviso('Oficina creada. Ya podés contratar a tu primer agente.'); })
         .catch(function (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Crear oficina'; });
     }
   }
@@ -177,6 +214,8 @@
 
   App.abrirCarpetaOficina = abrirCarpeta;
   App.crearOficina = crearOficina;
+  App.armarCharlando = armarCharlando;
+  App.opcionesOficina = opcionesOficina;
   App.abrirExistente = abrirExistente;
 
   /* ---------------- selector de color ---------------- */
@@ -309,9 +348,8 @@
       lista.forEach(function (o) {
         items.push({ texto: o.nombre, icono: 'edificio', nota: o.carpeta === E.carpeta ? 'actual' : '', accion: function () { if (o.carpeta !== E.carpeta) { App.Agente.cerrar(); abrirCarpeta(o.carpeta); } } });
       });
-      items.push({ texto: 'Abrir otra oficina…', icono: 'carpeta', accion: abrirExistente });
-      items.push({ texto: 'Crear oficina nueva…', icono: 'mas', accion: crearOficina });
-      items.push({ texto: 'Importar oficina…', icono: 'importar', accion: importarOficina });
+      items.push('-');
+      opcionesOficina().forEach(function (o) { items.push({ texto: o.texto + '…', icono: o.icono, accion: o.accion }); });
       items.push('-');
       items.push({ texto: 'Reglas de la oficina…', icono: 'regla', accion: function () { App.Ajustes.reglas(); } });
       items.push({ texto: 'Conectores…', icono: 'enchufe', accion: function () { App.Ajustes.conectores(); } });
