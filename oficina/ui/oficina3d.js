@@ -439,6 +439,7 @@ App.Oficina3D = (function () {
 
   function disenarSala(s) {
     if (s.tipo === 'reunion') { s.w = 20; s.d = 15; return; }
+    if (s.tipo === 'juegos') { s.w = PASO_MESAS * columnasCafe(s.n || 0) + 23; s.d = 20; return; }
     if (s.tipo === 'biblioteca') { s.w = 17; s.d = 15; return; }
     if (s.tipo === 'direccion') { s.w = 17; s.d = 15; return; }
     var n = Math.max(1, s.agentes.length);
@@ -457,11 +458,41 @@ App.Oficina3D = (function () {
     function nuevaAla() { ala = { fondo: [], frente: [], lf: 0, lr: 0 }; lista.push(ala); }
     nuevaAla();
     salas.forEach(function (s, i) {
-      var aFondo = s.tipo === 'reunion' || (s.tipo !== 'biblioteca' && ala.lf <= ala.lr);
+      /* reuniones y juegos van al fondo: la tele cuelga de la fachada alta y no tapa la vista */
+      var aFondo = s.tipo === 'reunion' || s.tipo === 'juegos' || (s.tipo !== 'biblioteca' && ala.lf <= ala.lr);
       if (s.tipo === 'biblioteca') aFondo = false;
-      if ((aFondo ? ala.lf : ala.lr) + s.w > largoMax + 6 && (aFondo ? ala.lr : ala.lf) + s.w > largoMax + 6) nuevaAla();
+      /* ala nueva solo si todavía no se armaron todas las calculadas: la última absorbe lo que sobre (si no, una sala
+         suelta terminaba sola en un ala entera, estirada de punta a punta) */
+      if (lista.length < alas && (aFondo ? ala.lf : ala.lr) + s.w > largoMax + 6 && (aFondo ? ala.lr : ala.lf) + s.w > largoMax + 6) nuevaAla();
       else if ((aFondo ? ala.lf : ala.lr) + s.w > largoMax + 6) aFondo = !aFondo;
       if (aFondo) { ala.fondo.push(s); ala.lf += s.w; } else { ala.frente.push(s); ala.lr += s.w; }
+    });
+    /* una fila sin salas no queda vacía: se pasan salas de la otra fila (las de departamentos primero; reuniones y juegos
+       quedan al fondo) mientras eso acorte el ala. Si igual queda vacía, se muda ahí la sala de juegos y café. */
+    lista.forEach(function (a) {
+      var vacia = !a.fondo.length ? 'fondo' : !a.frente.length ? 'frente' : null;
+      if (!vacia) return;
+      var llena = vacia === 'fondo' ? 'frente' : 'fondo';
+      var lv = vacia === 'fondo' ? 'lf' : 'lr', ll = vacia === 'fondo' ? 'lr' : 'lf';
+      for (var vuelta = 0; vuelta < 50; vuelta++) {
+        var cand = a[llena].filter(function (s) { return a[llena].length > 1 && (vacia === 'fondo' || (s.tipo !== 'reunion' && s.tipo !== 'juegos')); });
+        cand.sort(function (x, y) { return (x.tipo === 'depto' ? 0 : 1) - (y.tipo === 'depto' ? 0 : 1) || y.w - x.w; });
+        var mover = cand.filter(function (s) { return Math.max(a[ll] - s.w, a[lv] + s.w) < Math.max(a[ll], a[lv]); })[0];
+        if (!mover) break;
+        a[llena].splice(a[llena].indexOf(mover), 1); a[vacia].push(mover);
+        a[ll] -= mover.w; a[lv] += mover.w;
+      }
+    });
+    var juegos = salas.filter(function (s) { return s.tipo === 'juegos'; })[0];
+    lista.forEach(function (a) {
+      if (!juegos || (a.fondo.length && a.frente.length)) return;
+      var origen = lista.filter(function (b) { return b.fondo.indexOf(juegos) >= 0 || b.frente.indexOf(juegos) >= 0; })[0];
+      var filaO = origen.fondo.indexOf(juegos) >= 0 ? 'fondo' : 'frente';
+      if (origen[filaO].length < 2) return;
+      origen[filaO].splice(origen[filaO].indexOf(juegos), 1);
+      if (filaO === 'fondo') origen.lf -= juegos.w; else origen.lr -= juegos.w;
+      if (!a.fondo.length) { a.fondo.push(juegos); a.lf = juegos.w; } else { a.frente.push(juegos); a.lr = juegos.w; }
+      juegos = null;
     });
     var largo = Math.max.apply(null, lista.map(function (a) { return Math.max(a.lf, a.lr); }));
     var z = 0;
@@ -494,7 +525,8 @@ App.Oficina3D = (function () {
     ags.forEach(function (a) { if (porDep[a.departamento]) porDep[a.departamento].push(a); else sinDep.push(a); });
     if (sinDep.length) { porDep.__sin = sinDep; deps = deps.concat([{ id: '__sin', nombre: 'Sin departamento', color: '#9a9a9a' }]); }
     var salas = [{ tipo: 'direccion', nombre: perfil.nombre ? 'Despacho de ' + perfil.nombre : 'Tu despacho' },
-                 { tipo: 'reunion', nombre: 'Sala de reuniones' }, { tipo: 'biblioteca', nombre: 'Biblioteca' }]
+                 { tipo: 'reunion', nombre: 'Sala de reuniones' }, { tipo: 'biblioteca', nombre: 'Biblioteca' },
+                 { tipo: 'juegos', nombre: 'Juegos y café', n: ags.length }]
       .concat(deps.map(function (d) { return { tipo: 'depto', dep: d, nombre: d.nombre, agentes: porDep[d.id] || [] }; }));
     var nuevo = planificar(salas);
     nuevo.nombre = oficina.nombre || '';
@@ -537,8 +569,8 @@ App.Oficina3D = (function () {
     nuevo.alas.forEach(function (a) {
       pisoBaldosas(L, RECEPCION, a.z + a.df, nuevo.W - RECEPCION, PASILLO, '#d6d3cd');    // pasillo
       a.fondo.concat(a.frente).forEach(function (s) {
-        s.color = s.tipo === 'reunion' ? C.azul : s.tipo === 'biblioteca' ? C.verde : s.tipo === 'comun' ? C.naranja : s.tipo === 'direccion' ? C.amarillo : (s.dep.color || '#999999');
-        var piso = s.tipo === 'reunion' ? '#d9d6d0' : s.tipo === 'biblioteca' ? '#cdbfa6' : s.tipo === 'comun' ? '#dcd9d3' : s.tipo === 'direccion' ? '#c7ae8c' : mezclar(s.color, '#dedbd5', 0.78);
+        s.color = s.tipo === 'reunion' ? C.azul : s.tipo === 'biblioteca' ? C.verde : s.tipo === 'comun' ? C.naranja : s.tipo === 'direccion' ? C.amarillo : s.tipo === 'juegos' ? C.lila : (s.dep.color || '#999999');
+        var piso = s.tipo === 'reunion' ? '#d9d6d0' : s.tipo === 'juegos' ? '#d6d1db' : s.tipo === 'biblioteca' ? '#cdbfa6' : s.tipo === 'comun' ? '#dcd9d3' : s.tipo === 'direccion' ? '#c7ae8c' : mezclar(s.color, '#dedbd5', 0.78);
         pisoBaldosas(L, s.x, s.z, s.w, s.d, piso);
         paredesSala(L, LV, s, nuevo);
         var alFondo = s.lado === 'fondo';
@@ -565,6 +597,9 @@ App.Oficina3D = (function () {
         } else if (s.tipo === 'biblioteca') {
           biblioteca(L, s);
           lugares.push({ tipo: 'biblioteca', caja: new T.Box3(new T.Vector3(s.x, 0, s.z), new T.Vector3(s.x + s.w, 6, s.z + s.d)), etiqueta: etq });
+        } else if (s.tipo === 'juegos') {
+          nuevo.juegos = salaJuegos(L, s);
+          lugares.push({ tipo: 'juegos', caja: new T.Box3(new T.Vector3(s.x, 0, s.z), new T.Vector3(s.x + s.w, 2.5, s.z + s.d)), etiqueta: etq });
         } else {
           comun(L, s);
         }
@@ -610,6 +645,8 @@ App.Oficina3D = (function () {
         crearPantalla(f);
       });
       if (yoFig && plano.yo) { sentar({ obj: yoFig }, plano.yo.asiento); mundo.add(yoFig); }
+      crearPantallasJuego();
+      relojDeOcio();
       muroAgentes = agentesMuro;
       armarMuro();
       actividad(trabajo);
@@ -1237,6 +1274,214 @@ App.Oficina3D = (function () {
     plantaGrande(L, s.x + s.w - 2.2, zA, 0, false, cajaSala(s));
   }
 
+  /* Sala de juegos y café, armada como un bar: adonde van los agentes cuando no tienen nada que hacer.
+     A la izquierda, el café: barra contra la pared (cafetera, bacha, alacena, heladerita) con banquetas, y adelante
+     mesitas redondas con dos sillas cada una, en columnas. A la derecha, el rincón de juegos: dos arcades, la consola
+     con la tele y el sillón, y el ping-pong. El café suma columnas de mesas (y largo de barra) según cuántos agentes
+     haya: siempre entra toda la oficina. Marco local: lx desde el tabique izquierdo, t desde la pared de atrás.
+     Se camina por la fila de la puerta (t = FILA), por los pasillos entre columnas de mesas y por la franja de
+     adelante de la barra; ningún mueble pisa esos caminos. Devuelve los lugares y las pantallas que se animan. */
+  var PASO_MESAS = 8;                   // de columna a columna de mesitas: mesa, sillas y un pasillo cómodo en el medio
+  function capacidadJuegos(cols) {
+    var largoBarra = PASO_MESAS * cols - 1;
+    return Math.floor((largoBarra - 1.4) / 2) + 1 + 4 * cols + 9;    // banquetas + sillas + arcades, consola, ping-pong, metegol y pinball
+  }
+  function columnasCafe(n) { var c = 2; while (capacidadJuegos(c) < n) c++; return c; }
+  function salaJuegos(L, s) {
+    var y = PLACA, alFondo = s.lado === 'fondo';
+    function p(lx, t) { return { x: s.x + lx, z: alFondo ? s.z + 1 + t : s.z + s.d - 1 - t }; }
+    function giro(a) { return alFondo ? a : a + Math.PI; }        // a: rotación en el marco de una sala del fondo
+    var cols = Math.min(columnasCafe(s.n || 0) + 1, Math.max(columnasCafe(s.n || 0), Math.floor((s.w - 23) / PASO_MESAS)));   // a lo sumo una columna de más
+    var FILA = s.d - 3, filaZ = p(0, FILA).z, lugares = [], pantallas = [], mesaPP = null;
+    var haciaAtras = giro(Math.PI), haciaAdelante = giro(0);
+    var largoBarra = PASO_MESAS * cols - 1, G = PASO_MESAS * cols + 3;               // G: donde empieza el rincón de juegos
+    var pasillos = [];
+    for (var c = 0; c < cols; c++) pasillos.push(s.x + 8.5 + PASO_MESAS * c);    // entre columnas de mesas (el último, entre el café y los juegos)
+    function pasilloCerca(x) { return pasillos.reduce(function (a, b) { return Math.abs(b - x) < Math.abs(a - x) ? b : a; }); }
+
+    /* --- barra: mueble blanco con tapa de madera, puertas y heladerita al frente --- */
+    var m = p(1 + largoBarra / 2, 1.1);
+    pieza(L, largoBarra, 2, LADRILLO * 2, m.x, y, m.z, BLANCO, false);
+    pieza(L, largoBarra, 2.4, PLACA, m.x, y + LADRILLO * 2, p(0, 1.3).z, MADERA, false);
+    var tope = y + LADRILLO * 2 + PLACA;
+    for (var lxp = 2, i = 0; lxp <= largoBarra; lxp += 2, i++) {
+      var q = p(lxp, 2.12), heladera = lxp + 2 > largoBarra;
+      poner(L, geoBloque(1.8, 0.08, LADRILLO * 2 - 0.2), 'puertaMesada', q.x, y + 0.1, q.z, heladera ? GRIS_CLARO : '#e8e4dc');
+      poner(L, geoBloque(heladera ? 1.2 : 0.12, 0.12, heladera ? 0.12 : 0.6), heladera ? 'manijaHelad' : 'manijaPuerta', q.x + (heladera ? 0 : (i % 2 ? -0.6 : 0.6)), y + (heladera ? 2.0 : 1.5), p(lxp, 2.2).z, GRIS_OSCURO);
+    }
+    /* bacha de acero con la canilla de verdad (6936) y la alacena colgada arriba */
+    var bc = p(6.4, 1.1);
+    poner(L, geoBloque(2.2, 1.5, 0.06), 'bachaBorde', bc.x, tope, bc.z, '#c3c7ca');
+    poner(L, geoCaja(1.8, 1.1, 0.02), 'bachaFondo', bc.x, tope + 0.05, bc.z, '#7d8287');
+    ldraw('6936', bc.x, tope, p(6.4, 0.25).z, giro(0), GRIS_CLARO);
+    var al = p(7, 0.5), ya = y + LADRILLO * 3;
+    pieza(L, 4, 1, LADRILLO, al.x, ya, al.z, BLANCO, true);
+    [-1, 1].forEach(function (o) {
+      poner(L, geoBloque(1.9, 0.06, LADRILLO - 0.12), 'puertaAlacena', al.x + o, ya + 0.06, p(7, 1.02).z, '#e8e4dc');
+      poner(L, geoBloque(0.1, 0.1, 0.4), 'manijaAlacena', al.x + o * 0.2, ya + 0.15, p(7, 1.08).z, GRIS_OSCURO);
+    });
+    /* cafetera negra con pico, taza y luz; tetera; cartel con tazas en la pared */
+    var cf = p(2.0, 0.75);
+    pieza(L, 2, 1, LADRILLO * 2, cf.x, tope, cf.z, NEGRO, true);
+    pieza(L, 1, 1, PLACA, cf.x, tope + LADRILLO * 1.2, p(2.0, 1.45).z, GRIS_OSCURO, false);
+    poner(LP, geoCaja(0.3, 0.05, 0.2), 'luzCafe', cf.x + 0.55, tope + LADRILLO * 1.6, p(2.0, 1.28).z, C.rojo);
+    ldraw('3899', cf.x, tope, p(2.0, 1.55).z, giro(0), BLANCO);
+    ldraw('23986', p(3.6, 0.8).x, tope, p(3.6, 0.8).z, giro(2.2), GRIS_CLARO);
+    var ct = p(3.8, 0.02);
+    ldraw('3068bp25', ct.x, y + LADRILLO * 3.2, ct.z, giro(0), BLANCO, null, Math.PI / 2);
+    if (largoBarra > 10) { var tz2 = p(10, 0.8); ldraw('33054', tz2.x, tope, tz2.z, giro(0.6), C.rojo); ldraw('33054', tz2.x + 0.7, tope, tz2.z, giro(2), C.azul); }
+    /* banquetas frente a la barra, cada una con su taza; se llega por la franja de adelante */
+    var franja = p(0, 4.25).z, TAZA = [BLANCO, C.amarillo, C.verdeClaro, C.rojo, C.azulClaro];
+    for (var lb = 2.2, nb = 0; lb <= largoBarra + 0.2; lb += 2, nb++) {
+      var bq = p(lb, 3.4), tb = p(lb + 0.2, 2.2);
+      banqueta(L, bq.x, bq.z, nb % 2 ? C.rojo : '#4a5560');
+      ldraw('33054', tb.x, tope, tb.z, giro(1.2 + nb), TAZA[nb % TAZA.length]);
+      var pz0 = pasilloCerca(bq.x);
+      lugares.push({ tipo: 'barra', x: bq.x, z: bq.z, rot: haciaAtras, sentado: true,
+        acceso: [{ x: pz0, z: filaZ }, { x: pz0, z: franja }, { x: bq.x, z: franja }] });
+    }
+
+    /* --- mesitas del café: columnas de dos mesas redondas, cada una con dos sillas enfrentadas --- */
+    var SILLAS = [C.rojo, C.amarillo, C.azul, C.verdeClaro, C.naranja, C.turquesa];
+    for (c = 0; c < cols; c++) {
+      var cx = 4.5 + PASO_MESAS * c;
+      [7.4, FILA - 3.6].forEach(function (tm, fila) {
+        var mt = p(cx, tm), k = c * 2 + fila;
+        redonda(L, R1, LADRILLO, mt.x, y, mt.z, GRIS_OSCURO, 0);
+        redonda(L, R3, PLACA, mt.x, y + LADRILLO, mt.z, k % 3 ? BLANCO : TOSTADO, 0);
+        var ym2 = y + LADRILLO + PLACA;
+        ldraw('33054', mt.x - 0.4, ym2, mt.z + 0.3, giro(k), TAZAS[k % TAZAS.length]);
+        if (k % 3 === 1) ldraw('3069bpw1', mt.x + 0.5, ym2, mt.z - 0.2, giro(0.5), BLANCO);
+        else ldraw('6141', mt.x + 0.5, ym2, mt.z - 0.2, 0, BLANCO);                         // platito
+        [[-1.8, haciaAdelante], [1.8, haciaAtras]].forEach(function (o) {
+          var sq = p(cx, tm + o[0]);
+          silla(L, sq.x, sq.z, o[1], SILLAS[(k + (o[0] > 0 ? 1 : 0)) % SILLAS.length]);
+          var pz = s.x + cx + 4;
+          lugares.push({ tipo: 'mesa', x: sq.x, z: sq.z, rot: o[1], sentado: true,
+            acceso: [{ x: pz, z: filaZ }, { x: pz, z: sq.z }] });
+        });
+      });
+    }
+
+    /* --- rincón de juegos --- */
+    /* arcades: torre negra con la pantalla y el cartel encendido, cuerpo de color con los controles */
+    [[G + 1.5, C.azul, C.amarillo], [G + 3.8, C.rojo, C.azulClaro]].forEach(function (a, i) {
+      var lx = a[0], torre = p(lx, 0.7), cuerpo = p(lx, 2.0);
+      pieza(L, 2, 1.2, LADRILLO * 5, torre.x, y, torre.z, NEGRO, true);
+      pieza(L, 2, 1.6, LADRILLO * 2, cuerpo.x, y, cuerpo.z, a[1], false);
+      var yc = y + LADRILLO * 2;
+      if (i === 0) {
+        ldraw('3039p32', cuerpo.x, yc, cuerpo.z, giro(Math.PI), a[1]);                         // tablero con 12 botones
+      } else {
+        pieza(L, 2, 1.6, PLACA, cuerpo.x, yc, cuerpo.z, NEGRO, false);                        // palanca y dos botones
+        var j = p(lx - 0.5, 2.1);
+        ldraw('73587p01', j.x, yc + PLACA, j.z, giro(0), NEGRO);
+        ldraw('6141', p(lx + 0.35, 2.3).x, yc + PLACA, p(lx + 0.35, 2.3).z, 0, C.rojo);
+        ldraw('6141', p(lx + 0.75, 1.8).x, yc + PLACA, p(lx + 0.75, 1.8).z, 0, C.amarillo);
+      }
+      poner(LP, geoCaja(1.9, 0.06, 0.7), 'arcCartel', torre.x, y + LADRILLO * 5 - 0.8, p(lx, 1.31).z, a[2]);
+      poner(L, geoBloque(0.15, 1.1, LADRILLO * 3), 'b0.15x1.1x3.6', torre.x - 1.0, y + LADRILLO * 2, torre.z, a[1]);
+      poner(L, geoBloque(0.15, 1.1, LADRILLO * 3), 'b0.15x1.1x3.6', torre.x + 1.0, y + LADRILLO * 2, torre.z, a[1]);
+      pantallas.push({ tipo: 'arcade', x: torre.x, y: y + LADRILLO * 2 + 2.0, z: p(lx, 1.32).z, rot: giro(0), w: 1.7, h: 1.4, variante: i });
+      var q = p(lx, 3.9);
+      lugares.push({ tipo: 'arcade', x: q.x, z: q.z, rot: haciaAtras, pantalla: pantallas.length - 1, acceso: [{ x: q.x, z: filaZ }] });
+    });
+    /* consola: mueble bajo, consola, parlantes, tele en la pared, mesa con joysticks y sillón enfrente */
+    var tx = G + 9, mb = p(tx, 1.0);
+    alfombra(L, s.x + G + 5.5, Math.min(p(0, 0.3).z, p(0, 9.6).z), s.x + G + 12.5, Math.max(p(0, 0.3).z, p(0, 9.6).z), '#6b7078');
+    pieza(L, 6, 1.6, LADRILLO, mb.x, y, mb.z, GRIS_OSCURO, false);
+    teja(L, 6, 1.6, mb.x, y + LADRILLO, mb.z, NEGRO);
+    var ym = y + LADRILLO + PLACA;
+    pieza(L, 2, 1, PLACA, mb.x - 1, ym, mb.z, NEGRO, false);
+    ldraw('3069bpzc', mb.x - 1, ym + PLACA, mb.z, giro(0), GRIS_CLARO);
+    poner(LP, geoCaja(0.2, 0.05, 0.12), 'luzConsola', mb.x - 1.8, ym + 0.15, p(tx, 1.53).z, '#8de08f');
+    ldraw('3068bpx9', mb.x + 1.4, ym, mb.z, giro(0), GRIS_OSCURO);
+    [-3.6, 3.6].forEach(function (o) {
+      var q = p(tx + o, 0.8);
+      pieza(L, 1, 1, LADRILLO * 2, q.x, y, q.z, NEGRO, true);
+      poner(L, geoRedondo(0.3, 0.05), 'parlante', q.x, y + 1.1, p(tx + o, 1.31).z, GRIS_OSCURO);
+    });
+    /* en una sala del frente la pared de atrás queda del lado de la cámara: la tele va más baja, para no tapar la vista */
+    var tv = p(tx, 0.12), tvY = alFondo ? y + 2.15 : y + LADRILLO + PLACA + 0.2, tvW = alFondo ? 6.6 : 5.4, tvH = alFondo ? 3.8 : 3.0;
+    poner(L, geoBloque(tvW, 0.24, tvH), 'teleJuegos' + tvW, tv.x, tvY, tv.z, NEGRO);
+    pantallas.push({ tipo: 'tele', x: tv.x, y: tvY + tvH / 2, z: p(tx, 0.25).z, rot: giro(0), w: tvW - 0.4, h: tvH - 0.4 });
+    var tele = pantallas.length - 1;
+    var mj = p(tx, 4.4);
+    pieza(L, 4, 1.6, LADRILLO * 0.8, mj.x, y, mj.z, MADERA, false);
+    var ymt = y + LADRILLO * 0.8;
+    ldraw('3069bpc7', mj.x - 1.0, ymt, mj.z, giro(0.15), GRIS_OSCURO);
+    ldraw('3069bpc7', mj.x + 0.2, ymt, mj.z, giro(-0.2), GRIS_OSCURO);
+    ldraw('3069bpc5', mj.x + 1.3, ymt, mj.z, giro(1.4), NEGRO);
+    var so = p(tx, 7.0), b = { x: so.x, z: so.z, rot: giro(Math.PI) }, col = '#4a5560';
+    rotada(L, b, 4, 2, PLACA * 3, 0, 0, y, col, false);
+    rotada(L, b, 6, 1, PLACA * 6, 0, -1.5, y, col, true);
+    rotada(L, b, 1, 2, LADRILLO * 1.5, 2.5, 0, y, col, true);
+    rotada(L, b, 1, 2, LADRILLO * 1.5, -2.5, 0, y, col, true);
+    rotada(L, b, 1, 1, PLACA, 1.5, -0.6, y + PLACA * 3, C.lila, false);
+    var frente = p(tx, 5.6).z, columna = s.x + G + 5.0;
+    [tx - 0.9, tx + 0.9].forEach(function (lx) {
+      var q = p(lx, 7.0);
+      lugares.push({ tipo: 'consola', x: q.x, z: q.z, rot: haciaAtras, sentado: true, pantalla: tele,
+        acceso: [{ x: columna, z: filaZ }, { x: columna, z: frente }, { x: q.x, z: frente }] });
+    });
+    /* ping-pong: mesa verde a lo largo, un jugador en cada punta (la pelota se arma aparte porque se mueve) */
+    var px = G + 16.5, pm = p(px, 4.5), yp = y + LADRILLO * 1.5;
+    [[-1.5, 1.8], [1.5, 1.8], [-1.5, 7.2], [1.5, 7.2]].forEach(function (o) { var q = p(px + o[0], o[1]); redonda(L, R1, LADRILLO * 1.5, q.x, y, q.z, GRIS_OSCURO, 0); });
+    pieza(L, 4, 6, PLACA, pm.x, yp, pm.z, '#2f6b45', false);
+    poner(L, geoCaja(0.06, 5.8, 0.02), 'lineaPPl', pm.x, yp + PLACA, pm.z, BLANCO);
+    pieza(L, 4, 0.2, 0.5, pm.x, yp + PLACA, pm.z, BLANCO, false);
+    var pelota = p(px + 0.6, 3.2);
+    mesaPP = { mesa: yp + PLACA, reposo: { x: pelota.x, z: pelota.z } };
+    var cerca = p(px, 8.6), lejos = p(px, 0.6), lado = s.x + px + 2.9;
+    lugares.push({ tipo: 'pingpong', extremo: 0, x: cerca.x, z: cerca.z, rot: haciaAtras, acceso: [{ x: cerca.x, z: filaZ }] });
+    lugares.push({ tipo: 'pingpong', extremo: 1, x: lejos.x, z: lejos.z, rot: giro(0), acceso: [{ x: lado, z: filaZ }, { x: lado, z: lejos.z }] });
+    /* si la sala quedó más larga (ocupa una fila entera), lo que sobra es un salón: sillones, mesas bajas y plantas */
+    for (var lx0 = G + 21; lx0 + 9 <= s.w - 1; lx0 += 10) {
+      var cs = lx0 + 4.5, k2 = Math.round(lx0);
+      alfombra(L, s.x + lx0, Math.min(p(0, 0.6).z, p(0, 8).z), s.x + lx0 + 9, Math.max(p(0, 0.6).z, p(0, 8).z), ALFOMBRAS[k2 % ALFOMBRAS.length]);
+      var sl = p(cs, 2.2);
+      sillon(L, sl.x, sl.z, giro(0), sobrio(k2), 4);
+      var mm = p(cs, 5.2);
+      mesita(L, mm.x, mm.z, MADERA);
+      [-1, 1].forEach(function (o) { var q = p(cs + o * 3, 5.2); banqueta(L, q.x, q.z, sobrio(k2 + 1 + o)); });
+      plantaGrande(L, s.x + lx0 + 9.5, p(0, 1.4).z, k2, true, cajaSala(s));
+    }
+    /* diana en el tabique izquierdo; plantas en el rincón de juegos, lejos de los caminos */
+    var dn = p(1.02, 9.0);
+    ldraw('14769p0b', dn.x, y + 1.5, dn.z, Math.PI / 2, NEGRO, null, Math.PI / 2);
+
+    /* metegol: mueble de madera con la cancha verde, a lo ancho; un jugador de cada lado. Las barras con los muñequitos
+       y la pelota se arman aparte porque se mueven (ver crearMetegol). Al de atrás se llega por la columna del sillón. */
+    var fx = G + 9, ft = FILA - 4.5, fm = p(fx, ft), yf = y + LADRILLO * 1.5;
+    [[-1.8, -0.9], [1.8, -0.9], [-1.8, 0.9], [1.8, 0.9]].forEach(function (o) { var q = p(fx + o[0], ft + o[1]); redonda(L, R1, LADRILLO * 1.5, q.x, y, q.z, NEGRO, 0); });
+    pieza(L, 4.6, 2.6, LADRILLO, fm.x, yf, fm.z, MADERA, false);
+    poner(L, geoCaja(4.0, 2.0, 0.04), 'canchaMetegol', fm.x, yf + LADRILLO - 0.3, fm.z, '#3f8a3a');
+    poner(L, geoCaja(0.05, 2.0, 0.05), 'lineaMetegol', fm.x, yf + LADRILLO - 0.26, fm.z, BLANCO);
+    [-2.05, 2.05].forEach(function (o) { poner(L, geoCaja(0.08, 0.8, 0.35), 'arcoMetegol', fm.x + o, yf + LADRILLO - 0.3, fm.z, BLANCO); });
+    var metegol = { x: fm.x, z: fm.z, y: yf + LADRILLO - 0.05, cancha: yf + LADRILLO - 0.26 };
+    var mA = p(fx - 0.8, ft - 2.0), mB = p(fx + 0.8, ft + 2.0), colSillon = s.x + G + 5.0;
+    lugares.push({ tipo: 'metegol', x: mA.x, z: mA.z, rot: haciaAdelante, acceso: [{ x: colSillon, z: filaZ }, { x: colSillon, z: mA.z }] });
+    lugares.push({ tipo: 'metegol', x: mB.x, z: mB.z, rot: haciaAtras, acceso: [{ x: mB.x, z: filaZ }] });
+
+    /* pinball: mueble negro con patas, mesa inclinada (pantalla animada acostada) y marcador parado al fondo */
+    var bx = G + 14.2, bt0 = FILA - 7, bt1 = FILA - 3.2, bm = p(bx, (bt0 + bt1) / 2), yb = y + LADRILLO * 1.2;
+    [[-0.8, bt0 + 0.3], [0.8, bt0 + 0.3], [-0.8, bt1 - 0.3], [0.8, bt1 - 0.3]].forEach(function (o) { var q = p(bx + o[0], o[1]); poner(L, geoRedondo(0.14, LADRILLO * 1.2), 'pataPinball', q.x, y, q.z, GRIS_CLARO); });
+    poner(L, geoBloque(2.2, bt1 - bt0, 0.9), 'cuerpoPinball', bm.x, yb, bm.z, NEGRO);
+    [-1.05, 1.05].forEach(function (o) { poner(L, geoBloque(0.12, bt1 - bt0, 0.35), 'bordePinball', bm.x + o, yb + 0.9, bm.z, C.rosa); });
+    var caja = p(bx, bt0 + 0.3);
+    poner(L, geoBloque(2.2, 0.6, 2.4), 'cajaPinball', caja.x, yb + 0.9, caja.z, NEGRO);
+    poner(LP, geoCaja(2.0, 0.06, 0.3), 'luzPinball', caja.x, yb + 0.9 + 2.0, p(bx, bt0 + 0.62).z, C.amarillo);
+    ldraw('6141', p(bx - 0.6, bt1 + 0.05).x, yb + 0.5, p(bx - 0.6, bt1 + 0.05).z, 0, C.rojo);       // botones del frente
+    ldraw('6141', p(bx + 0.6, bt1 + 0.05).x, yb + 0.5, p(bx + 0.6, bt1 + 0.05).z, 0, C.rojo);
+    var mesaPin = p(bx, (bt0 + 0.6 + bt1) / 2);
+    pantallas.push({ tipo: 'pinball', x: mesaPin.x, y: yb + 1.05, z: mesaPin.z, rot: giro(0), rx: -Math.PI / 2 + 0.1, w: 1.9, h: bt1 - bt0 - 0.7 });
+    var pinMesa = pantallas.length - 1;
+    pantallas.push({ tipo: 'marcador', x: caja.x, y: yb + 0.9 + 1.2, z: p(bx, bt0 + 0.62).z, rot: giro(0), w: 1.9, h: 1.3 });
+    var qp = p(bx, bt1 + 0.75);
+    lugares.push({ tipo: 'pinball', x: qp.x, z: qp.z, rot: haciaAtras, pantalla: pinMesa, pantalla2: pinMesa + 1, acceso: [{ x: qp.x, z: filaZ }] });
+    return { sala: s, lugares: lugares, pantallas: pantallas, filaZ: filaZ, pingpong: mesaPP, metegol: metegol };
+  }
+
   /* árboles de verdad: copa ovalada (3470), pino grande (3471) o pino chico (2435) */
   function arbol(L, x, z, k) {
     var tipo = k % 3;
@@ -1368,7 +1613,7 @@ App.Oficina3D = (function () {
       var paso = VEL * dt;
       if (dist <= paso) {
         obj.position.x = dest.x; obj.position.z = dest.z; f.camino.shift();
-        if (!f.camino.length) { f.estado = 'quieto'; if (f.alLlegar) f.alLlegar(); return f.estado === 'hablando'; }
+        if (!f.camino.length) { f.estado = 'quieto'; if (f.alLlegar) f.alLlegar(); return f.estado === 'hablando' || (f.estado === 'jugando' && AMBIENTE); }
       } else {
         obj.position.x += dx / dist * paso; obj.position.z += dz / dist * paso;
         var objetivo = Math.atan2(dx, dz), dif = objetivo - obj.rotation.y;
@@ -1387,6 +1632,7 @@ App.Oficina3D = (function () {
       soloLento = false;
       return true;
     }
+    if (f.estado === 'jugando' && f.ocio) return animarJuego(f, dt);
     if (f.estado === 'escritorio' && trabajo[id]) {
       f.fase += dt * 9;
       P.pose(f.obj, 'sentado');
@@ -1475,6 +1721,7 @@ App.Oficina3D = (function () {
   var faroDe = {};
   function faros(mapa) {
     faroDe = mapa || {};
+    revisarOcio();
     for (var id in figuras) {
       var f = figuras[id];
       if (!f.etqFaro) {
@@ -1501,6 +1748,7 @@ App.Oficina3D = (function () {
       pintarTarea(f);
     }
     consultasActualizar();
+    revisarOcio();
     actualizarEtiquetasHover();
     pedir();
   }
@@ -1541,13 +1789,18 @@ App.Oficina3D = (function () {
       var f = figuras[id], idx = ids ? ids.indexOf(id) : -1;
       if (idx >= 0 && idx < asientos.length) {
         var a = asientos[idx]; usados++;
-        if (f.estado === 'escritorio' || (forzar && f.estado !== 'en-reunion' && f.estado !== 'caminando')) {
+        if (f.ocio && f.estado !== 'en-reunion' && f.estado !== 'hablando') {
+          /* estaba en la sala de juegos (o yendo): vuelve por su escritorio y sigue a la reunión */
+          var desde = rutaDesdeJuegos(f);
+          dejarOcio(f);
+          caminar(id, desde.concat(rutaHaciaReunion(f, a)), function () { f.estado = 'en-reunion'; sentar(f, a); f.enSilla = a; if (hablando === id) { f.estado = 'hablando'; } });
+        } else if (f.estado === 'escritorio' || (forzar && f.estado !== 'en-reunion' && f.estado !== 'caminando')) {
           caminar(id, rutaHaciaReunion(f, a), function () { f.estado = 'en-reunion'; sentar(f, a); f.enSilla = a; if (hablando === id) { f.estado = 'hablando'; } });
         } else if (f.estado === 'en-reunion' || f.estado === 'hablando') {
           f.estado = hablando === id ? 'hablando' : 'en-reunion';
           if (f.estado === 'hablando') animando[id] = true; else sentar(f, f.enSilla || a);
         }
-      } else if (f.estado !== 'escritorio' && !f.consulta) {
+      } else if (f.estado !== 'escritorio' && !f.consulta && !f.ocio) {
         volver(id);
       }
     });
@@ -1565,6 +1818,369 @@ App.Oficina3D = (function () {
       if (trabajo[id]) animando[id] = true;
       pintarTarea(f);
     });
+  }
+
+  /* ---------------- tiempo libre: sala de juegos y café ----------------
+     Un agente que lleva un rato sin trabajo (ni reunión, ni consulta, ni chat abierto) se levanta y va a un lugar
+     libre de la sala de juegos: la mesada del café, una máquina de arcade o el sillón frente a la tele. Cada tanto
+     cambia de juego. En cuanto le llega trabajo (o lo llaman a una reunión) vuelve a su escritorio por los pasillos.
+     f.ocio = {lugar: índice en plano.juegos.lugares, hasta: ms en que cambia de juego, volver: bool}. */
+  var OCIO_ESPERA = [15, 45], OCIO_TURNO = [40, 110];   // segundos sin trabajo antes de ir; segundos por juego
+  var relojOcio = null;
+  function azar(r) { return 1000 * (r[0] + Math.random() * (r[1] - r[0])); }
+  function libreParaOcio(id, f) {
+    return !trabajo[id] && !f.ocupado && !f.consulta && elegido !== id && !faroDe[id]
+      && !(reunionActual && reunionActual.agentes.indexOf(id) >= 0);
+  }
+  function lugaresTomados() {
+    var t = {};
+    for (var k in figuras) if (figuras[k].ocio) t[figuras[k].ocio.lugar] = k;
+    return t;
+  }
+  function lugarLibre(salvo) {
+    var j = plano.juegos, t = lugaresTomados(), libres = [];
+    j.lugares.forEach(function (l, i) { if (!(i in t) && i !== salvo) libres.push(i); });
+    /* de a dos se juega mejor: si alguien ya está en el sillón, el otro lugar del sillón gana */
+    var compa = libres.filter(function (i) { return j.lugares[i].tipo === 'consola' && j.lugares.some(function (l, k) { return k in t && l.tipo === 'consola'; }); });
+    /* primero se elige qué hacer (barra, mesa, arcade, consola, ping-pong) y después un lugar libre de eso:
+       así los juegos no quedan vacíos aunque haya muchas sillas */
+    var tipos = [];
+    libres.forEach(function (i) { if (tipos.indexOf(j.lugares[i].tipo) < 0) tipos.push(j.lugares[i].tipo); });
+    var tipo = tipos[Math.floor(Math.random() * tipos.length)];
+    var deTipo = libres.filter(function (i) { return j.lugares[i].tipo === tipo; });
+    var pool = compa.length && Math.random() < 0.7 ? compa : deTipo;
+    return pool.length ? pool[Math.floor(Math.random() * pool.length)] : -1;
+  }
+  /* escritorio -> lugar de la sala de juegos, por los pasillos (como la ruta a la sala de reuniones) */
+  function rutaHaciaJuegos(f, l) {
+    var pl = plano, r = pl.juegos.sala, s = f.asiento.sala, pts = [];
+    pts.push({ x: f.asiento.salida.x, z: f.asiento.salida.z });
+    pts.push({ x: f.asiento.salida.x, z: s.puertaZ });
+    if (s !== r) {
+      pts.push({ x: s.puertaX, z: s.puertaZ });
+      pts.push({ x: s.puertaX, z: s.ala.pasilloZ });
+      if (s.ala !== r.ala) { pts.push({ x: pl.pasilloX, z: s.ala.pasilloZ }); pts.push({ x: pl.pasilloX, z: r.ala.pasilloZ }); }
+      pts.push({ x: r.puertaX, z: r.ala.pasilloZ });
+      pts.push({ x: r.puertaX, z: r.puertaZ });
+    }
+    pts.push({ x: r.puertaX, z: pl.juegos.filaZ });
+    return pts.concat(l.acceso, [{ x: l.x, z: l.z }]);
+  }
+  /* desde donde está en la sala de juegos hasta su silla del escritorio */
+  function rutaDesdeJuegos(f) {
+    var l = plano.juegos.lugares[f.ocio.lugar], ida = rutaHaciaJuegos(f, l).reverse();
+    ida.shift();
+    ida.push({ x: f.asiento.x, z: f.asiento.z });
+    return ida;
+  }
+  /* paleta de ping-pong en la mano derecha (en el espacio LDraw del brazo: la mano está en (-1, 19, -8)) */
+  var matPaleta = null, matMango = null;
+  function paleta(f, ver) {
+    var b = f.obj.userData.partes && f.obj.userData.partes.brazoD;
+    if (!b) return;
+    if (!ver) { if (f.paleta) { b.remove(f.paleta); f.paleta = null; } return; }
+    if (f.paleta) return;
+    if (!matPaleta) { matPaleta = P.plastico(C.rojo); matMango = P.plastico(MADERA); }
+    var g = new T.Group();
+    var cara = new T.Mesh(geoCache.paletaPP || (geoCache.paletaPP = new T.CylinderGeometry(9, 9, 2, 20)), matPaleta);
+    cara.rotation.z = Math.PI / 2; cara.position.set(0, 13, 0);
+    var mango = new T.Mesh(geoCache.mangoPP || (geoCache.mangoPP = new T.BoxGeometry(3, 9, 3)), matMango);
+    mango.position.set(0, 4, 0);
+    g.add(cara, mango);
+    g.position.set(-1, 22, -12); g.rotation.x = -0.5;
+    b.add(g); f.paleta = g;
+  }
+  function sentarJuego(f, l) {
+    paleta(f, l.tipo === 'pingpong');
+    f.obj.position.set(l.x, l.sentado ? (l.alto || PLACA + LADRILLO) - 1.38 : PLACA, l.z);
+    f.obj.rotation.y = l.rot;
+    P.pose(f.obj, l.sentado ? 'sentado' : '');
+  }
+  function llegarAJugar(f) {
+    var l = plano.juegos.lugares[f.ocio.lugar];
+    f.estado = 'jugando'; sentarJuego(f, l); sombrasSucias = true;
+    if (f.ocio.volver || !libreParaOcio(f.a.id, f)) { volverDeOcio(f); return; }
+    if (AMBIENTE) animando[f.a.id] = true;
+    redibujarJuegos();
+    pintarTarea(f); pedir();
+  }
+  function irAJugar(f) {
+    var i = lugarLibre(-1);
+    if (i < 0) return false;
+    f.ocio = { lugar: i, hasta: Date.now() + azar(OCIO_TURNO), volver: false };
+    caminar(f.a.id, rutaHaciaJuegos(f, plano.juegos.lugares[i]), function () { llegarAJugar(f); });
+    sombrasSucias = true;
+    return true;
+  }
+  /* cambia de juego dentro de la sala: vuelve a la fila y entra al otro lugar */
+  function cambiarJuego(f) {
+    var i = lugarLibre(f.ocio.lugar);
+    if (i < 0) { f.ocio.hasta = Date.now() + azar(OCIO_TURNO); return; }
+    var a = plano.juegos.lugares[f.ocio.lugar], b = plano.juegos.lugares[i];
+    paleta(f, false);
+    var ruta = a.acceso.slice().reverse().concat(b.acceso, [{ x: b.x, z: b.z }]);
+    f.ocio = { lugar: i, hasta: Date.now() + azar(OCIO_TURNO), volver: false };
+    caminar(f.a.id, ruta, function () { llegarAJugar(f); });
+    redibujarJuegos();
+  }
+  function dejarOcio(f) { paleta(f, false); f.ocio = null; f.libreDesde = 0; redibujarJuegos(); }
+  function volverDeOcio(f) {
+    if (!f.ocio) return;
+    var ruta = rutaDesdeJuegos(f);
+    dejarOcio(f);
+    f.volviendo = true;
+    caminar(f.a.id, ruta, function () {
+      f.volviendo = false; f.estado = 'escritorio'; sentar(f, f.asiento); sombrasSucias = true;
+      if (trabajo[f.a.id]) animando[f.a.id] = true;
+      pintarTarea(f);
+      consultasActualizar();
+      pedir();
+    });
+  }
+  /* cada pocos segundos (y en cada cambio de actividad): quién va, quién cambia de juego y quién vuelve */
+  function revisarOcio() {
+    if (!plano || !plano.juegos || !mundo) return;
+    var ahora = Date.now();
+    Object.keys(figuras).forEach(function (id) {
+      var f = figuras[id], libre = libreParaOcio(id, f);
+      if (f.estado === 'escritorio' && !f.ocio && f.asiento && !f.volviendo) {
+        if (!libre) { f.libreDesde = 0; return; }
+        if (!f.libreDesde) { f.libreDesde = ahora; f.esperaOcio = azar(OCIO_ESPERA); return; }
+        if (ahora - f.libreDesde > f.esperaOcio) irAJugar(f);
+      } else if (f.ocio && f.estado === 'jugando') {
+        if (!libre) volverDeOcio(f);
+        else if (ahora > f.ocio.hasta) cambiarJuego(f);
+      } else if (f.ocio && f.estado === 'caminando' && !libre) {
+        f.ocio.volver = true;
+      }
+    });
+  }
+  function relojDeOcio() { if (!relojOcio) relojOcio = setInterval(revisarOcio, 2500); }
+
+  function animarJuego(f, dt) {
+    var l = plano.juegos.lugares[f.ocio.lugar];
+    if (!AMBIENTE) return false;
+    if (l.tipo === 'consola') { f.fase += dt * 14; P.pose(f.obj, 'sentado'); P.pose(f.obj, 'jugar', f.fase); }
+    else if (l.tipo === 'arcade') { f.fase += dt * 10; P.pose(f.obj, 'arcade', f.fase); }
+    else if (l.tipo === 'barra' || l.tipo === 'mesa') { f.fase += dt * 2.2; P.pose(f.obj, 'sentado'); P.pose(f.obj, 'charla', f.fase); }
+    else if (l.tipo === 'metegol') { f.fase += dt * 12; P.pose(f.obj, 'metegol', f.fase); moverMetegol(); soloLento = false; }
+    else if (l.tipo === 'pinball') { f.fase += dt * 12; P.pose(f.obj, 'pinball', f.fase); }
+    else if (l.tipo === 'pingpong') { var g = peloteo(l); P.pose(f.obj, 'paleta', g.golpe); soloLento = false; f.obj.userData.partes.cabeza.rotation.y = g.mira; }
+    else { f.fase += dt * 2.2; P.pose(f.obj, 'cafe', f.fase); }
+    var pt = l.pantalla !== undefined ? pantallasJuego[l.pantalla] : null, ahora = performance.now();
+    if (pt && ahora - pt.ultimo > 110) { pt.ultimo = ahora; pt.n++; dibujarJuego(pt, true); }
+    var pt2 = l.pantalla2 !== undefined ? pantallasJuego[l.pantalla2] : null;
+    if (pt2 && ahora - pt2.ultimo > 110) { pt2.ultimo = ahora; pt2.n++; dibujarJuego(pt2, true); }
+    return true;
+  }
+
+  /* pantallas de la tele y de los arcades: textura de canvas; quietas cuando nadie juega */
+  var pantallasJuego = [];
+  /* Pelota de ping-pong: va de la paleta de un extremo a la del otro, pica una vez en la mitad contraria y el que la
+     recibe hace el golpe. Si juega uno solo, peloteo contra la red imaginaria (la pelota vuelve igual). */
+  var pelotaPP = null, DUR_PP = 0.85;
+  function puntoGolpe(l) {
+    var r = l.rot;
+    return { x: l.x + Math.sin(r) * 0.75 - Math.cos(r) * 0.7, z: l.z + Math.cos(r) * 0.75 + Math.sin(r) * 0.7 };
+  }
+  function crearPelota() {
+    pelotaPP = null;
+    var pp = plano && plano.juegos && plano.juegos.pingpong;
+    if (!pp) return;
+    var m = new T.Mesh(geoCache.pelotaPP || (geoCache.pelotaPP = new T.SphereGeometry(0.14, 12, 8)), P.plastico('#f4f4f1'));
+    m.castShadow = true;
+    m.position.set(pp.reposo.x, pp.mesa + 0.14, pp.reposo.z);
+    mundo.add(m);
+    var extremos = plano.juegos.lugares.filter(function (l) { return l.tipo === 'pingpong'; }).sort(function (a, b) { return a.extremo - b.extremo; });
+    pelotaPP = { m: m, a: puntoGolpe(extremos[0]), b: puntoGolpe(extremos[1]), mesa: pp.mesa, t0: 0, cuadro: -1 };
+  }
+  /* mueve la pelota (una vez por cuadro) y devuelve, para el jugador del lugar l, cuánto golpe hacer y adónde mirar */
+  function peloteo(l) {
+    var pb = pelotaPP;
+    if (!pb) return { golpe: 0, mira: 0 };
+    var ahora = performance.now() / 1000;
+    if (!pb.t0) pb.t0 = ahora;
+    var u = (ahora - pb.t0) / DUR_PP, ida = Math.floor(u) % 2 === 0, s = u - Math.floor(u);
+    var desde = ida ? pb.a : pb.b, hasta = ida ? pb.b : pb.a, alto = pb.mesa + 0.55, k, y;
+    if (pb.cuadro !== idCuadro) {
+      pb.cuadro = idCuadro;
+      if (s < 0.68) { k = s / 0.68; y = alto + (pb.mesa + 0.14 - alto) * k + Math.sin(k * Math.PI) * 0.9; }
+      else { k = (s - 0.68) / 0.32; y = pb.mesa + 0.14 + (alto - pb.mesa - 0.14) * k + Math.sin(k * Math.PI) * 0.45; }
+      pb.m.position.set(desde.x + (hasta.x - desde.x) * s, y, desde.z + (hasta.z - desde.z) * s);
+    }
+    /* el que recibe prepara el golpe al final del viaje; el que pegó termina el gesto al principio */
+    var mio = l.extremo === 0 ? !ida : ida;           // la pelota viene hacia este extremo
+    /* golpe: negativo = lleva la paleta atrás esperando; 1 = el swing justo al pegarle, que se va apagando */
+    var golpe = mio ? -Math.max(0, (s - 0.5) / 0.5) * 0.5 : Math.max(0, 1 - s / 0.35);
+    return { golpe: golpe, mira: Math.sin(ahora * 3.7) * 0.08 };
+  }
+  /* metegol: cuatro barras que cruzan la cancha con sus muñequitos (rojos y azules); mientras juegan, las barras van y
+     vienen y la pelota rebota de arco a arco */
+  var metegolObj = null;
+  function crearMetegol() {
+    metegolObj = null;
+    var mg = plano && plano.juegos && plano.juegos.metegol;
+    if (!mg) return;
+    var g = new T.Group(), barras = [], matB = P.plastico(GRIS_CLARO), matM = P.plastico('#2a2b2e');
+    var geoBarra = geoCache.barraMetegol || (geoCache.barraMetegol = new T.CylinderGeometry(0.05, 0.05, 3.6, 8));
+    var geoMun = geoCache.munMetegol || (geoCache.munMetegol = new T.BoxGeometry(0.22, 0.42, 0.16));
+    var geoMango = geoCache.mangoMetegol || (geoCache.mangoMetegol = new T.CylinderGeometry(0.1, 0.1, 0.35, 8));
+    [[-1.5, C.rojo, 1], [-0.5, C.azul, 2], [0.5, C.rojo, 2], [1.5, C.azul, 1]].forEach(function (b, i) {
+      var r = new T.Group(); r.position.set(mg.x + b[0], mg.y, mg.z);
+      var barra = new T.Mesh(geoBarra, matB); barra.rotation.x = Math.PI / 2; r.add(barra);
+      var mm = P.plastico(b[1]);
+      for (var k = 0; k < b[2]; k++) { var mu = new T.Mesh(geoMun, mm); mu.position.set(0, -0.12, b[2] === 1 ? 0 : (k ? 0.5 : -0.5)); r.add(mu); }
+      var lado = b[1] === C.rojo ? -1 : 1, mango = new T.Mesh(geoMango, matM);
+      mango.rotation.x = Math.PI / 2; mango.position.z = lado * 1.9; r.add(mango);
+      g.add(r); barras.push(r);
+    });
+    var pel = new T.Mesh(geoCache.pelotaPP || (geoCache.pelotaPP = new T.SphereGeometry(0.14, 12, 8)), P.plastico('#f4f4f1'));
+    pel.position.set(mg.x, mg.cancha + 0.12, mg.z); g.add(pel);
+    mundo.add(g);
+    metegolObj = { barras: barras, pelota: pel, mg: mg, cuadro: -1 };
+  }
+  function moverMetegol() {
+    var o = metegolObj;
+    if (!o || o.cuadro === idCuadro) return;
+    o.cuadro = idCuadro;
+    var t = performance.now() / 1000;
+    o.barras.forEach(function (r, i) { r.position.z = o.mg.z + Math.sin(t * 3.1 + i * 1.7) * 0.35; r.rotation.z = Math.sin(t * 5 + i) * 0.5; });
+    var u = (t * 0.55) % 1, ida = u < 0.5 ? u * 2 : 2 - u * 2;     // de arco a arco y vuelta
+    o.pelota.position.set(o.mg.x - 1.8 + ida * 3.6, o.mg.cancha + 0.12, o.mg.z + Math.sin(t * 4.3) * 0.7);
+  }
+  function reposarMetegol() {
+    var o = metegolObj; if (!o) return;
+    var hay = false;
+    for (var k in figuras) { var f = figuras[k]; if (f.ocio && f.estado === 'jugando' && plano.juegos.lugares[f.ocio.lugar].tipo === 'metegol') hay = true; }
+    if (hay) return;
+    o.barras.forEach(function (r) { r.position.z = o.mg.z; r.rotation.z = 0; });
+    o.pelota.position.set(o.mg.x + 0.3, o.mg.cancha + 0.12, o.mg.z + 0.2);
+  }
+  function reposarPelota() {
+    var pb = pelotaPP, pp = plano && plano.juegos && plano.juegos.pingpong;
+    if (!pb || !pp) return;
+    var hay = false;
+    for (var k in figuras) { var f = figuras[k]; if (f.ocio && f.estado === 'jugando' && plano.juegos.lugares[f.ocio.lugar].tipo === 'pingpong') hay = true; }
+    if (!hay) { pb.t0 = 0; pb.m.position.set(pp.reposo.x, pp.mesa + 0.14, pp.reposo.z); }
+  }
+  function crearPantallasJuego() {
+    pantallasJuego = [];
+    crearPelota();
+    crearMetegol();
+    if (!plano || !plano.juegos) return;
+    plano.juegos.pantallas.forEach(function (d) {
+      var c = document.createElement('canvas');
+      var tam = { tele: [160, 88], pinball: [64, 128], marcador: [96, 64] }[d.tipo] || [64, 56];
+      c.width = tam[0]; c.height = tam[1];
+      var tex = new T.CanvasTexture(c);
+      if (T.sRGBEncoding) tex.encoding = T.sRGBEncoding;
+      var mat = new T.MeshBasicMaterial({ map: tex, toneMapped: false });
+      var m = new T.Mesh(new T.PlaneGeometry(d.w, d.h), mat);
+      m.position.set(d.x, d.y, d.z);
+      if (d.rx) { m.rotation.order = 'YXZ'; m.rotation.x = d.rx; }     // acostada (la mesa del pinball)
+      m.rotation.y = d.rot;
+      mundo.add(m);
+      pantallasJuego.push({ d: d, ctx: c.getContext('2d'), tex: tex, n: 0, ultimo: 0 });
+    });
+    redibujarJuegos();
+  }
+  function redibujarJuegos() {
+    if (!plano || !plano.juegos) return;
+    var activas = {};
+    for (var k in figuras) {
+      var f = figuras[k], l = f.ocio && f.estado === 'jugando' ? plano.juegos.lugares[f.ocio.lugar] : null;
+      if (l && l.pantalla !== undefined) activas[l.pantalla] = true;
+      if (l && l.pantalla2 !== undefined) activas[l.pantalla2] = true;
+    }
+    pantallasJuego.forEach(function (pt, i) { dibujarJuego(pt, !!activas[i]); });
+    reposarPelota();
+    reposarMetegol();
+    pedir();
+  }
+  function dibujarJuego(pt, activa) {
+    var x = pt.ctx, n = pt.n, i, j;
+    if (pt.d.tipo === 'tele') {
+      var W = 160, H = 88;
+      if (!activa) {
+        /* en espera: fondo azul oscuro con el logo de la consola */
+        x.fillStyle = '#121a26'; x.fillRect(0, 0, W, H);
+        x.fillStyle = '#26354a'; x.fillRect(58, 30, 44, 28);
+        x.fillStyle = '#58c4f5'; x.beginPath(); x.moveTo(74, 37); x.lineTo(74, 51); x.lineTo(87, 44); x.closePath(); x.fill();
+      } else {
+        /* carrera a pantalla dividida: ruta en perspectiva con líneas que avanzan y un auto por jugador */
+        [[0, C.rojo, 0], [80, C.azul, 2.1]].forEach(function (h) {
+          var x0 = h[0];
+          x.fillStyle = '#8fd0f5'; x.fillRect(x0, 0, 80, 34);
+          x.fillStyle = '#e9f6fd'; x.fillRect(x0 + 10 + (n % 60), 10, 14, 4);
+          x.fillStyle = '#5cad2c'; x.fillRect(x0, 34, 80, H - 34);
+          x.fillStyle = '#55595e';
+          x.beginPath(); x.moveTo(x0 + 36, 34); x.lineTo(x0 + 44, 34); x.lineTo(x0 + 78, H); x.lineTo(x0 + 2, H); x.closePath(); x.fill();
+          x.fillStyle = '#f4f4f1';
+          for (j = 0; j < 5; j++) {
+            var u = ((j / 5) + (n * 0.06) % 0.2 * 5 / 5) % 1, yy = 34 + u * u * (H - 34), hh = 1 + u * 7;
+            x.fillRect(x0 + 40 - (0.5 + u), yy, 1 + u * 2, hh);
+          }
+          var dx = Math.sin(n * 0.18 + h[2]) * 14;
+          x.fillStyle = h[1]; x.fillRect(x0 + 32 + dx, 66, 16, 10);
+          x.fillStyle = '#1b2a34'; x.fillRect(x0 + 30 + dx, 72, 4, 6); x.fillRect(x0 + 46 + dx, 72, 4, 6);
+          x.fillStyle = '#f5cd2f'; x.fillRect(x0 + 4, 4, 10, 8);
+        });
+        x.fillStyle = '#111'; x.fillRect(79, 0, 2, H);
+      }
+    } else if (pt.d.tipo === 'pinball') {
+      /* mesa del pinball (de arriba): carriles, tres hongos que se encienden, paletas abajo y la bola que recorre */
+      var PW = 64, PH = 128;
+      x.fillStyle = '#1b2a5a'; x.fillRect(0, 0, PW, PH);
+      x.strokeStyle = '#f5cd2f'; x.lineWidth = 2;
+      x.beginPath(); x.arc(32, 30, 26, Math.PI, 0); x.stroke();
+      x.fillStyle = '#2f5dd8'; x.fillRect(4, 40, 3, 60); x.fillRect(57, 40, 3, 60);
+      var hongos = [[20, 44, C.rosa], [44, 44, C.turquesa], [32, 62, C.naranja]];
+      hongos.forEach(function (hg, i) {
+        var luz = activa && (Math.floor(n / 2) + i) % 3 === 0;
+        x.fillStyle = luz ? '#ffffff' : hg[2]; x.beginPath(); x.arc(hg[0], hg[1], 7, 0, Math.PI * 2); x.fill();
+        x.fillStyle = '#1b2a5a'; x.beginPath(); x.arc(hg[0], hg[1], 3, 0, Math.PI * 2); x.fill();
+      });
+      x.fillStyle = '#f06aa8'; x.fillRect(12, 84, 8, 3); x.fillRect(44, 84, 8, 3);
+      var golpe = activa && n % 6 < 2;
+      x.strokeStyle = '#f4f4f1'; x.lineWidth = 4; x.lineCap = 'round';
+      x.beginPath(); x.moveTo(14, 108); x.lineTo(28, golpe ? 104 : 114); x.stroke();
+      x.beginPath(); x.moveTo(50, 108); x.lineTo(36, golpe ? 104 : 114); x.stroke();
+      var a = n * 0.21, bx2 = activa ? 32 + Math.sin(a) * 22 : 58, by2 = activa ? 64 + Math.sin(a * 1.37) * 44 : 112;
+      x.fillStyle = '#d0d4d8'; x.beginPath(); x.arc(bx2, by2, 3.5, 0, Math.PI * 2); x.fill();
+    } else if (pt.d.tipo === 'marcador') {
+      /* marcador del pinball: puntaje en naranja que sube mientras juegan, y un cartel que titila */
+      x.fillStyle = '#120d08'; x.fillRect(0, 0, 96, 64);
+      x.fillStyle = activa && n % 8 < 4 ? '#f5cd2f' : '#f06aa8'; x.fillRect(6, 6, 84, 14);
+      x.fillStyle = '#120d08'; x.font = 'bold 11px monospace'; x.textAlign = 'center'; x.fillText('PINBALL', 48, 17);
+      x.fillStyle = '#ff9a3c'; x.font = 'bold 20px monospace';
+      x.fillText(String(activa ? 10000 + n * 270 : 0).padStart(6, '0'), 48, 48);
+    } else {
+      var w = 64, h = 56, v = pt.d.variante;
+      x.fillStyle = '#0b0d14'; x.fillRect(0, 0, w, h);
+      if (v === 0) {
+        /* naves: filas de invasores que van y vienen, la nave abajo y un disparo */
+        var off = activa ? Math.round(Math.sin(n * 0.15) * 8) : 0, cols = ['#f06aa8', '#f5cd2f', '#8de08f'];
+        for (j = 0; j < 3; j++) for (i = 0; i < 5; i++) {
+          if (activa && (i * 7 + j * 3 + Math.floor(n / 25)) % 11 === 0) continue;
+          x.fillStyle = cols[j]; x.fillRect(10 + i * 10 + off, 6 + j * 8, 6, 4);
+          x.fillRect(10 + i * 10 + off + (n % 2), 10 + j * 8, 2, 2); x.fillRect(14 + i * 10 + off - (n % 2), 10 + j * 8, 2, 2);
+        }
+        var sx = activa ? 32 + Math.round(Math.sin(n * 0.23) * 20) : 32;
+        x.fillStyle = '#58c4f5'; x.fillRect(sx - 4, 48, 8, 3); x.fillRect(sx - 1, 45, 2, 3);
+        if (activa) { x.fillStyle = '#ffffff'; x.fillRect(sx, 44 - (n * 5) % 40, 1, 4); }
+      } else {
+        /* laberinto: un comecocos amarillo que recorre un pasillo con puntitos */
+        x.strokeStyle = '#2f5dd8'; x.lineWidth = 2;
+        x.strokeRect(3, 3, w - 6, h - 6); x.strokeRect(14, 14, w - 28, h - 28);
+        var paso = activa ? n % 40 : 8, px = 8 + paso * 1.2;
+        x.fillStyle = '#f4f4f1';
+        for (i = 0; i < 9; i++) { var dx2 = 8 + i * 6; if (dx2 > px) x.fillRect(dx2, 8, 2, 2); }
+        var boca = activa ? Math.abs(Math.sin(n * 0.6)) * 0.7 : 0.5;
+        x.fillStyle = '#f5cd2f'; x.beginPath(); x.moveTo(px, 9); x.arc(px, 9, 4, boca, Math.PI * 2 - boca); x.closePath(); x.fill();
+        x.fillStyle = '#f06aa8'; x.fillRect(activa ? 50 - (n % 30) * 0.4 : 46, 44, 7, 7);
+      }
+    }
+    pt.tex.needsUpdate = true;
   }
 
 
@@ -1759,8 +2375,8 @@ App.Oficina3D = (function () {
     alElegirAgente: function (fn) { cbAgente = fn; },
     alElegirLugar: function (fn) { cbLugar = fn; },
     alPasar: function (fn) { cbHover = fn; },
-    elegir: function (id) { elegido = id; actualizarEtiquetasHover(); pedir(); },
-    ocupado: function (id, si) { var f = figuras[id]; if (!f) return; f.ocupado = !!si; f.etiqueta.el.classList.toggle('ocupado', !!si); actualizarEtiquetasHover(); pedir(); },
+    elegir: function (id) { elegido = id; revisarOcio(); actualizarEtiquetasHover(); pedir(); },
+    ocupado: function (id, si) { var f = figuras[id]; if (!f) return; f.ocupado = !!si; f.etiqueta.el.classList.toggle('ocupado', !!si); revisarOcio(); actualizarEtiquetasHover(); pedir(); },
     reunion: reunion,
     finReunion: function () { reunion([], null); },
     encuadrar: function () { encuadrar(true); pedir(); },
@@ -1772,6 +2388,6 @@ App.Oficina3D = (function () {
     muro: muro,
     pieza: piezaViaje,
     pedir: pedir,
-    _estado: function () { return { figuras: Object.keys(figuras).length, animando: Object.keys(animando), orb: orb, plano: plano && { w: plano.x1, d: plano.z1 }, autos: autos.map(function (a) { return Math.round(a.g.position.x * 10) / 10; }), post: !!post, info: renderer.info.render }; }
+    _estado: function () { return { ocio: Object.keys(figuras).filter(function (k) { return figuras[k].ocio; }).map(function (k) { return k + ':' + figuras[k].estado + '@' + (plano.juegos ? plano.juegos.lugares[figuras[k].ocio.lugar].tipo : ''); }), figuras: Object.keys(figuras).length, animando: Object.keys(animando), orb: orb, plano: plano && { w: plano.x1, d: plano.z1 }, autos: autos.map(function (a) { return Math.round(a.g.position.x * 10) / 10; }), post: !!post, info: renderer.info.render }; }
   };
 })();

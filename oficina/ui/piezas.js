@@ -222,6 +222,41 @@ App.Piezas = (function () {
     } else if (nombre === 'mirar') {           /* busca: gira la cabeza de lado a lado */
       p.brazoD.rotation.x = p.brazoI.rotation.x = -0.75;
       p.cabeza.rotation.y = Math.sin((fase || 0) * 0.6) * 0.45;
+    } else if (nombre === 'jugar') {           /* sobre 'sentado': joystick en las manos, pulgares rápidos */
+      p.brazoD.rotation.x = -1.15 + Math.max(0, s) * 0.1;
+      p.brazoI.rotation.x = -1.15 + Math.max(0, Math.sin((fase || 0) * 1.3)) * 0.1;
+      p.cabeza.rotation.y = Math.sin((fase || 0) * 0.07) * 0.14;
+    } else if (nombre === 'arcade') {          /* parado: una mano en la palanca, la otra en los botones */
+      p.piernaD.rotation.x = p.piernaI.rotation.x = 0;
+      p.brazoI.rotation.x = -1.25 + s * 0.12;
+      p.brazoD.rotation.x = -1.2 + Math.max(0, Math.sin((fase || 0) * 1.7)) * 0.18;
+      p.cabeza.rotation.y = 0;
+    } else if (nombre === 'paleta') {          /* ping-pong: fase = golpe (-0.5 paleta atrás, 0 en guardia, 1 swing hacia adelante) */
+      var g = Math.min(1, Math.max(-1, fase || 0));
+      p.piernaD.rotation.x = 0.15; p.piernaI.rotation.x = -0.15;
+      p.brazoD.rotation.x = -0.75 - g * 0.95;
+      p.brazoI.rotation.x = -0.45;
+    } else if (nombre === 'charla') {          /* sobre 'sentado': taza en la mano, sorbos de vez en cuando, mira a los demás */
+      var sorbo2 = Math.max(0, (Math.sin((fase || 0) * 0.5) - 0.7) / 0.3);
+      p.brazoD.rotation.x = -0.75 - sorbo2 * 1.25;
+      p.brazoI.rotation.x = -0.55;
+      p.cabeza.rotation.y = sorbo2 ? 0 : Math.sin((fase || 0) * 0.23) * 0.45;
+    } else if (nombre === 'metegol') {         /* parado, las dos manos en los mangos, girando y empujando */
+      p.piernaD.rotation.x = p.piernaI.rotation.x = 0;
+      p.brazoD.rotation.x = -1.3 + Math.sin((fase || 0) * 1.1) * 0.25;
+      p.brazoI.rotation.x = -1.3 + Math.sin((fase || 0) * 0.9 + 1.5) * 0.25;
+      p.cabeza.rotation.y = Math.sin((fase || 0) * 0.15) * 0.3;
+    } else if (nombre === 'pinball') {         /* parado, una mano a cada lado del mueble: botonazos */
+      p.piernaD.rotation.x = p.piernaI.rotation.x = 0;
+      p.brazoD.rotation.x = -1.0 + (Math.sin((fase || 0) * 1.6) > 0.6 ? 0.18 : 0);
+      p.brazoI.rotation.x = -1.0 + (Math.sin((fase || 0) * 1.3 + 2) > 0.6 ? 0.18 : 0);
+      p.cabeza.rotation.y = 0;
+    } else if (nombre === 'cafe') {            /* parado con la taza: cada tanto un sorbo, y charla mirando a los costados */
+      var sorbo = Math.max(0, (Math.sin((fase || 0) * 0.5) - 0.7) / 0.3);
+      p.piernaD.rotation.x = p.piernaI.rotation.x = 0;
+      p.brazoI.rotation.x = -0.15;
+      p.brazoD.rotation.x = -0.75 - sorbo * 1.25;
+      p.cabeza.rotation.y = sorbo ? 0 : Math.sin((fase || 0) * 0.23) * 0.4;
     } else {
       p.piernaD.rotation.x = p.piernaI.rotation.x = 0;
       p.brazoD.rotation.x = p.brazoI.rotation.x = 0;
