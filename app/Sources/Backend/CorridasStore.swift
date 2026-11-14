@@ -25,6 +25,15 @@ public struct Corrida: Sendable, Equatable {
         (try? JSONSerialization.jsonObject(with: Data(definicion.utf8))) as? [String: Any] ?? [:]
     }
 
+    /// Nombre y responsable del paso actual, y responsable del anterior. Una sola lectura de la definición y sin armar el JSON
+    /// completo: lo usan `/api/actividad` y los avisos, que se piden seguido y para todas las corridas abiertas.
+    var resumenPaso: (nombre: String, quien: String, anterior: String) {
+        let pasos = objetoDef["pasos"] as? [[String: Any]] ?? []
+        let actual = paso >= 0 && paso < pasos.count ? pasos[paso] : [:]
+        let anterior = paso > 0 && paso - 1 < pasos.count ? pasos[paso - 1] : [:]
+        return ((actual["nombre"] as? String) ?? "", (actual["quien"] as? String) ?? "", (anterior["quien"] as? String) ?? "")
+    }
+
     public var json: [String: Any] {
         let def = objetoDef
         let pasos = def["pasos"] as? [[String: Any]] ?? []

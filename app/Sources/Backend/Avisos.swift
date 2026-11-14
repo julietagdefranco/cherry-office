@@ -88,7 +88,7 @@ extension Store {
         }
         // corridas de flujos que esperan a la persona y todavía no vio
         for c in corridasEsperandoPersona(oficina: oficina) {
-            let paso = (c.json["pasoNombre"] as? String) ?? ""
+            let paso = c.resumenPaso.nombre
             out.append(Aviso(id: "flujo:\(c.id)", tipo: "flujo", agente: "", texto: "«\(c.nombre)» te necesita: \(paso)",
                              ref: String(c.id), creado: c.actualizada))
         }

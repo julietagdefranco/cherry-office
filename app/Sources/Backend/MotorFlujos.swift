@@ -391,11 +391,9 @@ actor MotorFlujos {
     /// Corridas abiertas para `/api/actividad`.
     func resumenActividad(oficina: String) async -> [[String: Any]] {
         await store.corridas(oficina: oficina, estados: Corrida.abiertas, limite: 100).map { c in
-            let pasos = c.def?.pasos ?? []
-            let anterior = c.paso > 0 && c.paso - 1 < pasos.count ? pasos[c.paso - 1].quien : ""
-            let j = c.json
-            return ["id": c.id, "nombre": c.nombre, "flujo": c.flujo, "paso": c.paso, "pasoNombre": j["pasoNombre"] ?? "",
-                    "quien": j["quien"] ?? "", "anterior": anterior, "estado": c.estado]
+            let p = c.resumenPaso
+            return ["id": c.id, "nombre": c.nombre, "flujo": c.flujo, "paso": c.paso, "pasoNombre": p.nombre,
+                    "quien": p.quien, "anterior": p.anterior, "estado": c.estado]
         }
     }
 }
