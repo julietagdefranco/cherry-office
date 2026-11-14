@@ -408,7 +408,12 @@ window.App = window.App || {};
         var solo = h('textarea.campo', { rows: 3, value: (lim.solo || []).join('\n') }), prop = h('textarea.campo', { rows: 3, value: (lim.proponer || []).join('\n') });
         reg('limites', solo, function () { var a = lin(solo), b = lin(prop); if (!a.length && !b.length) return null; var o = {}; if (a.length) o.solo = a; if (b.length) o.proponer = b; return o; });
         var coord = h('input', { type: 'checkbox', checked: (d.permisos || []).indexOf('coordinador') >= 0 });
-        reg('permisos', coord, function () { return coord.checked ? ['coordinador'] : null; });
+        /* conserva los demás permisos de la tarjeta: el check solo pone o saca «coordinador» */
+        reg('permisos', coord, function () {
+          var otros = (d.permisos || []).filter(function (p) { return p !== 'coordinador'; });
+          if (coord.checked) otros.push('coordinador');
+          return otros.length ? otros : null;
+        });
         App.add(cont,
           h('div.dos', texto('nombre', 'Nombre', { obl: true }), texto('rol', 'Rol', { obl: true })),
           sel('departamento', 'Departamento', opcionesRef('departamento'), d.departamento, { obl: true, tipo: 'departamento' }),
