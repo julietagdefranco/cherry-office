@@ -832,7 +832,8 @@ public actor ReunionesRouter: SubRouter {
             texto = try await runner.conCarril(oficina: carpeta, agente: ag.id) {
                 try await runner.actividad.seguir(oficina: cwd, agente: agid, origen: "reunion", tarea: "Reunión: " + f.tema,
                                                   extra: caja.observador()) { obs, _ in
-                    try await runner.turnoSoloLectura(agente: agid, prompt: prompt, cwd: cwd, timeout: t, dirsExtra: dirs, obs: obs)
+                    try await runner.turnoSoloLectura(agente: agid, prompt: prompt, cwd: cwd, timeout: t, dirsExtra: dirs, obs: obs,
+                                                 instrucciones: Instrucciones.para(of, ag))
                 }
             }
             texto = texto.trimmingCharacters(in: .whitespacesAndNewlines)
