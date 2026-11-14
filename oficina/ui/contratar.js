@@ -13,32 +13,59 @@
     var retratar = App.debounce(function () {
       App.Piezas.retrato(av, av.semilla || semilla(), 236).then(function (u) { img.src = u; }).catch(function () {});
     }, 120);
-    function selector(etq, clave, opciones) {
-      return h('div.fila-campo', h('label.etiqueta-campo', etq), h('select.campo', {
-        onchange: function (e) { av[clave] = e.target.value; retratar(); }
-      }, opciones.map(function (o) { return h('option', { value: o[0], selected: o[0] === av[clave] }, o[1]); })));
+    /* Selector con miniaturas: la fila muestra la opción elegida; al tocarla se abre una grilla con cada opción
+       probada sobre la figura actual. Solo una grilla abierta a la vez, y sus miniaturas se generan al abrirla. */
+    var abierto = null, scrollGrilla = 0;
+    function miniatura(cambio, encuadre, tam) {
+      var img = h('img', { alt: '' });
+      App.Piezas.retrato(Object.assign({}, av, cambio), av.semilla || semilla(), tam || 112, encuadre)
+        .then(function (u) { img.src = u; }).catch(function () {});
+      return img;
+    }
+    function galeria(etq, clave, grupo, encuadre) {
+      var claves = Object.keys(catalogo[grupo] || {});
+      var actual = catalogo[grupo][av[clave]] || {};
+      function cambio(k) { var o = {}; o[clave] = k; return o; }
+      var cab = h('button.galeria-cab', { type: 'button', 'aria-expanded': abierto === clave ? 'true' : 'false',
+        onclick: function () { abierto = abierto === clave ? null : clave; scrollGrilla = 0; pintarControles(); } },
+        miniatura({}, encuadre, 96), h('span.galeria-nombre', actual.nombre || ''), h('span.galeria-flecha', abierto === clave ? '▴' : '▾'));
+      var grilla = abierto !== clave ? null : h('div.galeria-grilla', { onscroll: function () { scrollGrilla = this.scrollTop; } }, claves.map(function (k) {
+        return h('button', { type: 'button', class: k === av[clave] ? 'sel' : '', title: catalogo[grupo][k].nombre,
+          onclick: function () { av[clave] = k; pintarControles(); retratar(); } }, miniatura(cambio(k), encuadre));
+      }));
+      if (grilla) requestAnimationFrame(function () { grilla.scrollTop = scrollGrilla; });
+      return h('div.fila-campo', h('label.etiqueta-campo', etq), cab, grilla);
     }
     function colores(etq, clave, lista) {
       var p = h('div.paleta');
       lista.forEach(function (c) {
         p.appendChild(h('button', { class: c.hex.toLowerCase() === (av[clave] || '').toLowerCase() ? 'sel' : '', style: { background: c.hex }, title: c.id,
-          onclick: function () { av[clave] = c.hex; p.querySelectorAll('button').forEach(function (b) { b.classList.remove('sel'); }); this.classList.add('sel'); retratar(); } }));
+          onclick: function () {
+            /* las mangas acompañan al torso mientras sean del mismo color */
+            if (clave === 'colorTorso' && (av.colorBrazos || '').toLowerCase() === (av.colorTorso || '').toLowerCase()) av.colorBrazos = c.hex;
+            av[clave] = c.hex;
+            pintarControles(); retratar(); } }));
       });
       return h('div.fila-campo', h('label.etiqueta-campo', etq), p);
     }
     function pintarControles() {
       var c = catalogo;
-      function ops(g) { return Object.keys(c[g]).map(function (k) { return [k, c[g][k].nombre]; }); }
+      var conAccesorio = (c.sombrero[av.sombrero] || {}).parte || ((c.cuello[av.cuello] || {}).color === 'accesorio');
       App.add(App.vaciar(controles),
-        selector('Peinado', 'pelo', ops('pelo')), colores('Color de pelo', 'colorPelo', c.colores.pelo),
-        selector('Cara', 'cara', ops('cara')), selector('Ropa', 'torso', ops('torso')),
-        colores('Color de la ropa', 'colorTorso', c.colores.torso), colores('Pantalón', 'colorPiernas', c.colores.piernas));
+        colores('Piel', 'colorPiel', c.colores.piel),
+        galeria('Cara', 'cara', 'cara', 'cara'),
+        galeria('Peinado', 'pelo', 'pelo', 'cara'), colores('Color de pelo', 'colorPelo', c.colores.pelo),
+        galeria('Sombrero', 'sombrero', 'sombrero', 'cara'), galeria('Barba o moño', 'cuello', 'cuello', 'busto'),
+        conAccesorio ? colores('Color del sombrero o moño', 'colorAccesorio', c.colores.accesorio) : null,
+        galeria('Ropa', 'torso', 'torso', 'torso'),
+        colores('Color de la ropa', 'colorTorso', c.colores.torso), colores('Mangas', 'colorBrazos', c.colores.torso),
+        galeria('Abajo', 'piernas', 'piernas', 'cuerpo'), colores((c.piernas[av.piernas] || {}).parte ? 'Color de la falda' : 'Color del pantalón', 'colorPiernas', c.colores.piernas));
     }
     App.Piezas.completar(av, semilla()).then(function (a) { av = a; return App.Piezas.catalogo(); })
       .then(function (c) { catalogo = c; pintarControles(); retratar(); }).catch(App.fallo);
     var azar = h('button.btn.chico', {
       onclick: function () {
-        App.Piezas.completar({ semilla: App.uuid().slice(0, 8) }).then(function (a) { av = a; pintarControles(); retratar(); });
+        App.Piezas.completar({ semilla: App.uuid().slice(0, 8) }, null, true).then(function (a) { av = a; pintarControles(); retratar(); });
       }
     }, App.icono('dado'), 'Otro aspecto');
     return { el: h('div.editor-avatar', img, azar, controles), valor: function () { return av; }, retratar: retratar };

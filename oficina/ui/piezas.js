@@ -1,5 +1,6 @@
 /* Piezas LDraw: carga el paquete minifigs.mpd una sola vez, parsea cada pieza a demanda (una geometría por pieza,
-   compartida entre todas las figuras) y arma minifigs a partir de un avatar {pelo, cara, torso, colores}.
+   compartida entre todas las figuras) y arma minifigs a partir de un avatar
+   {pelo, cara, torso, piernas, sombrero, cuello, colorPiel, colorPelo, colorTorso, colorBrazos, colorPiernas, colorAccesorio}.
    Unidades: 1 unidad de mundo = 1 stud = 20 LDU. Las figuras miran hacia +z del mundo. */
 window.App = window.App || {};
 App.Piezas = (function () {
@@ -47,7 +48,7 @@ App.Piezas = (function () {
     if (paquete) return paquete;
     paquete = Promise.all([
       traer('ldraw/minifigs.mpd'),
-      fetch((window.APP_BASE || '') + 'ldraw/catalogo.json').then(function (r) { if (!r.ok) throw new Error('catalogo.json ' + r.status); return r.json(); })
+      fetch((window.APP_BASE || '') + 'ldraw/catalogo.json', { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error('catalogo.json ' + r.status); return r.json(); })
     ]).then(function (res) {
       var p = leerMPD(res[0]);
       p.catalogo = res[1];
@@ -85,7 +86,7 @@ App.Piezas = (function () {
       var ranuras = lista.map(function (m) {
         var cod = m.userData && m.userData.code;
         if (cod === COD_PRINCIPAL) return { principal: true };
-        return { hex: '#' + m.color.getHexString(), opacidad: m.transparent ? m.opacity : 1 };
+        return { hex: '#' + m.color.getHexString(), opacidad: m.transparent ? m.opacity : 1, codigo: String(cod) };
       });
       geo.computeBoundingBox();
       grupo.traverse(function (o) { if (o !== malla && o.geometry) o.geometry.dispose(); });
@@ -94,8 +95,14 @@ App.Piezas = (function () {
     return geos[clave];
   }
 
-  function malla(def, hexPrincipal) {
-    var m = def.ranuras.map(function (r) { return r.principal ? plastico(hexPrincipal) : plastico(r.hex, { opacidad: r.opacidad }); });
+  /* hexPiel: si viene, el amarillo LDraw (14) se pinta del color de piel. Los estampados de torso dibujan la piel
+     del cuello y el escote en amarillo fijo, pensando en figuras amarillas. */
+  function malla(def, hexPrincipal, hexPiel) {
+    var m = def.ranuras.map(function (r) {
+      if (r.principal) return plastico(hexPrincipal);
+      if (hexPiel && r.codigo === '14') return plastico(hexPiel);
+      return plastico(r.hex, { opacidad: r.opacidad });
+    });
     var x = new T.Mesh(def.geo, m.length === 1 ? m[0] : m);
     x.castShadow = true; x.receiveShadow = true;
     return x;
@@ -105,18 +112,39 @@ App.Piezas = (function () {
   function hash(s) { var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
   function elegir(lista, h, sal) { return lista[(hash(h + ':' + sal)) % lista.length]; }
 
-  /* Completa un avatar con valores deterministas a partir de la semilla (el mismo id da siempre la misma figura). */
-  function completar(av, cat, semilla) {
+  var HEX = /^#[0-9a-f]{6}$/i;
+  function hexDe(lista, i) { var c = lista[i]; return typeof c === 'string' ? c : c.hex; }
+
+  /* Completa un avatar con valores deterministas a partir de la semilla (el mismo id da siempre la misma figura).
+     Por defecto elige pelo, cara y torso solo entre las piezas originales (cat.legado) y deja piel amarilla, pantalón,
+     mangas del color del torso y sin accesorios: así los avatares guardados antes de ampliar el catálogo no cambian.
+     Con todo=true (botón «Otro aspecto») sortea entre todo el catálogo, con género coherente entre cara, pelo y ropa. */
+  function completar(av, cat, semilla, todo) {
     var a = Object.assign({}, av || {});
     var s = a.semilla || semilla || 'x';
     a.semilla = s;
-    var pelos = Object.keys(cat.pelo), caras = Object.keys(cat.cara), torsos = Object.keys(cat.torso);
-    if (!cat.pelo[a.pelo]) a.pelo = elegir(pelos, s, 'p');
-    if (!cat.cara[a.cara]) a.cara = elegir(caras, s, 'c');
-    if (!cat.torso[a.torso]) a.torso = elegir(torsos, s, 't');
-    if (!/^#[0-9a-f]{6}$/i.test(a.colorPelo || '')) a.colorPelo = elegir(cat.colores.pelo, s, 'cp').hex;
-    if (!/^#[0-9a-f]{6}$/i.test(a.colorTorso || '')) a.colorTorso = elegir(cat.colores.torso, s, 'ct').hex;
-    if (!/^#[0-9a-f]{6}$/i.test(a.colorPiernas || '')) a.colorPiernas = elegir(cat.colores.piernas, s, 'cl').hex;
+    var leg = cat.legado || {};
+    function claves(g, genero) {
+      var ks = Object.keys(cat[g] || {});
+      if (!todo && leg[g]) ks = ks.slice(0, leg[g]);
+      if (genero) { var f = ks.filter(function (k) { var x = cat[g][k].genero; return !x || x === 'u' || x === genero; }); if (f.length) ks = f; }
+      return ks;
+    }
+    var col = cat.colores;
+    if (!cat.cara[a.cara]) a.cara = elegir(claves('cara'), s, 'c');
+    var gen = todo ? cat.cara[a.cara].genero : null;
+    if (!cat.pelo[a.pelo]) a.pelo = elegir(claves('pelo', gen), s, 'p');
+    if (!cat.torso[a.torso]) a.torso = elegir(claves('torso', gen), s, 't');
+    if (!HEX.test(a.colorPelo || '')) a.colorPelo = hexDe(col.pelo, hash(s + ':cp') % col.pelo.length);
+    if (!HEX.test(a.colorTorso || '')) a.colorTorso = hexDe(col.torso, hash(s + ':ct') % col.torso.length);
+    if (!HEX.test(a.colorPiernas || '')) a.colorPiernas = hexDe(col.piernas, hash(s + ':cl') % col.piernas.length);
+    var sorteo = function (sal) { return (hash(s + ':' + sal) % 100) / 100; };
+    if (!HEX.test(a.colorPiel || '')) a.colorPiel = todo ? hexDe(col.piel, hash(s + ':cs') % col.piel.length) : hexDe(col.piel, 0);
+    if (!HEX.test(a.colorBrazos || '')) a.colorBrazos = todo && sorteo('mb') < 0.3 ? hexDe(col.torso, hash(s + ':cb') % col.torso.length) : a.colorTorso;
+    if (!HEX.test(a.colorAccesorio || '')) a.colorAccesorio = hexDe(col.accesorio, hash(s + ':ca') % col.accesorio.length);
+    if (!(cat.piernas || {})[a.piernas]) a.piernas = todo && gen === 'f' && sorteo('fa') < 0.45 ? elegir(claves('piernas', 'f').slice(1), s, 'fa') : 'pantalon';
+    if (!(cat.sombrero || {})[a.sombrero]) a.sombrero = todo && sorteo('so') < 0.15 ? elegir(Object.keys(cat.sombrero).slice(1), s, 'so') : 'ninguno';
+    if (!(cat.cuello || {})[a.cuello]) a.cuello = todo && sorteo('cu') < 0.15 ? elegir(claves('cuello', gen).slice(1), s, 'cu') : 'nada';
     return a;
   }
 
@@ -124,23 +152,25 @@ App.Piezas = (function () {
   function figura(avatar, semilla) {
     return cargar().then(function (p) {
       var cat = p.catalogo, a = completar(avatar, cat, semilla), b = cat.base;
-      var piel = (cat.colores.piel && cat.colores.piel[0]) || '#f6c928';
-      var partes = [cat.torso[a.torso].parte, cat.cara[a.cara].parte, cat.pelo[a.pelo].parte, b.brazoD, b.brazoI, b.mano, b.cadera, b.piernaD, b.piernaI];
-      return Promise.all(partes.map(pieza)).then(function (d) {
+      var pier = (cat.piernas || {})[a.piernas] || {}, somb = (cat.sombrero || {})[a.sombrero] || {}, cue = (cat.cuello || {})[a.cuello] || {};
+      var partes = [cat.torso[a.torso].parte, cat.cara[a.cara].parte, somb.parte || cat.pelo[a.pelo].parte, b.brazoD, b.brazoI, b.mano,
+        pier.reemplaza ? pier.parte : b.cadera, b.piernaD, b.piernaI, (!pier.reemplaza && pier.parte) || null, cue.parte || null];
+      return Promise.all(partes.map(function (x) { return x ? pieza(x) : null; })).then(function (d) {
         var raiz = new T.Group();            // espacio de mundo, en studs
         var ld = new T.Group();              // espacio LDraw: y hacia abajo; la figura mira hacia -z
         ld.scale.setScalar(LDU);
         ld.rotation.x = Math.PI;              // y hacia arriba y frente hacia +z
         raiz.add(ld);
         var cuerpo = new T.Group(); ld.add(cuerpo);  // origen = arriba de los hombros
-        cuerpo.add(malla(d[0], a.colorTorso));
+        cuerpo.add(malla(d[0], a.colorTorso, cat.torso[a.torso].amarilloFijo ? null : a.colorPiel));
         var cabeza = new T.Group(); cabeza.position.set(0, -24, 0); cuerpo.add(cabeza);
-        cabeza.add(malla(d[1], piel));
-        cabeza.add(malla(d[2], a.colorPelo));
+        cabeza.add(malla(d[1], a.colorPiel));
+        cabeza.add(malla(d[2], somb.parte ? a.colorAccesorio : a.colorPelo));   // el sombrero va en lugar del pelo
+        if (d[10]) { var cue3 = malla(d[10], cue.color === 'pelo' ? a.colorPelo : a.colorAccesorio); cue3.position.y = 24; cabeza.add(cue3); }  // cuello: origen en los hombros, gira con la cabeza
         function brazo(def, x, lado) {
           var g = new T.Group(); g.position.set(x, 8, 0); g.rotation.z = lado * 0.1;
-          g.add(malla(def, a.colorTorso));
-          var mano = malla(d[5], piel);
+          g.add(malla(def, a.colorBrazos));
+          var mano = malla(d[5], a.colorPiel);
           mano.position.set(-lado, 19, -8);
           mano.rotation.x = Math.PI / 4;
           g.add(mano);
@@ -149,8 +179,11 @@ App.Piezas = (function () {
         }
         var brazoD = brazo(d[3], -15.552, 1), brazoI = brazo(d[4], 15.552, -1);
         var cadera = malla(d[6], a.colorPiernas); cadera.position.y = 32; cuerpo.add(cadera);
-        function pierna(def) { var g = new T.Group(); g.position.y = 44; g.add(malla(def, a.colorPiernas)); cuerpo.add(g); return g; }
-        var piernaD = pierna(d[7]), piernaI = pierna(d[8]);
+        var colorPatas = pier.parte && !pier.reemplaza ? a.colorPiel : a.colorPiernas;   // bajo una falda de tela, piernas a la vista
+        function pierna(def) { var g = new T.Group(); g.position.y = 44; if (def) g.add(malla(def, colorPatas)); cuerpo.add(g); return g; }
+        /* falda larga: una sola pieza en lugar de cadera y piernas (los grupos de pierna quedan vacíos para las poses) */
+        var piernaD = pierna(pier.reemplaza ? null : d[7]), piernaI = pierna(pier.reemplaza ? null : d[8]);
+        if (d[9]) { var falda = malla(d[9], a.colorPiernas); falda.position.y = 32; cuerpo.add(falda); }
         ld.updateMatrixWorld(true);
         var caja = new T.Box3().setFromObject(ld);
         raiz.userData.altura = caja.max.y - caja.min.y;
@@ -227,9 +260,10 @@ App.Piezas = (function () {
 
   /* ---------- retratos: una sola cámara y un renderer chico, en cola, cacheados por avatar ---------- */
   var ret = null, cola = Promise.resolve(), retratos = {};
-  function retrato(avatar, semilla, tam) {
+  /* encuadre: 'busto' (por defecto), 'cara' (cabeza con pelo y accesorios), 'torso' o 'cuerpo' (de la cintura para abajo, para ver la falda). */
+  function retrato(avatar, semilla, tam, encuadre) {
     tam = tam || 160;
-    var clave = JSON.stringify([avatar || {}, semilla || '', tam]);
+    var clave = JSON.stringify([avatar || {}, semilla || '', tam, encuadre || '']);
     if (retratos[clave]) return retratos[clave];
     retratos[clave] = cola = cola.catch(function () {}).then(function () {
       return figura(avatar, semilla).then(function (fig) {
@@ -247,8 +281,21 @@ App.Piezas = (function () {
         ret.r.setSize(tam, tam, false);
         ret.esc.add(fig);
         var h = fig.userData.altura;
-        ret.cam.position.set(1.3, h * 0.78, 8.2);
-        ret.cam.lookAt(0, h * 0.67, 0);
+        if (encuadre === 'cara' || encuadre === 'torso') {
+          fig.updateMatrixWorld(true);
+          var pt = fig.userData.partes, ref = encuadre === 'cara' ? pt.cabeza.children[0] : pt.cuerpo.children[0];  // la cabeza sola, sin pelo
+          var c = new T.Box3().setFromObject(ref).getCenter(new T.Vector3());
+          if (encuadre === 'cara') c.y += 0.25;   // deja lugar arriba para el pelo o el sombrero
+          var dist = encuadre === 'cara' ? 4.6 : 5.2;
+          ret.cam.position.set(c.x + dist * 0.16, c.y + dist * 0.06, dist);
+          ret.cam.lookAt(c.x, c.y, 0);
+        } else if (encuadre === 'cuerpo') {
+          ret.cam.position.set(h * 0.4, h * 0.5, h * 2.2);   // de la cintura para abajo, con algo de torso
+          ret.cam.lookAt(0, h * 0.36, 0);
+        } else {
+          ret.cam.position.set(1.3, h * 0.78, 8.2);
+          ret.cam.lookAt(0, h * 0.67, 0);
+        }
         ret.r.render(ret.esc, ret.cam);
         var url = ret.r.domElement.toDataURL('image/png');
         ret.esc.remove(fig);
@@ -262,7 +309,7 @@ App.Piezas = (function () {
 
   return {
     cargar: cargar, catalogo: catalogo, figura: figura, pieza: pieza, pose: pose, retrato: retrato,
-    completar: function (av, semilla) { return catalogo().then(function (c) { return completar(av, c, semilla); }); },
+    completar: function (av, semilla, todo) { return catalogo().then(function (c) { return completar(av, c, semilla, todo); }); },
     plastico: plastico, lineal: lineal, entorno: entorno, prepararRenderer: prepararRenderer, LDU: LDU
   };
 })();

@@ -109,8 +109,8 @@ def main():
         with open(a.catalogo, encoding="utf-8") as f:
             cat = json.load(f)
         raiz_partes = list(cat["base"].values())
-        for grupo in ("pelo", "cara", "torso"):
-            raiz_partes += [v["parte"] for v in cat[grupo].values()]
+        for grupo in ("pelo", "cara", "torso", "piernas", "sombrero", "cuello"):
+            raiz_partes += [v["parte"] for v in cat.get(grupo, {}).values() if v.get("parte")]
 
     idx = indexar(a.ldraw)
     archivos = {}   # clave -> texto limpio

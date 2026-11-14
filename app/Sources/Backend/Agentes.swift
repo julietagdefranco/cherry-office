@@ -99,9 +99,14 @@ public struct NuevoAgente: Sendable {
             return t.isEmpty ? nil : t
         }
         var a = Avatar(semilla: try s("semilla"), pelo: try s("pelo"), colorPelo: try s("colorPelo"), cara: try s("cara"),
-                       torso: try s("torso"), colorTorso: try s("colorTorso"), colorPiernas: try s("colorPiernas"))
-        for c in [a.colorPelo, a.colorTorso, a.colorPiernas] { if let c, !Validar.colorHex(c) { throw ErrorAPI(400, "Avatar: los colores tienen que ser tipo #141414.") } }
+                       torso: try s("torso"), colorTorso: try s("colorTorso"), colorPiernas: try s("colorPiernas"),
+                       colorPiel: try s("colorPiel"), colorBrazos: try s("colorBrazos"), colorAccesorio: try s("colorAccesorio"),
+                       piernas: try s("piernas"), sombrero: try s("sombrero"), cuello: try s("cuello"))
+        for c in [a.colorPelo, a.colorTorso, a.colorPiernas, a.colorPiel, a.colorBrazos, a.colorAccesorio] {
+            if let c, !Validar.colorHex(c) { throw ErrorAPI(400, "Avatar: los colores tienen que ser tipo #141414.") }
+        }
         a.colorPelo = a.colorPelo?.lowercased(); a.colorTorso = a.colorTorso?.lowercased(); a.colorPiernas = a.colorPiernas?.lowercased()
+        a.colorPiel = a.colorPiel?.lowercased(); a.colorBrazos = a.colorBrazos?.lowercased(); a.colorAccesorio = a.colorAccesorio?.lowercased()
         return a
     }
 }
