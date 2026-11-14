@@ -73,6 +73,9 @@ struct FlujosTests {
         #expect(str(e1["titulo"]) == "Clase 7 · Diseño")
         let paso0 = try #require(await intentos(f, c, 0).first)
         #expect(str(paso0["estado"]) == "esperando_aprobacion" && (paso0["costo"] as? Double ?? 0) > 0)
+        // el intento trae su conversación (para abrirla desde el flujo) y quién la tuvo
+        #expect(str(paso0["agente"]) == "sofia" && str(paso0["sid"]).count == 36 && str(paso0["ejecucionEstado"]) == "ok")
+        #expect(paso0["consultas"] == nil)
         // la consigna llevó el flujo, el paso y el contexto, y termina con la carpeta de entrega
         let consigna = try #require(f.sb.prompts.first)
         #expect(consigna.contains("Paso 1 de 3: Diseño") && consigna.contains("Diseñá la clase") && consigna.contains("Tema: fracciones"))
