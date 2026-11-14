@@ -49,16 +49,18 @@
     var a = App.agente(actual); if (!a) { cerrar(); return; }
     var d = App.depto(a.departamento);
     var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
-    var tabs = h('div.pestanas', [['chat', 'Conversación'], ['perfil', 'Perfil'], ['notas', 'Notas'], ['tareas', 'Tareas']].map(function (p) {
+    var tabs = h('div.pestanas', [['chat', 'Conversación'], ['perfil', 'Perfil'], ['permisos', 'Permisos'], ['notas', 'Notas'], ['tareas', 'Tareas']].map(function (p) {
       return h('button.pestana' + (pestana === p[0] ? '.activa' : ''), { onclick: function () { pestana = p[0]; pintar(); } }, p[1]);
     }));
     App.add(App.vaciar(App.dom.derecho), 
       h('div.der-cab', App.retratoImg(a, 'retrato', 120), h('div.der-tit', h('h2', a.nombre),
-        h('div.sub', a.rol, d ? h('span.insignia', h('span.punto', { style: { background: d.color, marginRight: '5px' } }), d.nombre) : null)),
+        h('div.sub', a.rol, d ? h('span.insignia', h('span.punto', { style: { background: d.color, marginRight: '5px' } }), d.nombre) : null,
+          (a.permisos || []).indexOf('coordinador') >= 0 ? h('span.insignia.coord', 'Coordinador/a') : null)),
         h('button.btn.fantasma.icono', { title: 'Cerrar', onclick: App.cerrarDerecho }, App.icono('cerrar'))),
       tabs, cuerpo, pie);
     if (pestana === 'chat') pintarChat(a, cuerpo, pie);
     else if (pestana === 'perfil') pintarPerfil(a, cuerpo, pie);
+    else if (pestana === 'permisos') pintarPermisos(a, cuerpo, pie);
     else if (pestana === 'tareas') pintarTareas(a, cuerpo, pie);
     else pintarNotas(a, cuerpo, pie);
   }
@@ -173,6 +175,125 @@
         App.aviso(a.nombre + ' ya no está en la oficina.');
       }).catch(App.fallo);
     });
+  }
+
+  /* ---------------- permisos (docs/plan-creador-flujos.md §12) ---------------- */
+  var sondeoPermisos = null;
+
+  function pintarPermisos(a, cuerpo, pie) {
+    var id = a.id, cont = h('div.perm'), err = h('div.error-txt');
+    cuerpo.appendChild(cont);
+    function vigente() { return actual === id && pestana === 'permisos' && cont.isConnected; }
+    var lim = a.limites || {};
+    var solo = (lim.solo || []).slice(), proponer = (lim.proponer || []).slice();
+    var coord = (a.permisos || []).indexOf('coordinador') >= 0;
+    var tocado = {};          // servidor -> {leer?, actuar?}
+    var catalogo = null, carpetaEnt = null;
+    var zonaConectores = h('div');
+
+    /* lista editable de textos: una fila por ítem, con «Agregar» (hasta 12 de 300 caracteres) */
+    function listaEditable(items, placeholder) {
+      var caja = h('div.perm-lista'), mas = h('button.btn.chico', { onclick: function () { items.push(''); pintarItems(true); } }, App.icono('mas'), 'Agregar');
+      function pintarItems(foco) {
+        App.vaciar(caja);
+        var ult = null;
+        items.forEach(function (t, i) {
+          var inp = h('input.campo', { value: t, maxlength: 300, placeholder: placeholder });
+          inp.addEventListener('input', function () { items[i] = inp.value; });
+          caja.appendChild(h('div.fila-ed', inp, h('button.btn.fantasma.icono', { title: 'Quitar', onclick: function () { items.splice(i, 1); pintarItems(); } }, App.icono('papelera'))));
+          ult = inp;
+        });
+        mas.disabled = items.length >= 12;
+        if (foco && ult) ult.focus();
+      }
+      pintarItems();
+      return h('div', caja, mas);
+    }
+
+    function pintarConectores() {
+      App.vaciar(zonaConectores);
+      if (!catalogo) { zonaConectores.appendChild(h('div.vacio', h('span.giro'))); return; }
+      var servs = catalogo.servidores || [], asig = a.conectores || [];
+      // servidores asignados que ya no aparecen en el catálogo: se muestran apagados y se conservan
+      var extra = asig.filter(function (c) { return !servs.some(function (s) { return s.nombre === c.servidor; }); })
+        .map(function (c) { return { nombre: c.servidor, disponible: false, herramientas: [], _viejo: c }; });
+      var todos = servs.concat(extra);
+      if (catalogo.detectando) zonaConectores.appendChild(h('div.ayuda', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' } }, h('span.giro'), 'Detectando tus conectores de claude.ai…'));
+      if (!todos.length) {
+        zonaConectores.appendChild(h('div.ayuda', catalogo.detectando ? '' : 'No hay conectores detectados. Conectalos en claude.ai y actualizá la lista.'));
+      }
+      todos.forEach(function (s) {
+        var o = asig.filter(function (c) { return c.servidor === s.nombre; })[0] || { leer: [], actuar: [] };
+        var checks = h('div.perm-checks');
+        ['leer', 'actuar'].forEach(function (tipo) {
+          var todas = App.Ajustes.delTipo(s, tipo);
+          if (!s._viejo && !todas.length) return;
+          var lista = o[tipo] || [];
+          var tiene = s._viejo ? lista.length : todas.filter(function (n) { return lista.indexOf(n) >= 0; }).length;
+          var total = s._viejo ? lista.length : todas.length;
+          var t = tocado[s.nombre] && tocado[s.nombre][tipo];
+          var ck = h('input', { type: 'checkbox', disabled: !s.disponible });
+          if (t !== undefined) ck.checked = t; else { ck.checked = total > 0 && tiene === total; ck.indeterminate = tiene > 0 && tiene < total; }
+          ck.addEventListener('change', function () {
+            (tocado[s.nombre] = tocado[s.nombre] || {})[tipo] = ck.checked; ck.indeterminate = false;
+          });
+          checks.appendChild(h('label', ck, tipo === 'leer' ? 'Leer' : 'Actuar',
+            tipo === 'actuar' ? h('span.insignia.actuar', 'Actuar pide tu aprobación') : null));
+        });
+        zonaConectores.appendChild(h('div.perm-srv' + (s.disponible ? '' : '.no'),
+          h('div', { style: { fontWeight: 600 } }, s.nombre, s.disponible ? null : h('span.ayuda', { style: { fontWeight: 400, marginLeft: '8px' } }, 'No disponible · conectalo en claude.ai')),
+          checks.childNodes.length ? checks : null));
+      });
+      zonaConectores.appendChild(h('div', { style: { display: 'flex', gap: '8px', marginTop: '4px' } },
+        h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.conectores(); } }, App.icono('enchufe'), 'Ver todos los conectores')));
+    }
+
+    function cargarCatalogo() {
+      clearTimeout(sondeoPermisos);
+      api.get('/api/conectores').then(function (r) {
+        if (!vigente()) return;
+        catalogo = r; pintarConectores();
+        if (r.detectando) sondeoPermisos = setTimeout(function () { if (vigente()) cargarCatalogo(); }, 2000);
+      }).catch(function () { if (vigente()) { catalogo = { servidores: [] }; pintarConectores(); } });
+    }
+
+    var checkCoord = h('input', { type: 'checkbox', checked: coord });
+    var rutaEnt = h('div', 'archivos/entregables/' + id + '/');
+    App.add(cont,
+      h('div.det-sec', h('h4', 'Dónde puede escribir'),
+        h('div.perm-rutas', h('div', 'conocimiento/agentes/' + id + '.md'), rutaEnt),
+        h('div.ayuda', 'Solo ahí. El resto de la oficina lo puede leer pero no tocar.')),
+      h('div.det-sec', h('h4', 'Hace solo'), listaEditable(solo, 'Algo que puede hacer sin preguntarte'),
+        h('div.ayuda', 'Lo que sale de la oficina siempre queda como propuesta: mandar un mail, crear un evento, publicar, gastar.')),
+      h('div.det-sec', h('h4', 'Deja como propuesta'), listaEditable(proponer, 'Algo que te tiene que consultar antes'),
+        h('div.ayuda', 'Lo que sale de la oficina siempre queda como propuesta, aunque no figure acá.')),
+      h('div.det-sec', h('h4', 'Conectores'), zonaConectores),
+      h('div.det-sec', h('h4', 'Coordinación'),
+        h('label', { style: { display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer' } }, checkCoord,
+          h('span', 'Es el coordinador/a de la oficina', h('div.ayuda', 'Ve entregas, flujos y bloqueos de todos y puede repartir encargos. No hace el trabajo de otros: lo pide.')))),
+      err);
+    pintarConectores();
+    cargarCatalogo();
+    api.get('/api/biblioteca/entregables', { agente: id }).then(function (r) {
+      if (vigente() && r.carpeta) { var c = String(r.carpeta); rutaEnt.textContent = c; }
+    }).catch(function () {});
+
+    var guardar = h('button.btn.primario', { onclick: function () {
+      var limpiar = function (l) { return l.map(function (t) { return t.trim(); }).filter(Boolean); };
+      var cuerpoPatch = {
+        limites: { solo: limpiar(solo), proponer: limpiar(proponer) },
+        /* conserva los demás permisos del agente: el check solo pone o saca «coordinador» */
+        permisos: (a.permisos || []).filter(function (x) { return x !== 'coordinador'; }).concat(checkCoord.checked ? ['coordinador'] : [])
+      };
+      if (Object.keys(tocado).length && catalogo) cuerpoPatch.conectores = App.Ajustes.nuevosConectores(a, catalogo.servidores, tocado);
+      guardar.disabled = true; err.textContent = '';
+      api.patch('/api/agentes/' + encodeURIComponent(id), cuerpoPatch).then(function (r) {
+        App.aviso('Permisos guardados.');
+        App.actualizar(r.oficina);
+        pintar();
+      }).catch(function (e) { err.textContent = e.message; guardar.disabled = false; });
+    } }, 'Guardar permisos');
+    App.add(pie, h('div', { style: { display: 'flex', justifyContent: 'flex-end' } }, guardar));
   }
 
   /* ---------------- notas y entregables ---------------- */

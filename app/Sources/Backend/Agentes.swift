@@ -13,6 +13,9 @@ public struct NuevoAgente: Sendable {
     public var brief: String?
     public var avatar: Avatar?
     var escritura: [String]?
+    public var limites: LimitesAgente?
+    public var conectores: [ConectorAsignado]?
+    public var permisos: [String]?
 
     /// Valida el JSON del `POST /api/agentes`. Lanza 400 con un mensaje claro.
     static func desde(_ d: [String: Any]) throws -> NuevoAgente {
@@ -27,7 +30,41 @@ public struct NuevoAgente: Sendable {
         let brief = try Validar.texto(d["brief"], "brief", max: 4000, obligatorio: false)
         return NuevoAgente(id: id, nombre: nombre, rol: rol, description: desc, prompt: prompt, departamento: dep,
                            chips: try chipsValidos(d["chips"]), modelo: modelo, brief: brief,
-                           avatar: try avatarValido(d["avatar"]), escritura: nil)
+                           avatar: try avatarValido(d["avatar"]), escritura: nil,
+                           limites: try limitesValidos(d["limites"]), conectores: try conectoresValidos(d["conectores"]),
+                           permisos: try permisosValidos(d["permisos"]))
+    }
+
+    /// `{solo: [...], proponer: [...]}`. nil si la clave no viene (o es null); un objeto sin ítems da `LimitesAgente()` vacío.
+    static func limitesValidos(_ v: Any?) throws -> LimitesAgente? {
+        guard let v, !(v is NSNull) else { return nil }
+        guard let d = v as? [String: Any] else { throw ErrorAPI(400, "«limites» tiene que ser un objeto con «solo» y «proponer».") }
+        let l = LimitesAgente(solo: try LecturaAPI.lista(d["solo"], "limites.solo"), proponer: try LecturaAPI.lista(d["proponer"], "limites.proponer"))
+        try ValidarAgenteExtra.limites(l)
+        return l
+    }
+
+    /// `[{servidor, leer: [...], actuar: [...]}]`. nil si la clave no viene; `[]` si viene vacía.
+    static func conectoresValidos(_ v: Any?) throws -> [ConectorAsignado]? {
+        guard let v, !(v is NSNull) else { return nil }
+        guard let a = v as? [Any] else { throw ErrorAPI(400, "«conectores» tiene que ser una lista.") }
+        var out: [ConectorAsignado] = []
+        for x in a {
+            guard let d = x as? [String: Any] else { throw ErrorAPI(400, "Cada conector tiene que ser un objeto con «servidor», «leer» y «actuar».") }
+            let s = try Validar.texto(d["servidor"], "servidor", max: ValidarAgenteExtra.maxLargoServidor)!
+            out.append(ConectorAsignado(servidor: s, leer: try LecturaAPI.lista(d["leer"], "leer") ?? [],
+                                        actuar: try LecturaAPI.lista(d["actuar"], "actuar") ?? []))
+        }
+        try ValidarAgenteExtra.conectores(out)
+        return out
+    }
+
+    /// `["coordinador"]`. nil si la clave no viene; `[]` si viene vacía.
+    static func permisosValidos(_ v: Any?) throws -> [String]? {
+        guard let v, !(v is NSNull) else { return nil }
+        guard let p = try LecturaAPI.lista(v, "permisos") else { return nil }
+        try ValidarAgenteExtra.permisos(p)
+        return p
     }
 
     static func modeloValido(_ v: Any?) throws -> String {
@@ -204,7 +241,10 @@ extension Oficinas {
         if avatar.semilla == nil { avatar.semilla = id }
         let def = AgenteDef(id: id, nombre: n.nombre, rol: n.rol, departamento: n.departamento, brief: n.brief,
                             modelo: n.modelo, chips: n.chips.isEmpty ? nil : n.chips, avatar: avatar,
-                            creado: Oficinas.ahoraISO(), escritura: n.escritura)
+                            creado: Oficinas.ahoraISO(), escritura: n.escritura,
+                            limites: (n.limites?.vacio ?? true) ? nil : n.limites,
+                            conectores: (n.conectores?.isEmpty ?? true) ? nil : n.conectores,
+                            permisos: (n.permisos?.isEmpty ?? true) ? nil : n.permisos)
         let notas = a.ruta("conocimiento/agentes/\(id).md")
         let notasNuevas = !FileManager.default.fileExists(atPath: notas)
         do {
@@ -228,6 +268,8 @@ extension Oficinas {
     public struct CambiosAgente: Sendable {
         public var nombre: String?, rol: String?, departamento: String?, avatar: Avatar?
         public var prompt: String?, description: String?, chips: [String]?, modelo: String?, brief: String?
+        /// Si la clave viene, reemplaza; una lista vacía (o límites sin ítems) borra.
+        public var limites: LimitesAgente?, conectores: [ConectorAsignado]?, permisos: [String]?
         static func desde(_ d: [String: Any]) throws -> CambiosAgente {
             var c = CambiosAgente()
             c.nombre = try Validar.texto(d["nombre"], "nombre", max: 80, obligatorio: false)
@@ -239,6 +281,9 @@ extension Oficinas {
             if d["modelo"] != nil, !(d["modelo"] is NSNull) { c.modelo = try NuevoAgente.modeloValido(d["modelo"]) }
             if d["chips"] != nil, !(d["chips"] is NSNull) { c.chips = try NuevoAgente.chipsValidos(d["chips"]) }
             c.avatar = try NuevoAgente.avatarValido(d["avatar"])
+            c.limites = try NuevoAgente.limitesValidos(d["limites"])
+            c.conectores = try NuevoAgente.conectoresValidos(d["conectores"])
+            c.permisos = try NuevoAgente.permisosValidos(d["permisos"])
             return c
         }
     }
@@ -254,6 +299,9 @@ extension Oficinas {
         if let v = c.brief { o.agentes[i].brief = v }
         if let v = c.chips { o.agentes[i].chips = v.isEmpty ? nil : v }
         if let v = c.modelo { o.agentes[i].modelo = v }
+        if let v = c.limites { o.agentes[i].limites = v.vacio ? nil : v }
+        if let v = c.conectores { o.agentes[i].conectores = v.isEmpty ? nil : v }
+        if let v = c.permisos { o.agentes[i].permisos = v.isEmpty ? nil : v }
         if var av = c.avatar {
             if av.semilla == nil { av.semilla = o.agentes[i].avatar?.semilla ?? id }
             o.agentes[i].avatar = av

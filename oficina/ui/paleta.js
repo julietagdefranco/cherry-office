@@ -39,7 +39,13 @@ App.Paleta = (function () {
     o.departamentos.forEach(function (d) {
       out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Deptos.abrir(); } });
     });
-    [['Contratar un agente', 'mas', function () { App.Contratar.abrir(); }],
+    [['Parte del día', 'parte', function () { App.Parte.abrir(); }],
+     ['Flujos', 'flujo', function () { App.Flujos.abrir(); }],
+     ['Nueva corrida', 'flujo', function () { App.Flujos.abrir(); App.Flujos.nueva(); }],
+     ['Armar con el Creador', 'chispa', function () { App.Creador.abrir(); }],
+     ['Reglas de la oficina', 'regla', function () { App.Ajustes.reglas(); }],
+     ['Conectores', 'enchufe', function () { App.Ajustes.conectores(); }],
+     ['Contratar un agente', 'mas', function () { App.Contratar.abrir(); }],
      ['Llamar a reunión', 'reunion', function () { App.Reunion.nueva(); }],
      ['Departamentos', 'capas', function () { App.Deptos.abrir(); }],
      ['Siguiente aviso pendiente', 'chispa', function () { if (App.Avisos) App.Avisos.siguiente(); }],

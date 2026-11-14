@@ -158,6 +158,8 @@ struct BibliotecaTests {
         let l = try #require(ll.first)
         #expect(!l.contains("--agent"))
         #expect(Sandbox.valor(l, "--tools") == "")
+        #expect(Sandbox.valor(l, "--permission-mode") == "dontAsk")
+        #expect(Sandbox.valor(l, "--disallowedTools") == "mcp__claude_ai_*")
         #expect(sinPrivate(try #require(f.sb.cwds[f.sb.llamadas.firstIndex(where: { $0 == l })!])) == sinPrivate(f.carpeta))
         let p = try #require(l.last)
         #expect(p.contains("Sos el bibliotecario de la oficina «Taller»"))
@@ -261,6 +263,9 @@ struct BibliotecaTests {
         let l = try #require(desc.first)
         #expect(!l.contains("--agent"))
         #expect(Sandbox.valor(l, "--tools") == "Read")
+        #expect(Sandbox.valor(l, "--permission-mode") == "dontAsk")
+        #expect(Sandbox.valor(l, "--allowedTools") == "Read")
+        #expect(Sandbox.valor(l, "--disallowedTools") == "mcp__claude_ai_*")
         #expect(Sandbox.valores(l, "--add-dir") == [f.carpeta + "/archivos/compartido"])
         #expect(try #require(l.last).contains(f.carpeta + "/archivos/compartido/foto.png"))
         #expect(f.leer("archivos/.texto/foto.md") == "Una imagen de prueba con el texto HOLA MUNDO.")
@@ -648,7 +653,8 @@ struct BibliotecaTests {
         #expect(Sandbox.valor(l, "--tools") == "Read,Glob,Grep,Skill,Edit,Write")
         // permiso de escritura: SOLO su archivo de notas (ni entregables ni nada más)
         let notas = f.carpeta + "/conocimiento/agentes/marce.md"
-        #expect(Sandbox.reglas(l) == ["Edit(/\(notas))", "Write(/\(notas))"])
+        #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "Skill", "Edit(/\(notas))", "Write(/\(notas))",
+                                       "--disallowedTools", "mcp__claude_ai_*"])
         #expect(!l.contains("--add-dir"))
         #expect(sinPrivate(try #require(f.sb.cwds[f.sb.llamadas.firstIndex(where: { $0 == l })!])) == sinPrivate(f.carpeta))
         let p = try #require(l.last)

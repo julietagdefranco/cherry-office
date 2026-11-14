@@ -13,16 +13,10 @@ App.Avisos = (function () {
     if (a.tipo === 'reunion') return 'Reunión esperándote';
     if (a.tipo === 'propuestas') return 'Biblioteca';
     if (a.tipo === 'pendiente') return 'Pendientes para vos';
+    if (a.tipo === 'flujo') return 'Te toca en un flujo';
     return (nombre(a) || 'Un agente') + (TITULO[a.tipo] || '');
   }
-  function hace(ts) {
-    var s = Math.max(0, Date.now() / 1000 - ts);
-    if (s < 60) return 'recién';
-    if (s < 3600) return 'hace ' + Math.round(s / 60) + ' min';
-    if (s < 86400) return 'hace ' + Math.round(s / 3600) + ' h';
-    return 'hace ' + Math.round(s / 86400) + ' d';
-  }
-  function guardado(a) { return /^a\d+$/.test(a.id); }
+  function guardado(a) { return /^a\d+$/.test(a.id) || /^flujo:/.test(a.id); }
 
   /* con el panel de ese agente (o de esa reunión) abierto, ya se está viendo: se marca solo */
   function filtrar(avs) {
@@ -69,7 +63,7 @@ App.Avisos = (function () {
     banner.classList.remove('oculto');
     var a = lista[indice] || lista[0];
     banner.appendChild(h('span.avisos-faro'));
-    banner.appendChild(h('div.avisos-txt', h('b', titulo(a)), h('span', a.texto), h('small', hace(a.creado))));
+    banner.appendChild(h('div.avisos-txt', h('b', titulo(a)), h('span', a.texto), h('small', App.hace(a.creado))));
     banner.appendChild(h('button.btn.chico.primario', { onclick: function () { abrir(a.id); } }, 'Ver'));
     if (lista.length > 1) banner.appendChild(h('button.btn.chico', { title: 'Siguiente (N)', onclick: siguiente }, (indice + 1) + ' de ' + lista.length, h('kbd', 'N')));
     if (guardado(a)) banner.appendChild(h('button.btn.fantasma.icono', { title: 'Descartar', onclick: function () { visto({ id: a.id }); } }, App.icono('cerrar')));
@@ -90,6 +84,7 @@ App.Avisos = (function () {
     }
     if (a.tipo === 'reunion') { if (a.ref && App.Reunion.ver) App.Reunion.ver(a.ref); else App.Reunion.abrir(); if (App.Oficina3D.enfocarLugar) App.Oficina3D.enfocarLugar('reunion'); return; }
     if (a.tipo === 'propuestas') { App.Biblioteca.abrir(); return; }
+    if (a.tipo === 'flujo') { visto({ id: a.id }); if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(a.ref); return; }
     if (a.tipo === 'pendiente') { visto({ id: a.id }); if (App.Reunion.ver && a.ref) App.Reunion.ver(a.ref); else App.Reunion.abrir(); return; }
     if (a.agente && App.agente(a.agente)) {
       App.Agente.abrir(a.agente, 'chat');

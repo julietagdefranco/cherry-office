@@ -14,6 +14,10 @@ public final class Backend: Sendable {
     private let migracion: Task<Migracion.Resultado, Never>
     /// Servidor MCP de las consultas entre agentes (Fase 4).
     let mcp: MCPServidor
+    /// Motor de flujos de la oficina (pasos con agentes y personas).
+    let motor: MotorFlujos
+    /// Lo que comparten el motor, el coordinador, las acciones, el Creador y los routers extra.
+    let servicios: ServiciosHQ
 
     public var router: APIHandler { apiRouter }
 
@@ -34,6 +38,9 @@ public final class Backend: Sendable {
 
     /// Registra el enrutador de `/api/entregas*` (entregas para revisar).
     func registrarEntregas(_ r: SubRouter) { apiRouter.subrouters.entregas = r }
+
+    /// Registra un router extra: se prueba antes que cualquier otro prefijo de `/api/*`.
+    func registrarExtra(_ r: SubRouter) { apiRouter.subrouters.registrarExtra(r) }
 
     /// Configuración real: defaults + config.json + entorno, datos en ~/Library/Application Support/Próspera HQ.
     public static func makeDefault() throws -> Backend {
@@ -59,11 +66,22 @@ public final class Backend: Sendable {
         migracion = mig
         let oficinas = Oficinas(config: cfg, log: log)
         self.oficinas = oficinas
-        let programador = Programador(store: store, runner: runner, oficinas: oficinas, config: cfg, log: log, env: env)
-        self.programador = programador
         let mcp = MCPServidor(store: store, runner: runner, log: log, env: env)
         self.mcp = mcp
-        apiRouter = Router(config: cfg, store: store, runner: runner, log: log, oficinas: oficinas, mcp: mcp, listo: { _ = await mig.value })
+        let programador = Programador(store: store, runner: runner, oficinas: oficinas, config: cfg, log: log, mcp: mcp, env: env)
+        self.programador = programador
+        let motor = MotorFlujos(store: store, runner: runner, oficinas: oficinas, programador: programador, log: log, env: env)
+        self.motor = motor
+        let servicios = ServiciosHQ(config: cfg, store: store, runner: runner, oficinas: oficinas, programador: programador,
+                                    motor: motor, mcp: mcp, log: log, env: env)
+        self.servicios = servicios
+        mcp.fijarServicios(servicios)
+        apiRouter = Router(config: cfg, store: store, runner: runner, log: log, oficinas: oficinas, mcp: mcp, servicios: servicios,
+                           listo: { _ = await mig.value })
+        registrarExtra(FlujosRouter(servicios: servicios))
+        registrarExtra(CreadorRouter(servicios: servicios))
+        registrarExtra(GobiernoRouter(servicios: servicios))
+        registrarExtra(ParteRouter(servicios: servicios))
         registrarReuniones(ReunionesRouter(store: store, runner: runner, oficinas: oficinas, log: log, programador: programador, env: env))
         let biblioteca = BibliotecaRouter(store: store, runner: runner, oficinas: oficinas, log: log, env: env)
         registrarBiblioteca(biblioteca)
@@ -73,6 +91,7 @@ public final class Backend: Sendable {
         // revisar la entrega de un encargo tilda su pendiente en las notas del agente
         registrarEntregas(EntregasRouter(oficinas: oficinas, store: store, programador: programador, alRevisar: { e, act in
             await PendientesReunion.tildarEncargo(e, act, store: store)
+            await motor.revisada(e, act)
         }))
         let canal = runner.canalAvisos
         Task {
@@ -81,18 +100,32 @@ public final class Backend: Sendable {
             await programador.alTerminar { e in
                 guard e.estado != "ok" else { return }
                 let of = await oficinas.activa()?.oficina
-                let tarea = of?.tareas?.first { $0.id == e.tarea }?.nombre
-                    ?? (Programador.deEncargo(e.tarea) != nil ? "Pendiente de reunión" : e.tarea)
+                let tarea = of?.tareas?.first { $0.id == e.tarea }?.nombre ?? Backend.nombreCorrida(e.tarea)
                 let texto = "«\(tarea)» falló: " + (e.error ?? "error")
                 if let av = await store.avisoCrear(oficina: e.oficina, tipo: "error", agente: e.agente, texto: texto, ref: e.sid) {
                     canal.emitir(av, nombre: of?.agente(e.agente)?.nombre ?? e.agente)
                 }
             }
+            await programador.alTerminar { ej in await motor.alTerminar(ej) }
+            await programador.alEntregar { e, ej in await motor.alEntregar(e, ej) }
             await programador.iniciar()
+            await Coordinador.instalar(servicios)
+            await Acciones.instalar(servicios)
+            await motor.preparar()
         }
         log.info("arranque oficinasDir=\(cfg.oficinasDir) claude=\(runner.claudePath ?? "no")")
         // chequeo de arranque, sin bloquear
         Task.detached { _ = await runner.authStatus(timeout: 30) }
+    }
+
+    /// Nombre para el aviso de una corrida que no es una tarea de `oficina.json`, según el prefijo de su id.
+    static func nombreCorrida(_ id: String) -> String {
+        if Programador.deEncargo(id) != nil { return "Pendiente de reunión" }
+        if id.hasPrefix(Programador.prefijoFlujo) { return "Paso de flujo" }
+        if id.hasPrefix(Programador.prefijoAccion) { return "Acción aprobada" }
+        if id.hasPrefix(Programador.prefijoCoordinador) { return "Encargo del coordinador" }
+        if id.hasPrefix(Programador.prefijoParte) { return "Parte del día" }
+        return id
     }
 
     /// Espera a que termine la migración inicial (tests).

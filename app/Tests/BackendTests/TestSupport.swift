@@ -28,6 +28,10 @@ import Testing
 ///   consulta  (--agent, "consulta de un colega")             -> "Mi mirada de <agente> sobre la consulta." (costo 0.03)
 ///   CONSULTAR:<colega> [x4] (en un chat) -> llama por HTTP a `consultar` del servidor MCP (URL de --mcp-config, token de
 ///                         $HQ_MCP_TOKEN); guarda las respuestas en `mcp.<agente>.out`, el token en `token.log` y la URL en `url.log`
+///   CREADOR_LLAMAR (en un chat del Creador) -> lee `creador.calls` (una línea JSON `{name, arguments}` por llamada) y hace un
+///                         POST `tools/call` al servidor MCP por cada una, igual que CONSULTAR (URL de --mcp-config, token de
+///                         $HQ_MCP_TOKEN). Las respuestas JSON-RPC van a `creador.out`, una por línea. Se arma con
+///                         `Sandbox.llamadasCreador(_:)` y se lee con `Sandbox.salidasCreador`.
 ///   lectura   (--agent, "Se sumó un documento a la biblioteca") -> agrega una línea a conocimiento/agentes/<agente>.md y responde "listo"
 /// `Sandbox.responder(clave, texto)` pisa la respuesta (clave: borrador|acta|ficha|imagen|turno|lectura, o `turno.<agente>`).
 /// `Sandbox.modo(clave, modo)` cambia el comportamiento de una clave (`<tipo>` o un id de agente):
@@ -181,6 +185,26 @@ final class Sandbox: @unchecked Sendable {
       echo "{\"type\":\"result\",\"result\":\"consulte\",\"is_error\":false,\"total_cost_usd\":0.01}"
       fin; exit 0
     fi
+    if [[ "$msg" == *CREADOR_LLAMAR* ]]; then
+      # hace las llamadas de $D/creador.calls al servidor MCP con el token del entorno, como haría el Creador de verdad
+      cfg=""; prev=""
+      for a in "$@"; do if [[ "$prev" == "--mcp-config" ]]; then cfg="$a"; fi; prev="$a"; done
+      url="$(echo "$cfg" | grep -o 'http://127[^"]*')"
+      echo "$HQ_MCP_TOKEN" >> "$D/token.log"
+      echo "$url" >> "$D/url.log"
+      i=0
+      if [[ -f "$D/creador.calls" ]]; then
+        while IFS= read -r linea || [[ -n "$linea" ]]; do
+          [[ -z "$linea" ]] && continue
+          i=$((i+1))
+          body="{\"jsonrpc\":\"2.0\",\"id\":$i,\"method\":\"tools/call\",\"params\":$linea}"
+          curl -s -m 20 -H "Authorization: Bearer $HQ_MCP_TOKEN" -H 'Content-Type: application/json' -d "$body" "$url" >> "$D/creador.out"
+          echo >> "$D/creador.out"
+        done < "$D/creador.calls"
+      fi
+      echo "{\"type\":\"result\",\"result\":\"Listo, armé las tarjetas.\",\"is_error\":false,\"total_cost_usd\":0.02}"
+      fin; exit 0
+    fi
     if [[ "$msg" == *ENTREGA:* ]]; then
       # escribe el archivo pedido (relativo a la carpeta de trabajo) y lo informa como un Write de claude
       rel="${msg#*ENTREGA:}"; rel="${rel%% *}"
@@ -329,6 +353,19 @@ extension Sandbox {
 
     /// Deja pasar a todos los claude que esperan en modo `puerta` (y a los siguientes).
     func abrirPuerta() { FileManager.default.createFile(atPath: binDir + "/go", contents: Data()) }
+
+    /// Las llamadas que hará el claude falso cuando el mensaje del chat lleve CREADOR_LLAMAR: `[{name, arguments}]`.
+    func llamadasCreador(_ llamadas: [[String: Any]]) {
+        let lineas = llamadas.map { String(decoding: json($0), as: UTF8.self) }
+        FileManager.default.createFile(atPath: binDir + "/creador.calls", contents: Data((lineas.joined(separator: "\n") + "\n").utf8))
+    }
+
+    /// Respuestas JSON-RPC del servidor MCP a las llamadas de `llamadasCreador` (una por llamada, en orden).
+    var salidasCreador: [[String: Any]] {
+        ((try? String(contentsOfFile: binDir + "/creador.out", encoding: .utf8)) ?? "").split(separator: "\n").compactMap {
+            (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
+        }
+    }
 
     /// Carpeta de trabajo de cada llamada, en el mismo orden que `llamadas`.
     var cwds: [String] {
