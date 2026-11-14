@@ -37,13 +37,16 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
 
   /* ---------------- app nativa (WKWebView) ---------------- */
   var puente = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.hq;
+  var plataforma = (window.oficinaApp && window.oficinaApp.plataforma) || 'darwin';
   App.nativo = {
     hay: !!puente,
-    /* abre un archivo o carpeta con la app predeterminada de macOS (solo rutas dentro de la oficina o vínculos) */
+    /* «en Finder» (Mac, app Swift o Electron) o «en el Explorador» (Windows) */
+    enExplorador: plataforma === 'win32' ? 'en el Explorador' : plataforma === 'darwin' ? 'en Finder' : 'en la carpeta',
+    /* abre un archivo o carpeta con la app predeterminada del sistema (solo rutas dentro de la oficina o vínculos) */
     abrir: function (ruta) { if (puente) puente.postMessage({ accion: 'abrir', ruta: ruta }); },
     revelar: function (ruta) { if (puente) puente.postMessage({ accion: 'revelar', ruta: ruta }); },
     acerca: function () { if (puente) puente.postMessage({ accion: 'acerca' }); },
-    /* número en el ícono del Dock (avisos pendientes); 0 lo saca */
+    /* número en el ícono del Dock o de la barra de tareas (avisos pendientes); 0 lo saca */
     insignia: function (n) { if (puente) puente.postMessage({ accion: 'insignia', n: n | 0 }); },
     /* selector de un .zip (importar una oficina); undefined si no hay app nativa o falla, null si se cancela */
     elegirArchivo: function (titulo) {

@@ -1,0 +1,122 @@
+// Eventos de `claude -p --output-format stream-json --verbose`, reducidos a lo que la oficina muestra (Stream.swift).
+// Nunca llevan contenido de mensajes ni de archivos: solo nombres de herramientas y un objetivo corto.
+import path from 'node:path'
+import { esObjeto } from './json.js'
+import { largo, prefijo } from './validar.js'
+
+export type EventoClaude =
+  | { tipo: 'inicio'; sesion: string }
+  | { tipo: 'pensando' }
+  | { tipo: 'herramienta'; nombre: string; objetivo?: string }
+  /** Ruta de un archivo que el agente escribió (Write, Edit, NotebookEdit). Llega después de su `herramienta`. */
+  | { tipo: 'archivo'; ruta: string }
+  | { tipo: 'texto' }
+  | { tipo: 'resultado'; costo?: number; error: boolean }
+
+/** Recibe los eventos de una corrida, en orden. */
+export type Observador = (e: EventoClaude) => void
+
+/** Herramientas que escriben un archivo (su ruta llega en `file_path` o `notebook_path`). */
+const escritoras = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+/** Eventos de una línea (una línea `assistant` puede traer varios bloques). Lo que no es JSON o no se conoce: []. */
+export function parsearEvento(linea: string): EventoClaude[] {
+  let o: unknown
+  try {
+    o = JSON.parse(linea)
+  } catch {
+    return []
+  }
+  if (!esObjeto(o) || typeof o.type !== 'string') return []
+  switch (o.type) {
+    case 'system':
+      return o.subtype === 'init' && typeof o.session_id === 'string' ? [{ tipo: 'inicio', sesion: o.session_id }] : []
+    case 'assistant': {
+      const msg = esObjeto(o.message) ? o.message : {}
+      const bloques = Array.isArray(msg.content) ? msg.content.filter(esObjeto) : []
+      return bloques.flatMap((b): EventoClaude[] => {
+        if (b.type === 'thinking') return [{ tipo: 'pensando' }]
+        if (b.type === 'text') return [{ tipo: 'texto' }]
+        if (b.type !== 'tool_use' || typeof b.name !== 'string') return []
+        const input = esObjeto(b.input) ? b.input : {}
+        const out: EventoClaude[] = [{ tipo: 'herramienta', nombre: b.name, objetivo: objetivo(input) }]
+        const p = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : ''
+        if (escritoras.has(b.name) && p !== '') out.push({ tipo: 'archivo', ruta: p })
+        return out
+      })
+    }
+    case 'result':
+      return [{ tipo: 'resultado', costo: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : undefined, error: o.is_error === true }]
+    default:
+      return []
+  }
+}
+
+/** Objetivo legible y corto de una herramienta: nombre de archivo, patrón, dominio o colega. Sin contenido. */
+export function objetivo(input: Record<string, unknown>): string | undefined {
+  const corto = (s: string) => (largo(s) > 60 ? prefijo(s, 59) + '…' : s)
+  const s = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined)
+  const p = typeof input.file_path === 'string' ? input.file_path : typeof input.path === 'string' ? input.path : undefined
+  if (p) return corto(path.posix.basename(p.replace(/\\/g, '/')))
+  if (s(input.pattern)) return corto(input.pattern as string)
+  if (typeof input.url === 'string') {
+    try {
+      const h = new URL(input.url).hostname
+      if (h) return corto(h)
+    } catch {}
+  }
+  if (s(input.query)) return corto(input.query as string)
+  if (s(input.colega)) return corto(input.colega as string)
+  return undefined
+}
+
+/** Corta bytes en líneas completas (los chunks del pipe pueden partir una línea o un carácter UTF-8). */
+export class CortadorLineas {
+  private buf: Buffer = Buffer.alloc(0)
+  constructor(private readonly alLinea: (l: string) => void) {}
+
+  agregar(d: Buffer) {
+    this.buf = this.buf.length === 0 ? d : Buffer.concat([this.buf, d])
+    let i: number
+    while ((i = this.buf.indexOf(0x0a)) >= 0) {
+      const linea = this.buf.subarray(0, i)
+      this.buf = this.buf.subarray(i + 1)
+      if (linea.length > 0) this.alLinea(linea.toString('utf8'))
+    }
+  }
+
+  /** Lo que quedó sin `\n` al final. */
+  terminar() {
+    if (this.buf.length > 0) {
+      this.alLinea(this.buf.toString('utf8'))
+      this.buf = Buffer.alloc(0)
+    }
+  }
+}
+
+/** Junta el costo de una o varias corridas. */
+export class CajaCosto {
+  private total?: number
+  sumar(c?: number) { if (c !== undefined) this.total = (this.total ?? 0) + c }
+  get valor() { return this.total }
+  /** Observador que suma el costo del `resultado` y reenvía todo a `siguiente`. */
+  observador(siguiente?: Observador): Observador {
+    return (e) => {
+      if (e.tipo === 'resultado') this.sumar(e.costo)
+      siguiente?.(e)
+    }
+  }
+}
+
+/** Junta las rutas de los archivos escritos, sin repetir y en orden. */
+export class CajaArchivos {
+  private rutas: string[] = []
+  agregar(r: string) { if (!this.rutas.includes(r)) this.rutas.push(r) }
+  get valor() { return [...this.rutas] }
+  observador(siguiente?: Observador): Observador {
+    return (e) => {
+      if (e.tipo === 'archivo') this.agregar(e.ruta)
+      siguiente?.(e)
+    }
+  }
+}

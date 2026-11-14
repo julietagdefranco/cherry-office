@@ -182,7 +182,7 @@
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, App.icono('importar'), h('div', { style: { minWidth: 0 } }, h('b', r.nombre), h('div', { style: { color: 'var(--tenue)', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: r.archivo }, r.archivo), h('div.ayuda', detalle))),
       omitidos.length ? h('div.ayuda', { style: { marginTop: '10px' } }, omitidos.join(' ')) : null,
       avisosLista(r.avisos));
-    if (App.nativo.hay) App.add(hj.pie, h('button.btn', { onclick: function () { App.nativo.revelar(r.archivo); } }, 'Mostrar en Finder'));
+    if (App.nativo.hay) App.add(hj.pie, h('button.btn', { onclick: function () { App.nativo.revelar(r.archivo); } }, 'Mostrar ' + App.nativo.enExplorador));
     App.add(hj.pie, h('button.btn.primario', { onclick: hj.cerrar }, 'Listo'));
   }
 
@@ -359,7 +359,7 @@
       items.push({ texto: 'Nombre de la oficina…', icono: 'edificio', accion: editarOficina });
       items.push({ texto: 'Quién dirige…', icono: 'personas', accion: function () { App.Yo.abrir(); } });
       items.push({ texto: 'Exportar oficina…', icono: 'subir', accion: exportarOficina });
-      items.push({ texto: App.nativo.hay ? 'Mostrar carpeta en Finder' : 'Ver archivos de la oficina', icono: 'carpeta', accion: function () { if (App.nativo.hay) App.nativo.revelar(E.carpeta); else App.verArchivosOficina(); } });
+      items.push({ texto: App.nativo.hay ? 'Mostrar carpeta ' + App.nativo.enExplorador : 'Ver archivos de la oficina', icono: 'carpeta', accion: function () { if (App.nativo.hay) App.nativo.revelar(E.carpeta); else App.verArchivosOficina(); } });
       if (App.nativo.hay) items.push({ texto: 'Acerca de', icono: 'chispa', accion: App.nativo.acerca });
       App.menu(ancla, items);
     });

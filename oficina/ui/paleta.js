@@ -115,7 +115,8 @@ App.Paleta = (function () {
   });
 
   /* ---------------- barra de pistas ---------------- */
-  var BASE = 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte · ⌘K buscar · N siguiente aviso';
+  var esMac = /Mac/.test(navigator.platform || navigator.userAgent);
+  var BASE = 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte · ' + (esMac ? '⌘K' : 'Ctrl+K') + ' buscar · N siguiente aviso';
   var VERBO = { pensando: 'pensando', leyendo: 'leyendo', escribiendo: 'escribiendo', buscando: 'buscando', consultando: 'consultando a', trabajando: 'trabajando' };
   function pista(hov) {
     var el = App.dom && App.dom.lienzo && App.dom.lienzo.parentNode && App.dom.lienzo.parentNode.querySelector('.pista');

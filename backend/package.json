@@ -1,0 +1,27 @@
+{
+  "name": "oficina-backend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Backend de la Oficina en TypeScript (port del backend Swift, misma API).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:swift": "HQ_BACKEND=swift vitest run",
+    "test:ts": "HQ_BACKEND=ts vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc && node dist/src/dev.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "mammoth": "^1.13.0",
+    "unpdf": "^2.2.0"
+  }
+}

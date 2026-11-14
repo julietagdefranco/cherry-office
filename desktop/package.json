@@ -1,0 +1,87 @@
+{
+  "name": "oficina",
+  "productName": "Oficina",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Oficina: tu oficina de agentes de Claude (Mac y Windows).",
+  "main": "dist/main.cjs",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "author": "Oficina",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p .",
+    "start": "node scripts/build.mjs && electron .",
+    "dist:mac": "node scripts/build.mjs --recursos && electron-builder --mac --arm64",
+    "dist:win": "node scripts/build.mjs --recursos && electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.oficina.app",
+    "productName": "Oficina",
+    "copyright": "Oficina",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!dist/**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "build/recursos/oficina",
+        "to": "oficina"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icono.png"
+      }
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "identity": null,
+      "minimumSystemVersion": "13.0"
+    },
+    "dmg": {
+      "artifactName": "Oficina-${version}-arm64.dmg"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "artifactName": "Oficina-Setup-${version}.exe",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Oficina",
+      "language": "3082"
+    }
+  }
+}
