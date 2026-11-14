@@ -426,8 +426,9 @@ public actor Oficinas {
 
     public struct DepartamentoNuevo: Sendable { public var id: String?; public var nombre: String; public var color: String?; public var mision: String? = nil }
 
+    /// `vacia`: la oficina arranca sin departamentos (la arma el Creador); si no, sin lista van los sugeridos.
     public func crear(nombre: String, duenio: String, carpeta: String? = nil,
-                      departamentos: [DepartamentoNuevo]? = nil) throws -> OficinaActiva {
+                      departamentos: [DepartamentoNuevo]? = nil, vacia: Bool = false) throws -> OficinaActiva {
         let n = nombre.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty, n.count <= 80 else { throw ErrorAPI(400, "Poné un nombre para la oficina (hasta 80 caracteres).") }
         let d = duenio.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -435,7 +436,7 @@ public actor Oficinas {
 
         var deps: [Departamento] = []
         let pedidos = (departamentos?.isEmpty == false) ? departamentos! :
-            Oficinas.departamentosSugeridos.map { DepartamentoNuevo(id: nil, nombre: $0, color: nil) }
+            vacia ? [] : Oficinas.departamentosSugeridos.map { DepartamentoNuevo(id: nil, nombre: $0, color: nil) }
         guard pedidos.count <= Oficinas.maxDepartamentos else { throw ErrorAPI(400, "Máximo \(Oficinas.maxDepartamentos) departamentos.") }
         for (i, p) in pedidos.enumerated() {
             deps.append(try Oficinas.armarDepartamento(p, indice: i, usados: Set(deps.map(\.id))))
