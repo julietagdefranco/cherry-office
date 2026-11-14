@@ -51,9 +51,9 @@ Con firma ad-hoc, macOS bloquea la primera apertura ("no se puede verificar el d
 
 ## Verificar el dmg a mano
 ```bash
-hdiutil verify "app/build/Oficina 0.4.0.dmg"
+hdiutil verify "app/build/Oficina 0.5.0.dmg"
 codesign --verify --deep --strict "/Volumes/Oficina/Oficina.app"   # con el dmg montado
-spctl -a -vv -t install "app/build/Oficina 0.4.0.dmg"                  # solo pasa si está notarizado
+spctl -a -vv -t install "app/build/Oficina 0.5.0.dmg"                  # solo pasa si está notarizado
 ```
 
 ## Agentes y oficinas
