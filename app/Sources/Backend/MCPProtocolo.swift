@@ -71,21 +71,24 @@ struct IdentidadMCP: Sendable, Equatable {
     var oficina: String
     var agente: String
     var sid: String
+    /// agente | coordinador | creador: decide qué herramientas ofrece el servidor.
+    var perfil: String = "agente"
 }
 
 /// Tokens por corrida: token (32 bytes aleatorios, hex) -> identidad y consultas que le quedan.
 /// Se emiten al empezar un chat y se revocan al terminar.
 final class MCPTokens: @unchecked Sendable {
     static let consultasPorMensaje = 3
-    private struct Entrada { var identidad: IdentidadMCP; var restantes: Int }
+    private struct Entrada { var identidad: IdentidadMCP; var restantes: Int; var usados: [String: Int] = [:] }
     private let lock = NSLock()
     private var tokens: [String: Entrada] = [:]
 
-    func emitir(oficina: String, agente: String, sid: String, consultas: Int = MCPTokens.consultasPorMensaje) -> String {
+    func emitir(oficina: String, agente: String, sid: String, perfil: String = "agente",
+                consultas: Int = MCPTokens.consultasPorMensaje) -> String {
         var g = SystemRandomNumberGenerator()
         let t = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255, using: &g)) }.joined()
         lock.lock(); defer { lock.unlock() }
-        tokens[t] = Entrada(identidad: IdentidadMCP(oficina: oficina, agente: agente, sid: sid), restantes: consultas)
+        tokens[t] = Entrada(identidad: IdentidadMCP(oficina: oficina, agente: agente, sid: sid, perfil: perfil), restantes: consultas)
         return t
     }
 
@@ -98,6 +101,14 @@ final class MCPTokens: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard var e = tokens[token], e.restantes > 0 else { return false }
         e.restantes -= 1; tokens[token] = e
+        return true
+    }
+
+    /// Cupo genérico: gasta una unidad de `clave` (máximo `max` por token). false si ya no queda (o si el token no existe).
+    func tomar(_ token: String, clave: String, max: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard var e = tokens[token], e.usados[clave, default: 0] < max else { return false }
+        e.usados[clave, default: 0] += 1; tokens[token] = e
         return true
     }
 

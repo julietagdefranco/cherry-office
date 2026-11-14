@@ -65,7 +65,7 @@ extension Store {
 /// Lógica de las dos herramientas que ve un agente durante un chat. Una consulta es de un solo salto: corre como turno de
 /// solo lectura del colega, en una sesión nueva y SIN `--mcp-config` (el colega no puede consultar a nadie), y no toma el
 /// carril del colega (así no se bloquea si está ocupado, ni si él mismo está esperando a quien pregunta).
-final class ConsultasMCP: Sendable {
+final class ConsultasMCP: @unchecked Sendable {
     private let store: Store
     private let runner: ClaudeRunner
     private let log: HQLog
@@ -75,12 +75,31 @@ final class ConsultasMCP: Sendable {
     static let maxPregunta = 4000
     static let maxRespuesta = 12000
 
+    private let lockServicios = NSLock()
+    private var serviciosValor: ServiciosHQ?
+    /// Servicios que usan las herramientas de coordinador, acciones y Creador (nil = solo las de `hq`).
+    var servicios: ServiciosHQ? {
+        get { lockServicios.lock(); defer { lockServicios.unlock() }; return serviciosValor }
+        set { lockServicios.lock(); serviciosValor = newValue; lockServicios.unlock() }
+    }
+
     init(store: Store, runner: ClaudeRunner, log: HQLog, tokens: MCPTokens, timeout: TimeInterval = 120) {
         self.store = store; self.runner = runner; self.log = log; self.tokens = tokens; self.timeout = timeout
     }
 
+    /// Compone las herramientas según el perfil del token: creador -> las del Creador; el resto -> hq + coordinador + acciones.
     func herramientas(token: String, identidad: IdentidadMCP) -> MCPHerramientas {
-        HerramientasHQ(consultas: self, token: token, identidad: identidad)
+        let s = servicios
+        if identidad.perfil == "creador" {
+            if let s, let h = Creador.herramientas(s, token: token, identidad: identidad) { return h }
+            return HerramientasVacias()
+        }
+        var partes: [MCPHerramientas] = [HerramientasHQ(consultas: self, token: token, identidad: identidad)]
+        if let s {
+            if let c = Coordinador.herramientas(s, token: token, identidad: identidad) { partes.append(c) }
+            if let a = Acciones.herramientas(s, token: token, identidad: identidad) { partes.append(a) }
+        }
+        return HerramientasCompuestas(partes: partes)
     }
 
     /// Sin caracteres de control (salvo `\n` y `\t`), sin separadores de línea unicode ni marcas bidireccionales.
@@ -151,7 +170,8 @@ final class ConsultasMCP: Sendable {
             let prompt = Self.prompt(de: yo, pregunta: pregunta), bid = b.id
             let texto = try await runner.actividad.seguir(oficina: carpeta, agente: bid, origen: "consulta",
                                                           tarea: "Consulta de \(yo.nombre)", extra: caja.observador()) { obs, _ in
-                try await runner.turnoSoloLectura(agente: bid, prompt: prompt, cwd: carpeta, timeout: timeout, dirsExtra: dirs, obs: obs)
+                try await runner.turnoSoloLectura(agente: bid, prompt: prompt, cwd: carpeta, timeout: timeout, dirsExtra: dirs, obs: obs,
+                                             instrucciones: Instrucciones.para(o, b))
             }
             let t = String(Self.sanear(texto).trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxRespuesta))
             if t.isEmpty { fallo = "\(b.nombre) no devolvió respuesta." } else { respuesta = t }

@@ -187,7 +187,8 @@ struct ReunionesTests {
         for (l, ag) in zip(ll, ["marce", "nico", "betty", "marce", "nico", "betty"]) {
             #expect(Sandbox.valor(l, "--agent") == ag)
             #expect(Sandbox.valor(l, "--tools") == "Read,Glob,Grep")
-            #expect(!l.contains("--allowedTools") && !l.contains("Edit") && !l.contains("Write"))
+            #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "--disallowedTools", "mcp__claude_ai_*"] && !l.contains("Edit") && !l.contains("Write"))
+            #expect(Sandbox.valor(l, "--permission-mode") == "dontAsk")
             #expect(Sandbox.valor(l, "--output-format") == "stream-json")
             #expect(l.contains("--session-id") && !l.contains("--resume"))
             #expect(!l.contains("--add-dir"))

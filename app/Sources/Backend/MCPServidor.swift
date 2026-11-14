@@ -69,6 +69,9 @@ public final class MCPServidor: @unchecked Sendable {
         arrancar()
     }
 
+    /// Los servicios de la oficina (coordinador, acciones, Creador): los fija el Backend al armarse.
+    func fijarServicios(_ s: ServiciosHQ) { consultas.servicios = s }
+
     private func arrancar() {
         let params = NWParameters.tcp
         params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)

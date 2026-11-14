@@ -44,11 +44,18 @@ public enum Permisos {
     // MARK: oficinas
 
     /// Dónde corre un agente de oficina y qué puede escribir (rutas absolutas).
-    public static func contexto(_ a: OficinaActiva, agente: AgenteDef, dirsExtra: [String] = []) -> ContextoOficina {
+    public static func contexto(_ a: OficinaActiva, agente: AgenteDef, dirsExtra: [String] = [], actuar: [String] = []) -> ContextoOficina {
         var rutas = [a.ruta("conocimiento/agentes/\(agente.id).md")]
         for r in agente.escritura ?? [] where Validar.rutaEscrituraValida(r) { rutas.append(a.ruta(r)) }
         if let e = entregables(a, agente: agente.id) { rutas.append(e) }
-        return ContextoOficina(carpeta: a.carpeta, escritura: rutas, dirsExtra: dirsExtra + dirsVinculos(a.oficina, agente: agente))
+        var ctx = ContextoOficina(carpeta: a.carpeta, escritura: rutas, dirsExtra: dirsExtra + dirsVinculos(a.oficina, agente: agente))
+        ctx.instrucciones = Instrucciones.para(a.oficina, agente)
+        let (permitidas, vedadas) = ConectoresAgente.herramientas(a.oficina, agente, catalogo: CatalogoConectores.compartido.servidores(), actuar: actuar)
+        ctx.permitidas = permitidas
+        ctx.vedadas = vedadas
+        ctx.herramientasMCP = HerramientasMCPAgente.lista(a.oficina, agente)
+        ctx.perfilMCP = Coordinador.perfil(a.oficina, agente)
+        return ctx
     }
 
     /// Patrón de escritura de `archivos/entregables/<id>/` (todo lo que cuelga de esa carpeta). Crea la carpeta del agente.
@@ -86,27 +93,43 @@ public enum Permisos {
         return String(decoding: d, as: UTF8.self)
     }
 
-    /// Herramientas de un agente de oficina: base + Edit,Write (siempre hay una ruta propia) + las MCP si hay servidor.
+    /// Herramientas de un agente de oficina: base + Edit,Write (si tiene alguna ruta) + las MCP si hay servidor.
     public static func herramientas(_ cfg: Config, oficina: ContextoOficina, agente: String) -> String {
-        var h = cfg.herramientasAgente[agente].flatMap { $0.isEmpty ? nil : $0 } ?? cfg.herramientas
+        var h = baseOficina(cfg, oficina: oficina, agente: agente)
         if !oficina.escritura.isEmpty { h += ",Edit,Write" }
-        if oficina.mcpUrl != nil { h += "," + herramientasMCP.joined(separator: ",") }
+        if oficina.mcpUrl != nil { h += "," + (oficina.herramientasMCP ?? herramientasMCP).joined(separator: ",") }
         return h
     }
 
-    /// Como `argumentos` pero para un agente de oficina: escritura solo en `oficina.escritura`.
+    /// Herramientas base: `herramientasBase` del contexto, o las del agente, o las generales.
+    static func baseOficina(_ cfg: Config, oficina: ContextoOficina, agente: String) -> String {
+        if let b = oficina.herramientasBase, !b.isEmpty { return b }
+        return cfg.herramientasAgente[agente].flatMap { $0.isEmpty ? nil : $0 } ?? cfg.herramientas
+    }
+
+    /// Como `argumentos` pero para un agente de oficina: escritura solo en `oficina.escritura`. Orden fijo (plan §3).
     public static func argumentos(_ cfg: Config, oficina: ContextoOficina, agente: String, mensaje: String,
                                   sid: String, flag: String) -> [String] {
-        var a = ["-p", "--agent", agente, flag, sid] + ClaudeRunner.formatoSalida + ["--tools",
-                 herramientas(cfg, oficina: oficina, agente: agente)]
+        var a = ["-p", "--agent", agente, flag, sid] + ClaudeRunner.formatoSalida
+        a += ["--tools", herramientas(cfg, oficina: oficina, agente: agente)]
+        a += ["--permission-mode", "dontAsk"]
         if let url = oficina.mcpUrl { a += ["--mcp-config", configMCP(url: url)] }
         for d in oficina.dirsExtra { a += ["--add-dir", d] }
-        if !oficina.escritura.isEmpty || oficina.mcpUrl != nil {
-            a.append("--allowedTools")
-            for p in oficina.escritura { for h in ["Edit", "Write"] { a.append(regla(h, ruta: p)) } }
-            if oficina.mcpUrl != nil { a += herramientasMCP }
+        a.append("--allowedTools")
+        for h in baseOficina(cfg, oficina: oficina, agente: agente).split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) where !h.isEmpty {
+            a.append(h)
         }
+        for p in oficina.escritura { for h in ["Edit", "Write"] { a.append(regla(h, ruta: p)) } }
+        if oficina.mcpUrl != nil { a += oficina.herramientasMCP ?? herramientasMCP }
+        a += oficina.permitidas
+        if !oficina.vedadas.isEmpty { a += ["--disallowedTools"] + oficina.vedadas }
+        if let i = oficina.instrucciones, !i.isEmpty { a += ["--append-system-prompt", i] }
         return a + ["--", mensaje]
+    }
+
+    /// Variables de entorno extra del hijo: con conectores de claude.ai asignados hay que esperar a que se conecten.
+    public static func entorno(_ ctx: ContextoOficina) -> [String: String] {
+        ctx.permitidas.contains { $0.hasPrefix("mcp__claude_ai_") } ? ["MCP_CONNECTION_NONBLOCKING": "false"] : [:]
     }
 }
 
@@ -117,6 +140,18 @@ public struct ContextoOficina: Sendable, Equatable {
     public var dirsExtra: [String]
     /// URL del servidor MCP de la oficina (Fase 4); nil = el chat corre sin consultas a colegas.
     public var mcpUrl: String?
+    /// Texto para `--append-system-prompt` (reglas, límites, conectores...). nil = nada.
+    public var instrucciones: String?
+    /// Herramientas MCP propias del agente; nil equivale a `Permisos.herramientasMCP`.
+    public var herramientasMCP: [String]?
+    /// Herramientas base; nil equivale a `cfg.herramientasAgente[id] ?? cfg.herramientas`.
+    public var herramientasBase: String?
+    /// Herramientas de conectores permitidas (van a `--allowedTools`).
+    public var permitidas: [String] = []
+    /// Herramientas vedadas (van a `--disallowedTools`).
+    public var vedadas: [String] = []
+    /// Perfil del token del servidor MCP: agente | coordinador | creador.
+    public var perfilMCP: String = "agente"
     public init(carpeta: String, escritura: [String], dirsExtra: [String] = [], mcpUrl: String? = nil) {
         self.carpeta = carpeta; self.escritura = escritura; self.dirsExtra = dirsExtra; self.mcpUrl = mcpUrl
     }

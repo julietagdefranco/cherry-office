@@ -326,11 +326,14 @@ public final class ClaudeRunner: Sendable {
     /// prompt arbitrario. Para reuniones: los agentes opinan pero no escriben. Sin carril: usar `conCarril(oficina:agente:)`.
     /// `dirsExtra`: carpetas vinculadas a las que el agente tiene acceso (`Permisos.dirsVinculos`).
     public func turnoSoloLectura(agente: String, prompt: String, cwd: String, timeout: TimeInterval? = nil,
-                                 dirsExtra: [String] = [], obs: Observador? = nil) async throws -> String {
+                                 dirsExtra: [String] = [], obs: Observador? = nil,
+                                 instrucciones: String? = nil) async throws -> String {
         try verificar(carpeta: cwd)
         var a = ["-p", "--agent", agente, "--session-id", UUID().uuidString.lowercased()] + Self.formatoSalida
-            + ["--tools", "Read,Glob,Grep"]
+            + ["--tools", "Read,Glob,Grep", "--permission-mode", "dontAsk"]
         for d in config.oficinaDirsExtra + dirsExtra { a += ["--add-dir", d] }
+        a += ["--allowedTools", "Read", "Glob", "Grep", "--disallowedTools", "mcp__claude_ai_*"]
+        if let i = instrucciones, !i.isEmpty { a += ["--append-system-prompt", i] }
         return try await resultado(a + ["--", prompt], timeout: timeout ?? config.timeout, cwd: cwd, obs: obs)
     }
 
@@ -413,7 +416,8 @@ public final class ClaudeRunner: Sendable {
                         envExtra: [String: String] = [:]) async throws -> Corrida {
         let args = oficina.map { Permisos.argumentos(config, oficina: $0, agente: agente, mensaje: mensaje, sid: sid, flag: flag) }
             ?? Permisos.argumentos(config, agente: agente, mensaje: mensaje, sid: sid, flag: flag)
-        let res = try await lanzar(args: args, timeout: config.timeout, cwd: oficina?.carpeta, envExtra: envExtra, alLinea: Self.lector(obs))
+        let entorno = envExtra.merging(oficina.map(Permisos.entorno) ?? [:]) { a, _ in a }
+        let res = try await lanzar(args: args, timeout: config.timeout, cwd: oficina?.carpeta, envExtra: entorno, alLinea: Self.lector(obs))
         if res.timedOut { throw ClaudeError.timeout }
         if registry.estaCerrado { throw ClaudeError.cerrando }
         return Corrida(res: res, json: Self.parsearJSON(res.stdout))

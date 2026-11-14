@@ -616,7 +616,9 @@ struct AgentesTests {
         #expect(!l.contains("--add-dir"))
         let notas = f.carpeta + "/conocimiento/agentes/marce.md"
         let entreg = f.carpeta + "/archivos/entregables/marce/**"
-        #expect(Sandbox.reglas(l) == ["Edit(/\(notas))", "Write(/\(notas))", "Edit(/\(entreg))", "Write(/\(entreg))", "mcp__hq__consultar", "mcp__hq__colegas"])
+        #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "Skill", "Edit(/\(notas))", "Write(/\(notas))", "Edit(/\(entreg))", "Write(/\(entreg))",
+                                      "mcp__hq__consultar", "mcp__hq__colegas", "--disallowedTools", "mcp__claude_ai_*"])
+        #expect(Sandbox.valor(l, "--permission-mode") == "dontAsk")
         #expect(sinPrivate(try #require(f.sb.cwds.last)) == sinPrivate(f.carpeta))
         // la carpeta del agente se crea al chatear
         #expect(f.existe("archivos/entregables/marce"))
@@ -629,7 +631,7 @@ struct AgentesTests {
         _ = await chat(f.b, agent: "marce", session: U.a)
         let l = try #require(f.sb.llamadas.last)
         let notas = f.carpeta + "/conocimiento/agentes/marce.md"
-        #expect(Sandbox.reglas(l) == ["Edit(/\(notas))", "Write(/\(notas))", "mcp__hq__consultar", "mcp__hq__colegas"])
+        #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "Skill", "Edit(/\(notas))", "Write(/\(notas))", "mcp__hq__consultar", "mcp__hq__colegas", "--disallowedTools", "mcp__claude_ai_*"])
         #expect(!f.existe("archivos/entregables"))
     }
 
