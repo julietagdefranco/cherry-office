@@ -41,7 +41,7 @@ App.Paleta = (function () {
     });
     [['Parte del día', 'parte', function () { App.Parte.abrir(); }],
      ['Flujos', 'flujo', function () { App.Flujos.abrir(); }],
-     ['Nueva corrida', 'flujo', function () { App.Flujos.abrir(); }],
+     ['Nueva corrida', 'flujo', function () { App.Flujos.abrir(); App.Flujos.nueva(); }],
      ['Armar con el Creador', 'chispa', function () { App.Creador.abrir(); }],
      ['Reglas de la oficina', 'regla', function () { App.Ajustes.reglas(); }],
      ['Conectores', 'enchufe', function () { App.Ajustes.conectores(); }],
