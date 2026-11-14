@@ -28,3 +28,15 @@
 3823      # Windscreen 2 x 4 x 2
 4070      # Brick 1 x 1 with Headlight
 2412b     # Tile 1 x 2 Grille
+# Sala de juegos y café
+3069bpc7  # Tile 1 x 2 con control de consola
+3069bpzc  # Tile 1 x 2 con grabadora de video (la consola)
+3069bpc5  # Tile 1 x 2 con control remoto
+3039p32   # Slope 45 2 x 2 con 12 botones (tablero del arcade)
+73587p01  # Palanca de control con base (joystick del arcade)
+3068bpx9  # Tile 2 x 2 con pantalla de videojuego
+3068bp25  # Tile 2 x 2 con tazas de café (cartel)
+14769p0b  # Tile 2 x 2 redonda con diana de dardos
+33054     # Minifig Mug
+23986     # Minifig Teapot
+3069bpw1  # Tile 1 x 2 con naipes (mesa del living)
