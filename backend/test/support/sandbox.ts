@@ -203,7 +203,19 @@ export class Sandbox {
     const pid = this.childPid
     if (pid) { try { process.kill(pid, 'SIGKILL') } catch {} }
     // En Windows un archivo recién cerrado (o que está mirando el antivirus) puede dar EBUSY un instante: reintentar.
-    fs.rmSync(this.root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
+    try {
+      fs.rmSync(this.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    } catch (e) {
+      // Windows: un claude que el servidor estaba lanzando justo cuando se lo mató se le escapa a taskkill /T
+      // (todavía no colgaba del árbol) y deja tomada su carpeta de trabajo. Se mata todo lo que corre desde este
+      // sandbox y se reintenta.
+      if (process.platform !== 'win32' || (e as NodeJS.ErrnoException).code !== 'EBUSY') throw e
+      const filtro = `$_.CommandLine -like '*${path.basename(this.root)}*'`
+      spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `Get-CimInstance Win32_Process | Where-Object { ${filtro} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],
+      { stdio: 'ignore', windowsHide: true, timeout: 20_000 })
+      fs.rmSync(this.root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
+    }
   }
 }
 
