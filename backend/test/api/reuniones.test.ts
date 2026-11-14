@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import {
-  Fix, Sandbox, U, chat, contratar, dict, esperar, historial, lista, llamar, msgs, escribir, sinPrivate, str, vivo, type Obj, type Resp,
+  Fix, Sandbox, U, chat, contratar, dict, esperar, historial, lista, llamar, msgs, escribir, ruta, sinPrivate, str, vivo, type Obj, type Resp,
 } from '../support/sandbox.js'
 
 type Ag = { id: string; depto: string; rol?: string }
@@ -469,7 +469,7 @@ describe('Reuniones', () => {
     // acta
     const rel = str(c.obj.acta)
     expect(rel).toBe(`reuniones/${hoy()}-plan-de-lanzamiento-diciembre.md`)
-    expect(c.obj.actaRuta).toBe(`${f.carpeta}/${rel}`)
+    expect(c.obj.actaRuta).toBe(ruta(f.carpeta, rel))
     const acta = f.leer(rel)
     expect(acta.startsWith('# Reunión: Plan de Lanzamiento: ¡Diciembre!\n')).toBe(true)
     expect(acta.includes('- **Oficina:** Taller')).toBe(true)
@@ -674,10 +674,10 @@ describe('Reuniones', () => {
     await aguardar(f, str((await nueva(f)).obj.id))
     const por: Record<string, string[]> = {}
     for (const l of llamadasTurno(f)) por[Sandbox.valor(l, '--agent') ?? ''] = Sandbox.valores(l, '--add-dir')
-    const e = `${f.sb.root}/ext/`
-    expect(por.marce).toEqual([`${e}todos`, `${e}solomarce`])
-    expect(por.nico).toEqual([`${e}todos`])
-    expect(por.betty).toEqual([`${e}todos`])
+    const e = (n: string) => ruta(f.sb.root, 'ext', n)
+    expect(por.marce).toEqual([e('todos'), e('solomarce')])
+    expect(por.nico).toEqual([e('todos')])
+    expect(por.betty).toEqual([e('todos')])
   })
 
   // MARK: documentos adjuntos

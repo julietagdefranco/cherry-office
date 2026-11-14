@@ -5,7 +5,7 @@
 // reloj del programador (`revisar()` / `fijarReloj`) y la tabla `ejecuciones` están en test/unit/tareas.test.ts. Los ganchos
 // (`alTerminar`, `avisos.alCrear`) se omiten en los tests de abajo (comentarios `interno`).
 import { describe, expect, test } from 'vitest'
-import { Fix, Sandbox, esperar, dict, historial, lista, llamar, msgs, sinPrivate, str, type Obj } from '../support/sandbox.js'
+import { Fix, Sandbox, esperar, dict, historial, lista, llamar, msgs, sinPrivate, str, type Obj, ruta, regla } from '../support/sandbox.js'
 
 const ba = 'America/Argentina/Buenos_Aires'
 const ny = 'America/New_York'
@@ -219,7 +219,7 @@ describe('Tareas programadas (API y programador)', () => {
     expect(l).toBeDefined()
     expect(Sandbox.valor(l, '--agent')).toBe('marce')
     expect(Sandbox.valor(l, '--session-id')).toBe(sid)
-    expect(Sandbox.reglas(l)).toContain(`Edit(/${f.carpeta}/conocimiento/agentes/marce.md)`)
+    expect(Sandbox.reglas(l)).toContain(regla('Edit', ruta(f.carpeta, 'conocimiento/agentes/marce.md')))
     expect(sinPrivate(f.sb.cwds.at(-1)!)).toBe(sinPrivate(f.carpeta))
     // costo con origen «tarea» y la tarea como referencia
     const c = await f.get('/api/costos')

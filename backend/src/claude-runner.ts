@@ -22,6 +22,8 @@ import { CajaCosto, CortadorLineas, parsearEvento, type Observador } from './str
 import { largo, prefijo } from './validar.js'
 
 const esWindows = process.platform === 'win32'
+/** Ruta completa: no depender del PATH que tenga la app (o el entorno de un test). */
+const taskkill = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe')
 
 // MARK: - errores
 
@@ -65,7 +67,7 @@ class Proceso {
     const h = this.hijo
     if (!h || !this.vivo || h.pid === undefined) return
     if (esWindows) {
-      spawnSync('taskkill', ['/PID', String(h.pid), '/T', ...(forzar ? ['/F'] : [])], { stdio: 'ignore', windowsHide: true })
+      spawnSync(taskkill, ['/PID', String(h.pid), '/T', ...(forzar ? ['/F'] : [])], { stdio: 'ignore', windowsHide: true })
       return
     }
     // el hijo es líder de su grupo (detached): señal a todo el grupo, así caen también las herramientas que lanzó

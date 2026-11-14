@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { strToU8, unzipSync, zipSync, type Zippable } from 'fflate'
 import { describe, expect, test } from 'vitest'
-import { Fix, Sandbox, U, dict, escribir, esperar, existe, leerTexto, lista, listar, llamar, sinPrivate, str, type Backend, type Resp } from '../support/sandbox.js'
+import { Fix, Sandbox, U, dict, escribir, esperar, existe, leerTexto, lista, listar, llamar, sinPrivate, str, type Backend, type Resp, ruta } from '../support/sandbox.js'
 
 /** Nombres de las entradas de un .zip (equivale a `zipinfo -1`). */
 function nombresZip(zip: string): string[] {
@@ -82,7 +82,7 @@ describe('Exportar e importar oficinas', () => {
     expect(r.status, JSON.stringify(r.obj)).toBe(200)
     expect(claves(r.obj)).toEqual(['archivo', 'avisos', 'documentos', 'nombre', 'omitidos', 'tam'])
     const zip = str(r.obj.archivo)
-    expect(zip).toBe(f.sb.root + '/exportados/Taller.oficina.zip')
+    expect(zip).toBe(ruta(f.sb.root, 'exportados/Taller.oficina.zip'))
     expect(r.obj.nombre).toBe('Taller.oficina.zip')
     expect(r.obj.tam).toBeGreaterThan(0)
     expect(r.obj.documentos).toBe(1)
@@ -106,7 +106,7 @@ describe('Exportar e importar oficinas', () => {
 
     // exportar de nuevo no pisa el anterior
     const r2 = await exportar(f)
-    expect(str(r2.obj.archivo)).toBe(f.sb.root + '/exportados/Taller 2.oficina.zip')
+    expect(str(r2.obj.archivo)).toBe(ruta(f.sb.root, 'exportados/Taller 2.oficina.zip'))
   }, 60_000)
 
   test('importar en otra compu: misma oficina, biblioteca lista sin volver a fichar, rutas adaptadas', async () => {
@@ -118,7 +118,7 @@ describe('Exportar e importar oficinas', () => {
     const r = await importar(b2, zip)
     expect(r.status, JSON.stringify(r.obj)).toBe(200)
     const carpeta = str(r.obj.carpeta)
-    expect(carpeta).toBe(sb2.oficinasDir + '/Taller')
+    expect(carpeta).toBe(ruta(sb2.oficinasDir, 'Taller'))
     expect(r.obj.documentos).toBe(1)
     expect(r.obj.reprocesar).toBe(0)
     expect(r.obj.avisos).toEqual([])
@@ -157,7 +157,7 @@ describe('Exportar e importar oficinas', () => {
     // importarla otra vez no pisa la primera
     const r2 = await importar(b2, zip)
     expect(r2.status).toBe(200)
-    expect(str(r2.obj.carpeta)).toBe(sb2.oficinasDir + '/Taller 2')
+    expect(str(r2.obj.carpeta)).toBe(ruta(sb2.oficinasDir, 'Taller 2'))
   }, 60_000)
 
   test('importar: un .zip hecho a mano con la carpeta (sin índice) también se abre, con aviso', async () => {
@@ -253,7 +253,7 @@ describe('Exportar e importar oficinas', () => {
     fs.mkdirSync(f.sb.home + '/Downloads', { recursive: true })
     const r = await f.post('/api/oficina/exportar')
     expect(r.status, JSON.stringify(r.obj)).toBe(200)
-    expect(str(r.obj.archivo)).toBe(f.sb.home + '/Downloads/Taller.oficina.zip')
+    expect(str(r.obj.archivo)).toBe(ruta(f.sb.home, 'Downloads/Taller.oficina.zip'))
     expect(existe(f.sb.home + '/Downloads/Taller.oficina.zip')).toBe(true)
   })
 

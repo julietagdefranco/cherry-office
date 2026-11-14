@@ -13,7 +13,7 @@
 // - `config` se pasa como el JSON de config.json (claves snake_case: timeout, agentes, escritura, herramientas…).
 // - `env` son variables del proceso del servidor (HQ_MAX_CLAUDE, HQ_BIBLIOTECA_*, …).
 // - El servidor dev exige Host/Origin/Content-Type: el cliente los manda siempre.
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -66,8 +66,9 @@ export class Sandbox {
   get oficinasDir() { return path.join(this.root, 'oficinas') }
 
   constructor({ proyecto = true }: { proyecto?: boolean } = {}) {
-    // realpath: en macOS el temporal vive bajo /private (igual que en los tests Swift, ver `sinPrivate`).
-    this.root = path.join(fs.realpathSync(os.tmpdir()), `hqtests-${randomUUID()}`)
+    // realpath: en macOS el temporal vive bajo /private (igual que en los tests Swift, ver `sinPrivate`); `.native`
+    // además expande los nombres cortos de Windows (C:\Users\RUNNER~1 -> C:\Users\runneradmin), como hace el backend.
+    this.root = path.join(fs.realpathSync.native(os.tmpdir()), `hqtests-${randomUUID()}`)
     this.home = path.join(this.root, 'home')
     this.proyecto = path.join(this.home, 'Próspera')
     this.datos = path.join(this.root, 'datos')
@@ -196,7 +197,8 @@ export class Sandbox {
     await Promise.all(this.servidores.map((s) => s.cerrar()))
     const pid = this.childPid
     if (pid) { try { process.kill(pid, 'SIGKILL') } catch {} }
-    fs.rmSync(this.root, { recursive: true, force: true })
+    // En Windows un archivo recién cerrado (o que está mirando el antivirus) puede dar EBUSY un instante: reintentar.
+    fs.rmSync(this.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   }
 }
 
@@ -222,7 +224,7 @@ export class Backend {
   private static async arrancarEn(sb: Sandbox, op: OpcionesBackend, puerto: number): Promise<Backend> {
     const cmd = inject('servidor')
     const env: Record<string, string> = {
-      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+      ...entornoSistema(),
       HOME: sb.home,
       HQ_HOME: sb.home,
       HQ_DATA_DIR: sb.datos,
@@ -263,7 +265,11 @@ export class Backend {
   async cerrar() {
     if (this.proc.exitCode !== null || this.proc.signalCode !== null) return
     const fin = new Promise<void>((r) => this.proc.once('exit', () => r()))
-    this.proc.kill('SIGTERM')
+    // En Windows no hay SIGTERM: kill() termina solo al servidor y sus claude quedarían huérfanos (con la carpeta
+    // de la oficina tomada). taskkill /T se lleva el árbol entero.
+    if (process.platform === 'win32' && this.proc.pid !== undefined) {
+      spawnSync(taskkill, ['/PID', String(this.proc.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+    } else this.proc.kill('SIGTERM')
     const t = setTimeout(() => this.proc.kill('SIGKILL'), 5_000)
     await fin
     clearTimeout(t)
@@ -357,7 +363,7 @@ export class Fix {
     const s = sb ?? new Sandbox()
     const b = await s.backend({ oficina: false, env, config })
     const r = await llamar(b, 'POST', '/api/oficinas', { body: { nombre, duenio, departamentos: deps } })
-    if (r.status !== 200) throw new Error(`crear oficina: ${JSON.stringify(r.obj)}`)
+    if (r.status !== 200) throw new Error(`crear oficina (${r.status}): ${JSON.stringify(r.obj)}\n${b.log}`)
     const f = new Fix(s, b, str(r.obj.carpeta))
     for (const a of agentes) {
       const c = await contratar(b, { id: a.id, depto: a.depto, rol: a.rol })
@@ -389,6 +395,31 @@ export function scriptNode(ruta: string, codigo: string): string {
   fs.writeFileSync(ruta, `#!${process.execPath}\n${codigo}`, { mode: 0o755 })
   fs.chmodSync(ruta, 0o755)
   return ruta
+}
+
+const taskkill = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe')
+
+/** Variables mínimas del sistema para el servidor: en macOS/Linux un PATH fijo; en Windows hacen falta SystemRoot
+ *  (sin ella fallan los sockets y el cifrado de Node) y System32 en el PATH (taskkill, cmd). */
+function entornoSistema(): Record<string, string> {
+  if (process.platform !== 'win32') return { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }
+  const e = process.env
+  const raiz = e.SystemRoot ?? 'C:\\Windows'
+  const out: Record<string, string> = { SystemRoot: raiz, PATH: [path.join(raiz, 'System32'), raiz, path.dirname(process.execPath)].join(';') }
+  for (const k of ['SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE']) {
+    if (e[k]) out[k] = e[k]!
+  }
+  return out
+}
+
+/** Ruta como la devuelve el backend: `base` + partes separadas por `/`, con el separador del sistema. */
+export function ruta(base: string, ...partes: string[]): string {
+  return path.join(base, ...partes.flatMap((p) => p.split('/')))
+}
+
+/** Regla de permiso como la arma el backend (`Edit(//abs)`; en Windows `Edit(//C:/…)`). */
+export function regla(herramienta: string, p: string): string {
+  return `${herramienta}(//${p.replace(/\\/g, '/').replace(/^\/+/, '')})`
 }
 
 export const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms))

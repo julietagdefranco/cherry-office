@@ -38,6 +38,15 @@ jobs:
             exit 1
           fi
 
+      # Compilaciones de Swift (debug de los tests y release de la app): con la caché solo se recompila lo que cambió.
+      - name: Caché de la compilación de Swift
+        uses: actions/cache@v4
+        with:
+          path: app/.build
+          key: swift-${{ runner.os }}-${{ hashFiles('app/Package.swift', 'app/Package.resolved') }}-${{ hashFiles('app/Sources/**', 'app/Tests/**') }}
+          restore-keys: |
+            swift-${{ runner.os }}-${{ hashFiles('app/Package.swift', 'app/Package.resolved') }}-
+
       - name: Tests del backend
         run: app/Tests/run-tests.sh
 

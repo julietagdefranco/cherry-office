@@ -4,7 +4,7 @@
 import fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import {
-  Fix, Sandbox, U, chat, contratar, dict, escribir, historial, leerTexto, lista, listar, llamar, msgs, sinPrivate, str,
+  Fix, Sandbox, U, chat, contratar, dict, escribir, historial, leerTexto, lista, listar, llamar, msgs, sinPrivate, str, ruta, regla,
   type Obj, type Resp,
 } from '../support/sandbox.js'
 
@@ -592,9 +592,9 @@ describe('Agentes', () => {
     expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Skill,Edit,Write,mcp__hq__consultar,mcp__hq__colegas')
     expect(l.slice(-2)).toEqual(['--', 'hola'])
     expect(l).not.toContain('--add-dir')
-    const notas = f.carpeta + '/conocimiento/agentes/marce.md'
-    const entreg = f.carpeta + '/archivos/entregables/marce/**'
-    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', `Edit(/${notas})`, `Write(/${notas})`, `Edit(/${entreg})`, `Write(/${entreg})`,
+    const notas = ruta(f.carpeta, 'conocimiento/agentes/marce.md')
+    const entreg = ruta(f.carpeta, 'archivos/entregables/marce') + '/**'
+    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', regla('Edit', notas), regla('Write', notas), regla('Edit', entreg), regla('Write', entreg),
       'mcp__hq__consultar', 'mcp__hq__colegas', '--disallowedTools', 'mcp__claude_ai_*'])
     expect(Sandbox.valor(l, '--permission-mode')).toBe('dontAsk')
     expect(sinPrivate(f.sb.cwds.at(-1)!)).toBe(sinPrivate(f.carpeta))
@@ -607,8 +607,8 @@ describe('Agentes', () => {
     fs.rmSync(f.ruta('archivos/entregables'), { recursive: true })
     await chat(f.b, { agent: 'marce', session: U.a })
     const l = f.sb.llamadas.at(-1)!
-    const notas = f.carpeta + '/conocimiento/agentes/marce.md'
-    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', `Edit(/${notas})`, `Write(/${notas})`, 'mcp__hq__consultar', 'mcp__hq__colegas', '--disallowedTools', 'mcp__claude_ai_*'])
+    const notas = ruta(f.carpeta, 'conocimiento/agentes/marce.md')
+    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', regla('Edit', notas), regla('Write', notas), 'mcp__hq__consultar', 'mcp__hq__colegas', '--disallowedTools', 'mcp__claude_ai_*'])
     expect(f.existe('archivos/entregables')).toBe(false)
   })
 
@@ -637,9 +637,9 @@ describe('Agentes', () => {
     fs.writeFileSync(f.ruta('oficina.json'), JSON.stringify(o))
     await chat(f.b, { agent: 'betty', session: U.a })
     const r = Sandbox.reglas(f.sb.llamadas.at(-1)!)
-    expect(r).toContain(`Edit(/${f.carpeta}/conocimiento/oficina.md)`)
-    expect(r).toContain(`Write(/${f.carpeta}/conocimiento/decisiones.md)`)
-    expect(r).toContain(`Edit(/${f.carpeta}/conocimiento/agentes/betty.md)`)
+    expect(r).toContain(regla('Edit', ruta(f.carpeta, 'conocimiento/oficina.md')))
+    expect(r).toContain(regla('Write', ruta(f.carpeta, 'conocimiento/decisiones.md')))
+    expect(r).toContain(regla('Edit', ruta(f.carpeta, 'conocimiento/agentes/betty.md')))
     // una ruta fuera de conocimiento/ no es válida: oficina.json no se acepta
     ags[0]!.escritura = ['../afuera.md']
     o.agentes = ags
@@ -665,15 +665,15 @@ describe('Agentes', () => {
       return Sandbox.valores(f.sb.llamadas.at(-1) ?? [], '--add-dir')
     }
     const e = f.sb.root + '/ext/'
-    expect(await dirs('marce', U.a)).toEqual([e + 'todos', e + 'soloredes', e + 'solomarce'])
-    expect(await dirs('nico', U.b)).toEqual([e + 'todos', e + 'soloads'])
-    expect(await dirs('betty', U.c)).toEqual([e + 'todos'])
+    expect(await dirs('marce', U.a)).toEqual([ruta(e, 'todos'), ruta(e, 'soloredes'), ruta(e, 'solomarce')])
+    expect(await dirs('nico', U.b)).toEqual([ruta(e, 'todos'), ruta(e, 'soloads')])
+    expect(await dirs('betty', U.c)).toEqual([ruta(e, 'todos')])
     // los --add-dir van antes de --allowedTools
     const l = f.sb.llamadas.at(-1)!
     expect(l.indexOf('--add-dir')).toBeLessThan(l.indexOf('--allowedTools'))
     // una carpeta vinculada que desapareció se omite
     fs.rmSync(e + 'solomarce', { recursive: true })
-    expect(await dirs('marce', U.d)).toEqual([e + 'todos', e + 'soloredes'])
+    expect(await dirs('marce', U.d)).toEqual([ruta(e, 'todos'), ruta(e, 'soloredes')])
     // oficinaDirsExtra de la config se suma
     const g = await Fix.crear({ agentes: [{ id: 'marce', depto: 'redes' }], config: { oficina_dirs_extra: ['/extra/uno'] } })
     await chat(g.b, { agent: 'marce', session: U.a })

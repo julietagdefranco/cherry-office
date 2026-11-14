@@ -2,7 +2,7 @@
 // Oficinas (crear, abrir, recientes, persistencia, PATCH, 409 sin oficina) y departamentos.
 import fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
-import { Fix, Sandbox, U, dict, escribir, existe, leerTexto, lista, listar, llamar, str, type Backend, type Obj, type Resp } from '../support/sandbox.js'
+import { Fix, Sandbox, U, dict, escribir, existe, leerTexto, lista, listar, llamar, str, type Backend, type Obj, type Resp, ruta } from '../support/sandbox.js'
 
 const nueva = (b: Backend, body?: Obj): Promise<Resp> => llamar(b, 'POST', '/api/oficinas', { body })
 const claves = (o: Obj) => Object.keys(o).sort()
@@ -19,7 +19,7 @@ describe('Oficinas y departamentos', () => {
     expect(r.status).toBe(200)
     expect(claves(r.obj)).toEqual(['carpeta', 'oficina'])
     const carpeta = str(r.obj.carpeta)
-    expect(carpeta).toBe(sb.oficinasDir + '/Taller')
+    expect(carpeta).toBe(ruta(sb.oficinasDir, 'Taller'))
     for (const d of ['conocimiento/agentes', 'conocimiento/fuentes', 'reuniones', 'archivos', '.claude/agents', 'archivos/compartido',
       'archivos/entregables', 'archivos/.texto', 'archivos/.papelera', 'archivos/direccion', 'archivos/comunicacion',
       'archivos/operaciones']) {
@@ -129,15 +129,15 @@ describe('Oficinas y departamentos', () => {
     const a = await nueva(b, { nombre: 'Taller' })
     const c = await nueva(b, { nombre: 'Taller' })
     const d = await nueva(b, { nombre: 'Taller' })
-    expect([a, c, d].map((x) => str(x.obj.carpeta))).toEqual([sb.oficinasDir + '/Taller', sb.oficinasDir + '/Taller 2', sb.oficinasDir + '/Taller 3'])
+    expect([a, c, d].map((x) => str(x.obj.carpeta))).toEqual([ruta(sb.oficinasDir, 'Taller'), ruta(sb.oficinasDir, 'Taller 2'), ruta(sb.oficinasDir, 'Taller 3')])
     // el nombre de la oficina queda tal cual aunque la carpeta tenga sufijo
     expect(dict(c.obj.oficina).nombre).toBe('Taller')
     const raro = await nueva(b, { nombre: 'A/B:C' })
-    expect(str(raro.obj.carpeta)).toBe(sb.oficinasDir + '/A-B-C')
+    expect(str(raro.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'A-B-C'))
     const punto = await nueva(b, { nombre: '..oculta' })
-    expect(str(punto.obj.carpeta)).toBe(sb.oficinasDir + '/oculta')
+    expect(str(punto.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'oculta'))
     // la última creada es la activa
-    expect((await llamar(b, 'GET', '/api/oficinas')).obj.activa).toBe(sb.oficinasDir + '/oculta')
+    expect((await llamar(b, 'GET', '/api/oficinas')).obj.activa).toBe(ruta(sb.oficinasDir, 'oculta'))
   })
 
   test('crear: carpeta explícita (absoluta, con ~ del HOME temporal), relativa -> 400, 409 si ya hay oficina.json', async () => {
@@ -151,7 +151,7 @@ describe('Oficinas y departamentos', () => {
 
     const tilde = await nueva(b, { nombre: 'Y', carpeta: '~/Casa' })
     expect(tilde.status).toBe(200)
-    expect(str(tilde.obj.carpeta)).toBe(sb.home + '/Casa')
+    expect(str(tilde.obj.carpeta)).toBe(ruta(sb.home, 'Casa'))
     expect(existe(sb.home + '/Casa/oficina.json')).toBe(true)
 
     expect((await nueva(b, { nombre: 'Z', carpeta: 'relativa/carpeta' })).status).toBe(400)
@@ -162,7 +162,7 @@ describe('Oficinas y departamentos', () => {
     expect(dup.status).toBe(409)
     expect(leerTexto(abs + '/oficina.json')).toBe(antes)
     // la que sigue activa es la anterior (la del 409 no la cambió)
-    expect((await llamar(b, 'GET', '/api/oficinas')).obj.activa).toBe(sb.home + '/Casa')
+    expect((await llamar(b, 'GET', '/api/oficinas')).obj.activa).toBe(ruta(sb.home, 'Casa'))
   })
 
   test('crear sobre una carpeta que ya existe: no pisa el contenido del usuario', async () => {

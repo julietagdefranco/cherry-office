@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 import {
-  Fix, Sandbox, U, dict, dormir, escribir, esperar, existe, historial, leerTexto, lista, listar, llamar, msgs, sinPrivate, str,
+  Fix, Sandbox, U, dict, dormir, escribir, esperar, existe, historial, leerTexto, lista, listar, llamar, msgs, sinPrivate, str, ruta, regla,
   type Obj, type Resp,
 } from '../support/sandbox.js'
 
@@ -130,7 +130,8 @@ function externa(f: Fix, nombre = 'externa'): string {
   escribir('oculto', d + '/.oculto.txt')
   escribir('oculto 2', d + '/.git/x.txt')
   escribir('binario', d + '/c.exe')
-  fs.symlinkSync(d + '/a.txt', d + '/link.txt')
+  // en Windows crear enlaces simbólicos pide permisos de administrador: sin enlace, lo que se verifica sigue valiendo
+  try { fs.symlinkSync(d + '/a.txt', d + '/link.txt') } catch (e) { if (process.platform !== 'win32') throw e }
   return d
 }
 
@@ -186,7 +187,7 @@ describe('Biblioteca', () => {
     const d = await f.get('/api/archivos/precios')
     expect(d.status).toBe(200)
     expect(d.obj.texto).toBe(texto)
-    expect(dict(d.obj.archivo).rutaAbsoluta).toBe(f.carpeta + '/archivos/compartido/precios.txt')
+    expect(dict(d.obj.archivo).rutaAbsoluta).toBe(ruta(f.carpeta, 'archivos/compartido/precios.txt'))
     // y un listado
     expect(lista((await f.get('/api/archivos')).obj.archivos).map((x) => str(x.slug))).toEqual(['precios'])
   })
@@ -303,8 +304,8 @@ describe('Biblioteca', () => {
     expect(Sandbox.valor(l, '--permission-mode')).toBe('dontAsk')
     expect(Sandbox.valor(l, '--allowedTools')).toBe('Read')
     expect(Sandbox.valor(l, '--disallowedTools')).toBe('mcp__claude_ai_*')
-    expect(Sandbox.valores(l, '--add-dir')).toEqual([f.carpeta + '/archivos/compartido'])
-    expect(l.at(-1)!).toContain(f.carpeta + '/archivos/compartido/foto.png')
+    expect(Sandbox.valores(l, '--add-dir')).toEqual([ruta(f.carpeta, 'archivos/compartido')])
+    expect(l.at(-1)!).toContain(ruta(f.carpeta, 'archivos/compartido/foto.png'))
     expect(f.leer('archivos/.texto/foto.md')).toBe('Una imagen de prueba con el texto HOLA MUNDO.')
     expect(fichas(f)[0]!.at(-1)!).toContain('HOLA MUNDO')
     expect(await buscar(f, 'hola')).toEqual(['foto'])
@@ -315,7 +316,7 @@ describe('Biblioteca', () => {
     expect(o.obj.nombre).toBe('foto.png')
     expect(o.obj.tam).toBe(png.length)
     expect(o.obj.base64).toBe(png.toString('base64'))
-    expect(o.obj.ruta).toBe(f.carpeta + '/archivos/compartido/foto.png')
+    expect(o.obj.ruta).toBe(ruta(f.carpeta, 'archivos/compartido/foto.png'))
   })
 
   test('imagen: si claude no puede describirla, queda en error con aviso y sin ficha', async () => {
@@ -668,8 +669,8 @@ describe('Biblioteca', () => {
     expect(uuidValido(Sandbox.valor(l, '--session-id') ?? '')).toBe(true)
     expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Skill,Edit,Write')
     // permiso de escritura: SOLO su archivo de notas (ni entregables ni nada más)
-    const notas = f.carpeta + '/conocimiento/agentes/marce.md'
-    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', `Edit(/${notas})`, `Write(/${notas})`, '--disallowedTools', 'mcp__claude_ai_*'])
+    const notas = ruta(f.carpeta, 'conocimiento/agentes/marce.md')
+    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', regla('Edit', notas), regla('Write', notas), '--disallowedTools', 'mcp__claude_ai_*'])
     expect(l).not.toContain('--add-dir')
     expect(sinPrivate(cwdDe(f, l))).toBe(sinPrivate(f.carpeta))
     const p = l.at(-1)!
@@ -904,8 +905,10 @@ describe('Biblioteca', () => {
     expect((await crear({ ruta: '~' })).status).toBe(400)
     expect((await crear({ ruta: f.sb.home })).status).toBe(400)
     expect((await crear({ ruta: f.sb.home + '/' })).status).toBe(400)
-    fs.symlinkSync(f.sb.home, f.sb.root + '/atajo')
-    expect((await crear({ ruta: f.sb.root + '/atajo' })).status).toBe(400) // enlace a la carpeta personal
+    if (process.platform !== 'win32') { // en Windows crear enlaces simbólicos pide administrador
+      fs.symlinkSync(f.sb.home, f.sb.root + '/atajo')
+      expect((await crear({ ruta: f.sb.root + '/atajo' })).status).toBe(400) // enlace a la carpeta personal
+    }
     // rutas inválidas
     expect((await crear({ ruta: 'relativa/carpeta' })).status).toBe(400)
     expect((await crear({})).status).toBe(400)
@@ -983,7 +986,7 @@ describe('Biblioteca', () => {
     expect(new Set(l.map((x) => str(x.slug)))).toEqual(new Set(['a', 'b']))
     for (const a of l) {
       expect(a.origen === 'vinculo' && a.departamento === 'vinculo' && a.vinculo === 'ext').toBe(true)
-      expect(str(a.ruta).startsWith('/')).toBe(true)
+      expect(path.isAbsolute(str(a.ruta))).toBe(true)
     }
     await aguardar(f, 'a'); await aguardar(f, 'b')
     // no se copió nada a la oficina
@@ -1001,7 +1004,7 @@ describe('Biblioteca', () => {
     expect(leerTexto(ext + '/a.txt') === 'alfa uno' && leerTexto(ext + '/sub/b.md') === 'beta dos').toBe(true)
     expect(await buscar(f, 'alfa')).toEqual(['a'])
     // el detalle muestra la ruta absoluta del original y la lista de vínculos cuenta sus archivos
-    expect(str(dict((await f.get('/api/archivos/a')).obj.archivo).rutaAbsoluta).endsWith('/externa/a.txt')).toBe(true)
+    expect(str(dict((await f.get('/api/archivos/a')).obj.archivo).rutaAbsoluta).endsWith(path.join('/externa', 'a.txt'))).toBe(true)
     const v = dict(lista((await f.get('/api/vinculos')).obj.vinculos)[0])
     expect(v.archivos === 2 && v.pendientes === 0).toBe(true)
     expect(v.existe).toBe(true)
@@ -1116,7 +1119,7 @@ describe('Biblioteca', () => {
     await aguardar(f, 'a'); await aguardar(f, 'b')
     const v = await f.delete('/api/archivos/a')
     expect(v.status).toBe(200)
-    expect(str(v.obj.papelera).endsWith('/externa/a.txt')).toBe(true)
+    expect(str(v.obj.papelera).endsWith(path.join('/externa', 'a.txt'))).toBe(true)
     expect(leerTexto(ext + '/a.txt')).toBe('alfa uno')
     // subido
     await subirYEsperar(f, 'precios.txt', 'contenido de precios')
@@ -1172,7 +1175,8 @@ describe('Biblioteca', () => {
     escribir('deck', f.ruta('archivos/entregables/marce/sub/deck.txt'))
     escribir('oculto', f.ruta('archivos/entregables/marce/.oculto'))
     escribir('de otro', f.ruta('archivos/entregables/betty/ajeno.md'))
-    fs.symlinkSync(f.ruta('oficina.json'), f.ruta('archivos/entregables/marce/escape.md'))
+    // en Windows crear enlaces simbólicos pide administrador: sin enlace, el resto de la prueba sigue valiendo
+    try { fs.symlinkSync(f.ruta('oficina.json'), f.ruta('archivos/entregables/marce/escape.md')) } catch (e) { if (process.platform !== 'win32') throw e }
     const r = await f.get('/api/biblioteca/entregables', { agente: 'marce' })
     expect(r.status).toBe(200)
     expect(r.obj.agente === 'marce' && r.obj.carpeta === 'archivos/entregables/marce').toBe(true)
@@ -1211,7 +1215,7 @@ describe('Biblioteca', () => {
     expect(g.status).toBe(200)
     expect(g.obj.base64).toBeUndefined()
     expect(g.obj.tam).toBe(grande.length)
-    expect(str(g.obj.ruta).endsWith('/entregables/marce/grande.bin')).toBe(true)
+    expect(str(g.obj.ruta).endsWith(path.join('/entregables', 'marce', 'grande.bin'))).toBe(true)
     expect(g.obj.mime).toBe('application/octet-stream')
     expect((await f.get('/api/biblioteca/entregable', { agente: 'marce', ruta: 'chico.txt' })).obj.base64).toBe(Buffer.from('chico').toString('base64'))
   })

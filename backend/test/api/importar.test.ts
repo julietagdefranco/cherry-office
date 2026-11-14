@@ -4,7 +4,7 @@
 import fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import {
-  Sandbox, U, chat, dict, escribir, existe, leerTexto, lista, listar, llamar, raizRepo, sinPrivate, str,
+  Sandbox, U, chat, dict, escribir, existe, leerTexto, lista, listar, llamar, raizRepo, sinPrivate, str, ruta, regla,
   type Backend,
 } from '../support/sandbox.js'
 
@@ -21,7 +21,7 @@ describe('Importar Próspera', () => {
     expect(r.status, JSON.stringify(r.obj)).toBe(200)
     expect(new Set(Object.keys(r.obj))).toEqual(new Set(['carpeta', 'oficina', 'yaExistia', 'agentesImportados', 'faltantes', 'copiados']))
     const carpeta = str(r.obj.carpeta)
-    expect(carpeta).toBe(sb.oficinasDir + '/Próspera HQ')
+    expect(carpeta).toBe(ruta(sb.oficinasDir, 'Próspera HQ'))
     expect(r.obj.yaExistia).toBe(false)
     expect(r.obj.agentesImportados).toEqual(ids)
     expect(r.obj.faltantes).toEqual([])
@@ -206,9 +206,8 @@ describe('Importar Próspera', () => {
     expect((await chat(b, { agent: 'betty', session: U.a })).status).toBe(200)
     // NFC: Swift compara cadenas por equivalencia canónica (el nombre de carpeta puede venir en NFD)
     const reglas = Sandbox.reglas(sb.llamadas.at(-1)!).map((x) => x.normalize('NFC'))
-    const nfc = carpeta.normalize('NFC')
     for (const rel of ['conocimiento/oficina.md', 'conocimiento/decisiones.md', 'conocimiento/agentes/betty.md']) {
-      expect(reglas.includes(`Edit(/${nfc}/${rel})`), `falta ${rel}: ${reglas}`).toBe(true)
+      expect(reglas.includes(regla('Edit', ruta(carpeta, rel)).normalize('NFC')), `falta ${rel}: ${reglas}`).toBe(true)
     }
     expect(sinPrivate(sb.cwds.at(-1)!).normalize('NFC')).toBe(sinPrivate(carpeta).normalize('NFC'))
     // otro agente: solo lo suyo
