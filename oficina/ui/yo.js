@@ -1,12 +1,12 @@
-/* YO: quien dirige la oficina. Un perfil para toda la app (nombre y minifig, en /api/perfil) que es el dueño de cada
-   oficina: los agentes te llaman por ese nombre. En la maqueta tenés tu despacho de Dirección, con tu bandeja de
+/* YO: quien dirige la oficina. Cada oficina tiene el suyo (nombre y minifig: `duenio` y `avatarDuenio` de
+   oficina.json, se cambian con /api/perfil): los agentes te llaman por ese nombre. En la maqueta tenés tu despacho de Dirección, con tu bandeja de
    entregables sobre el escritorio; en la barra lateral, tu fila arriba del equipo. */
 window.App = window.App || {};
 App.Yo = (function () {
   'use strict';
   var h = function () { return App.h.apply(null, arguments); };
 
-  function perfil() { return (App.E.estado && App.E.estado.perfil) || { nombre: '', avatar: null }; }
+  function perfil() { var o = App.E.oficina; return o ? { nombre: o.duenio || '', avatar: o.avatarDuenio || null } : { nombre: '', avatar: null }; }
   function nombre() { return perfil().nombre || ''; }
   /* para los retratos: el mismo formato que un agente */
   function comoAgente() { var p = perfil(); return { id: 'yo', nombre: p.nombre || 'Vos', avatar: p.avatar || { semilla: 'yo' } }; }
@@ -39,7 +39,7 @@ App.Yo = (function () {
     var err = h('div.error-txt');
     App.add(hj.cuerpo, h('div.editor', ava.el, h('div',
       h('div.fila-campo', h('label.etiqueta-campo', 'Tu nombre'), n,
-        h('div.ayuda', 'Sos quien dirige todas tus oficinas. Los agentes te llaman por este nombre, te piden aprobaciones y te dejan lo que terminan en la bandeja de tu despacho.')),
+        h('div.ayuda', 'Dirigís esta oficina' + (App.E.oficina ? ' («' + App.E.oficina.nombre + '»)' : '') + '; las demás pueden tener otro nombre y otra minifig. Los agentes te llaman por este nombre, te piden aprobaciones y te dejan lo que terminan en la bandeja de tu despacho.')),
       err)));
     var ok = h('button.btn.primario', {
       onclick: function () {
@@ -47,9 +47,8 @@ App.Yo = (function () {
         ok.disabled = true;
         App.api.put('/api/perfil', { nombre: n.value.trim(), avatar: ava.valor() }).then(function (r) {
           hj.cerrar();
-          App.E.estado = App.E.estado || {};
-          App.E.estado.perfil = r.perfil;
-          if (r.oficina) App.actualizar(r.oficina); else if (App.E.oficina) App.actualizar();
+          if (App.E.estado) App.E.estado.perfil = r.perfil;
+          App.actualizar(r.oficina);
           App.aviso('Listo, ' + r.perfil.nombre + '.');
         }).catch(function (e) { err.textContent = e.message; ok.disabled = false; });
       }

@@ -147,6 +147,8 @@ public struct Oficina: Codable, Sendable, Equatable {
     public var version: Int
     public var nombre: String
     public var duenio: String
+    /// Minifig de quien dirige esta oficina (opcional; ausente = la de semilla «yo»).
+    public var avatarDuenio: Avatar?
     public var departamentos: [Departamento]
     public var agentes: [AgenteDef]
     /// Carpetas vinculadas (opcional; ausente = ninguna).
@@ -159,22 +161,23 @@ public struct Oficina: Codable, Sendable, Equatable {
     /// Reglas de la oficina (opcional; ausente = ninguna).
     public var reglas: [Regla]?
 
-    public init(version: Int = 1, nombre: String, duenio: String, departamentos: [Departamento] = [], agentes: [AgenteDef] = [],
+    public init(version: Int = 1, nombre: String, duenio: String, avatarDuenio: Avatar? = nil, departamentos: [Departamento] = [], agentes: [AgenteDef] = [],
                 vinculos: [Vinculo]? = nil, biblioteca: BibliotecaCfg? = nil, tareas: [TareaProgramada]? = nil,
                 flujos: [FlujoDef]? = nil, reglas: [Regla]? = nil) {
         self.flujos = flujos; self.reglas = reglas
-        self.version = version; self.nombre = nombre; self.duenio = duenio
+        self.version = version; self.nombre = nombre; self.duenio = duenio; self.avatarDuenio = avatarDuenio
         self.departamentos = departamentos; self.agentes = agentes
         self.vinculos = vinculos; self.biblioteca = biblioteca; self.tareas = tareas
     }
 
-    enum CodingKeys: String, CodingKey { case version, nombre, duenio, departamentos, agentes, vinculos, biblioteca, tareas, flujos, reglas }
+    enum CodingKeys: String, CodingKey { case version, nombre, duenio, avatarDuenio, departamentos, agentes, vinculos, biblioteca, tareas, flujos, reglas }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         nombre = try c.decode(String.self, forKey: .nombre)
         duenio = try c.decodeIfPresent(String.self, forKey: .duenio) ?? ""
+        avatarDuenio = try c.decodeIfPresent(Avatar.self, forKey: .avatarDuenio)
         departamentos = try c.decodeIfPresent([Departamento].self, forKey: .departamentos) ?? []
         agentes = try c.decodeIfPresent([AgenteDef].self, forKey: .agentes) ?? []
         vinculos = try c.decodeIfPresent([Vinculo].self, forKey: .vinculos)
@@ -379,22 +382,18 @@ public struct OficinaActiva: Sendable {
 
 struct Reciente: Sendable, Equatable { var carpeta: String; var nombre: String; var abierta: Double }
 
-/// Quien dirige la app (YO): uno solo para todas las oficinas. Se guarda en config.json (clave `perfil`).
-/// Si tiene nombre, es el dueño de cada oficina que se abre: `Oficinas.activa()` lo copia a `duenio`.
+/// Quien dirige una oficina (YO): cada oficina tiene el suyo, guardado en su oficina.json (`duenio` + `avatarDuenio`).
+/// Versiones anteriores lo guardaban una sola vez para toda la app en config.json (clave `perfil`); ese perfil
+/// viejo solo se usa para pasarle la minifig a las oficinas que todavía no tienen una (ver `Oficinas.activa()`).
 public struct Perfil: Sendable, Equatable {
     public var nombre: String
     public var avatar: Avatar?
     public init(nombre: String = "", avatar: Avatar? = nil) { self.nombre = nombre; self.avatar = avatar }
 
     public var json: [String: Any] {
-        var a: [String: Any] = [:]
-        if let av = avatar {
-            for (k, v) in [("semilla", av.semilla), ("pelo", av.pelo), ("colorPelo", av.colorPelo), ("cara", av.cara),
-                           ("torso", av.torso), ("colorTorso", av.colorTorso), ("colorPiernas", av.colorPiernas)] {
-                if let v { a[k] = v }
-            }
-        }
-        return ["nombre": nombre, "avatar": avatar == nil ? NSNull() : a as Any]
+        var a: Any = NSNull()
+        if let av = avatar, let d = try? OficinaStore.encoder.encode(av), let o = try? JSONSerialization.jsonObject(with: d) { a = o }
+        return ["nombre": nombre, "avatar": a]
     }
 
     static func desde(_ o: Any?) -> Perfil {
@@ -417,7 +416,8 @@ public actor Oficinas {
     let estadoPath: String
     private var activaCarpeta: String?
     private var recientes: [Reciente] = []
-    private var perfil = Perfil()
+    /// Perfil global de versiones anteriores (config.json); solo para migrar la minifig a cada oficina.
+    private var perfilViejo = Perfil()
 
     public init(config: Config, log: HQLog) {
         self.config = config
@@ -426,7 +426,7 @@ public actor Oficinas {
         if let d = FileManager.default.contents(atPath: estadoPath),
            let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] {
             activaCarpeta = (o["oficina_activa"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            perfil = Perfil.desde(o["perfil"])
+            perfilViejo = Perfil.desde(o["perfil"])
             for r in (o["oficinas_recientes"] as? [[String: Any]]) ?? [] {
                 if let c = r["carpeta"] as? String, let n = r["nombre"] as? String {
                     recientes.append(Reciente(carpeta: c, nombre: n, abierta: (r["abierta"] as? Double) ?? 0))
@@ -440,30 +440,38 @@ public actor Oficinas {
     /// Oficina activa leída del disco, o nil (ninguna abierta, o su carpeta/oficina.json ya no es válida).
     public func activa() -> OficinaActiva? {
         guard let c = activaCarpeta, var o = try? OficinaStore.leer(carpeta: c) else { return nil }
-        if sincronizarDuenio(&o) { try? OficinaStore.escribir(o, carpeta: c) }
+        if migrarPerfilViejo(&o) { try? OficinaStore.escribir(o, carpeta: c) }
         return OficinaActiva(carpeta: c, oficina: o)
     }
 
     // MARK: perfil (YO)
 
-    public func perfilActual() -> Perfil { perfil }
+    /// Quien dirige la oficina activa (vacío si no hay oficina abierta).
+    public func perfilActual() -> Perfil {
+        guard let o = activa()?.oficina else { return Perfil() }
+        return Perfil(nombre: o.duenio, avatar: o.avatarDuenio)
+    }
 
-    /// Guarda el perfil y lo pasa como dueño a la oficina activa (las demás se sincronizan al abrirlas).
-    public func guardarPerfil(_ p: Perfil) throws -> Perfil {
+    /// Cambia quien dirige la oficina activa (nombre y minifig). Las demás oficinas no se tocan.
+    public func guardarPerfil(_ p: Perfil) throws -> (Perfil, OficinaActiva) {
         let n = p.nombre.trimmingCharacters(in: .whitespacesAndNewlines)
         guard n.count <= 80 else { throw ErrorAPI(400, "El nombre es demasiado largo (hasta 80 caracteres).") }
         var av = p.avatar
         if av != nil, av?.semilla == nil { av?.semilla = "yo" }
-        perfil = Perfil(nombre: n, avatar: av)
-        guardarEstado()
-        _ = activa()
-        return perfil
+        let a = try modificar { o in
+            o.duenio = n
+            o.avatarDuenio = av
+        }.1
+        return (Perfil(nombre: n, avatar: av), a)
     }
 
-    /// Con perfil cargado, el dueño de toda oficina es quien la dirige. Devuelve true si cambió algo.
-    private func sincronizarDuenio(_ o: inout Oficina) -> Bool {
-        guard !perfil.nombre.isEmpty, o.duenio != perfil.nombre else { return false }
-        o.duenio = perfil.nombre
+    /// Oficinas de antes de que cada una tuviera su director: si todavía no tienen minifig y las dirigía
+    /// el perfil global viejo, se quedan con la suya (y con su nombre si no tenían dueño). True si cambió algo.
+    private func migrarPerfilViejo(_ o: inout Oficina) -> Bool {
+        guard o.avatarDuenio == nil, let av = perfilViejo.avatar, !perfilViejo.nombre.isEmpty,
+              o.duenio.isEmpty || o.duenio == perfilViejo.nombre else { return false }
+        if o.duenio.isEmpty { o.duenio = perfilViejo.nombre }
+        o.avatarDuenio = av
         return true
     }
 
@@ -512,7 +520,7 @@ public actor Oficinas {
         } else {
             dir = Oficinas.carpetaLibre(base: config.oficinasDir, nombre: n)
         }
-        let of = Oficina(nombre: n, duenio: perfil.nombre.isEmpty ? d : perfil.nombre, departamentos: deps, agentes: [])
+        let of = Oficina(nombre: n, duenio: d, departamentos: deps, agentes: [])
         try Validar.oficina(of)
         do { try Plantillas.crearEstructura(carpeta: dir, oficina: of) }
         catch let e as ErrorAPI { throw e }
@@ -559,7 +567,6 @@ public actor Oficinas {
             obj = o
         }
         obj["oficina_activa"] = activaCarpeta ?? NSNull()
-        if perfil != Perfil() { obj["perfil"] = perfil.json } else { obj.removeValue(forKey: "perfil") }
         obj["oficinas_recientes"] = recientes.map { ["carpeta": $0.carpeta, "nombre": $0.nombre, "abierta": $0.abierta] as [String: Any] }
         do {
             try fm.createDirectory(atPath: config.datosDir, withIntermediateDirectories: true)

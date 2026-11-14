@@ -77,10 +77,6 @@
   /* Monta la oficina recién creada (o abierta), cerrando lo que hubiera abierto de la anterior. */
   function montarNueva(r) {
     if (E.oficina && App.Agente) App.Agente.cerrar();
-    /* la primera oficina: «Tu nombre» pasa a ser tu perfil (quien dirige todas) */
-    if (!App.Yo.nombre() && r.oficina.duenio) {
-      api.put('/api/perfil', { nombre: r.oficina.duenio }).then(function (p) { E.estado = E.estado || {}; E.estado.perfil = p.perfil; pintarEquipo(); }).catch(function () {});
-    }
     montar(r.carpeta, r.oficina);
   }
 
@@ -376,7 +372,7 @@
     var quien = h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, App.Yo.retrato('retrato', 96), h('b', App.Yo.nombre() || 'Sin nombre todavía'),
       h('button.btn.chico', { style: { marginLeft: 'auto' }, onclick: function () { hj.cerrar(); App.Yo.abrir(); } }, 'Cambiar…'));
     App.add(hj.cuerpo, h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), n),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Quién la dirige'), quien, h('div.ayuda', 'Sos vos en todas tus oficinas.')), h('div.ayuda', E.carpeta), err);
+      h('div.fila-campo', h('label.etiqueta-campo', 'Quién la dirige'), quien, h('div.ayuda', 'Cada oficina tiene su propio director.')), h('div.ayuda', E.carpeta), err);
     App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), h('button.btn.primario', {
       onclick: function () {
         api.patch('/api/oficina', { nombre: n.value.trim() }).then(function (r) { hj.cerrar(); actualizar(r.oficina); }).catch(function (e) { err.textContent = e.message; });

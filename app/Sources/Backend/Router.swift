@@ -180,8 +180,8 @@ public final class Router: APIHandler {
                 case "PUT":
                     let d = try objeto(body)
                     let nombre = try Validar.texto(d["nombre"], "nombre", max: 80, obligatorio: false) ?? ""
-                    let p = try await oficinas.guardarPerfil(Perfil(nombre: nombre, avatar: try NuevoAgente.avatarValido(d["avatar"])))
-                    return (200, ["perfil": p.json, "oficina": await oficinas.activa().map { $0.oficina.json as Any } ?? NSNull()])
+                    let (p, a) = try await oficinas.guardarPerfil(Perfil(nombre: nombre, avatar: try NuevoAgente.avatarValido(d["avatar"])))
+                    return (200, ["perfil": p.json, "oficina": a.oficina.json])
                 default: return no
                 }
             case ("oficinas", 2):
