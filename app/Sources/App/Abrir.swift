@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import Foundation
 
 /// Abrir archivos de la oficina en su aplicación nativa (Finder, Preview, Pages...) desde el front.
@@ -61,6 +62,15 @@ extension AppDelegate {
 
     /// `abrir`: abre el archivo con su aplicación. `revelar`: lo muestra en Finder (sin ruta: la carpeta de la oficina).
     func manejarAbrir(accion: String, ruta: String?) async {
+        // el .zip de una oficina exportada se puede mostrar en Finder aunque esté fuera de la oficina (solo mostrarlo)
+        if accion == "revelar", let r = ruta, r.hasPrefix("/"), !r.contains("\0"), r.hasSuffix(".oficina.zip") {
+            let url = AbrirArchivo.normalizar(r)
+            var esDir: ObjCBool = false
+            if url.path.hasSuffix(".oficina.zip"), FileManager.default.fileExists(atPath: url.path, isDirectory: &esDir), !esDir.boolValue {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+                return
+            }
+        }
         let (oficina, bases) = await basesPermitidas()
         guard let oficina else { NSSound.beep(); return }
         let destino = (ruta?.isEmpty == false) ? ruta! : oficina
@@ -92,6 +102,20 @@ extension AppDelegate {
             var esDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: i, isDirectory: &esDir), esDir.boolValue { panel.directoryURL = URL(fileURLWithPath: i) }
         }
+        let resultado: (NSApplication.ModalResponse) -> Void = { r in fin(r == .OK ? panel.url?.path : nil) }
+        if let w = NSApp.keyWindow ?? NSApp.mainWindow { panel.beginSheetModal(for: w, completionHandler: resultado) }
+        else { panel.begin(completionHandler: resultado) }
+    }
+
+    /// `elegirArchivo`: selector nativo de un archivo .zip (para importar una oficina exportada). Llama a `fin` con la ruta o nil.
+    func elegirArchivoZip(titulo: String?, fin: @escaping (String?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.zip]
+        panel.prompt = "Importar"
+        if let t = titulo, !t.isEmpty { panel.message = String(t.prefix(200)) }
         let resultado: (NSApplication.ModalResponse) -> Void = { r in fin(r == .OK ? panel.url?.path : nil) }
         if let w = NSApp.keyWindow ?? NSApp.mainWindow { panel.beginSheetModal(for: w, completionHandler: resultado) }
         else { panel.begin(completionHandler: resultado) }

@@ -39,11 +39,19 @@ App.Paleta = (function () {
     o.departamentos.forEach(function (d) {
       out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Deptos.abrir(); } });
     });
-    [['Contratar un agente', 'mas', function () { App.Contratar.abrir(); }],
+    [['Parte del día', 'parte', function () { App.Parte.abrir(); }],
+     ['Flujos', 'flujo', function () { App.Flujos.abrir(); }],
+     ['Nueva corrida', 'flujo', function () { App.Flujos.abrir(); }],
+     ['Armar con el Creador', 'chispa', function () { App.Creador.abrir(); }],
+     ['Reglas de la oficina', 'regla', function () { App.Ajustes.reglas(); }],
+     ['Conectores', 'enchufe', function () { App.Ajustes.conectores(); }],
+     ['Contratar un agente', 'mas', function () { App.Contratar.abrir(); }],
      ['Llamar a reunión', 'reunion', function () { App.Reunion.nueva(); }],
      ['Departamentos', 'capas', function () { App.Deptos.abrir(); }],
      ['Siguiente aviso pendiente', 'chispa', function () { if (App.Avisos) App.Avisos.siguiente(); }],
      ['Revisar la próxima entrega', 'chispa', function () { if (!App.Entregables.siguiente()) App.aviso('No tenés entregas sin revisar.'); }],
+     ['Exportar oficina', 'subir', function () { App.exportarOficina(); }],
+     ['Importar oficina', 'importar', function () { App.importarOficina(); }],
      ['Ver toda la oficina', 'edificio', function () { App.Oficina3D.encuadrar(); }]].forEach(function (x) {
       out.push({ tipo: 'Acción', icono: x[1], txt: x[0], buscar: x[0], hacer: x[2] });
     });

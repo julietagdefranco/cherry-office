@@ -499,7 +499,7 @@ public actor BibliotecaRouter: SubRouter {
     static let maxVinculos = 20
     static let maxBase64Directo: Int64 = 8 * 1024 * 1024
 
-    private let store: Store
+    let store: Store
     private let runner: ClaudeRunner
     private let oficinas: Oficinas
     private let log: HQLog
@@ -526,7 +526,7 @@ public actor BibliotecaRouter: SubRouter {
         envMaxTotalMB = Int(num("HQ_BIBLIOTECA_MAX_TOTAL_MB", 500))
     }
 
-    private func preparar() async throws {
+    func preparar() async throws {
         if preparado { return }
         try await store.prepararBiblioteca(sinFTS: sinFTS)
         preparado = true
@@ -841,7 +841,7 @@ public actor BibliotecaRouter: SubRouter {
 
     // MARK: cola
 
-    private func despertar() {
+    func despertar() {
         if trabajador != nil { otraVuelta = true; return }
         trabajador = Task { await self.bucle() }
     }

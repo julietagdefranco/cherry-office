@@ -51,9 +51,9 @@ Con firma ad-hoc, macOS bloquea la primera apertura ("no se puede verificar el d
 
 ## Verificar el dmg a mano
 ```bash
-hdiutil verify "app/build/Oficina 0.2.0.dmg"
+hdiutil verify "app/build/Oficina 0.3.0.dmg"
 codesign --verify --deep --strict "/Volumes/Oficina/Oficina.app"   # con el dmg montado
-spctl -a -vv -t install "app/build/Oficina 0.2.0.dmg"                  # solo pasa si está notarizado
+spctl -a -vv -t install "app/build/Oficina 0.3.0.dmg"                  # solo pasa si está notarizado
 ```
 
 ## Agentes y oficinas
@@ -88,6 +88,21 @@ Los ids son slugs (`^[a-z0-9][a-z0-9-]{0,40}$`). Los chats guardados antes de la
 **Importar Próspera:** `POST /api/oficinas/importar-prospera` (`Importar.swift`) crea `~/Oficinas/Próspera HQ/` (5 departamentos, 8 agentes) y copia, sin mover nada, `estado-actual.md` → `conocimiento/oficina.md`, `contexto-maestro.md` y `_equipo/` → `conocimiento/`.
 
 **Para reuniones** (`Backend` expone): `backend.oficinas` (`Oficinas`: `activa() -> OficinaActiva?` con `carpeta`, `oficina`, `ruta(rel)`), `backend.runner` (`correrSinAgente(prompt:timeout:cwd:)` para la síntesis, `turnoSoloLectura(agente:prompt:cwd:timeout:)` con `Read,Glob,Grep`, `conCarril(oficina:agente:_:)`), `backend.registrarReuniones(SubRouter)` para atender `/api/reuniones*`, y `Plantillas.anexarDecisiones(carpeta:decisiones:fecha:)`.
+
+## Exportar e importar una oficina
+
+Para compartir una oficina o pasarla a otra compu. Código: `Sources/Backend/Paquete.swift` (`PaqueteRouter`, registrado en `Backend.init`) y front en `oficina/ui/app.js` (menú de la oficina, paleta ⌘K y «Importar una oficina» en la pantalla de inicio).
+
+| Método | Ruta | Cuerpo | Respuesta |
+|---|---|---|---|
+| POST | `/api/oficina/exportar` | `{destino?}` (carpeta absoluta; por defecto `~/Downloads`) | `{archivo, nombre, tam, documentos, omitidos:{vinculos, papelera}, avisos}`. Arma `<Nombre>.oficina.zip` (`<Nombre> 2.oficina.zip` si ya existe). 409 sin oficina |
+| POST | `/api/oficinas/importar` | `{archivo}` (ruta absoluta a un .zip) | `{carpeta, oficina, documentos, reprocesar, avisos}`; queda activa en `<oficinasDir>/<Nombre>` (`Nombre 2` si existe) |
+
+- **Qué viaja:** la carpeta de la oficina (agentes, `conocimiento/`, actas, archivos subidos, fichas, texto extraído y entregables) más `.oficina-paquete.json`, con las filas de la biblioteca (ficha incluida). Al importar, los documentos con ficha y texto quedan `listo` e indexados sin llamar al bibliotecario; los demás quedan `pendiente` y se vuelven a fichar.
+- **Qué no viaja:** lo de `hq.db` (chats, estado de reuniones, entregas, avisos, costos), `archivos/.papelera/`, las carpetas vinculadas (se quitan de `oficina.json` con sus fichas), la marca `.importada-prospera`, enlaces simbólicos y `.DS_Store`.
+- **Rutas:** la ruta absoluta de la oficina en los `.md/.txt/.json` de `.claude/`, `conocimiento/` y `reuniones/` viaja como `{{OFICINA}}` y se reemplaza por la carpeta nueva al importar. Las otras rutas `/Users/…` de los `.md` de agente se informan en `avisos` (al exportar, todas; al importar, las que no existen en esta compu). Al importar también se quitan los vínculos cuya carpeta no existe.
+- **Seguridad al importar:** antes de extraer se revisa la lista con `zipinfo`: sin rutas absolutas ni `..`, sin enlaces simbólicos, hasta 50 000 entradas, 2 GB de zip y 4 GB descomprimido. Se extrae con `ditto` en una carpeta temporal y recién después se mueve a la carpeta de oficinas; si algo falla no queda nada a medias. Un .zip hecho a mano con la carpeta de una oficina también se importa (sin índice de la biblioteca, con aviso).
+- **Elegir el .zip:** en la app, `{accion:'elegirArchivo', titulo}` al handler `hq` abre un `NSOpenPanel` solo de .zip (`Abrir.swift`, `elegirArchivoZip`); en el navegador, el explorador propio con `GET /api/fs/carpetas?archivos=zip`. «Mostrar en Finder» del resultado usa `revelar`, que acepta un `.oficina.zip` aunque esté fuera de la oficina (solo lo muestra, nunca lo abre).
 
 ## Reuniones
 
@@ -169,7 +184,7 @@ Para no escribir rutas a mano. Código: `Sources/Backend/Explorador.swift` (`Exp
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| GET | `/api/fs/carpetas?ruta=&ocultas=0\|1` | `{ruta, padre\|null, esOficina, accesos:[{nombre,ruta}], carpetas:[{nombre,ruta,esOficina}], truncado}`. Sin `ruta`: `$HOME`. Solo subcarpetas (nunca contenido de archivos), ordenadas, tope 500. |
+| GET | `/api/fs/carpetas?ruta=&ocultas=0\|1&archivos=zip` | `{ruta, padre\|null, esOficina, accesos:[{nombre,ruta}], carpetas:[{nombre,ruta,esOficina}], truncado}`. Sin `ruta`: `$HOME`. Solo subcarpetas (nunca contenido de archivos), ordenadas, tope 500. Con `archivos=zip` suma `archivos:[{nombre,ruta,tam}]` con los .zip (para importar una oficina). |
 | POST | `/api/fs/carpetas` `{padre, nombre}` | Crea una subcarpeta (nombre saneado: sin `/ \ :`, controles ni puntos iniciales). 409 si ya existe. |
 | GET | `/api/oficina/archivos?ruta=<rel>` | Lista de la carpeta de la oficina activa: `{carpeta, ruta, archivos:[{rel,nombre,esCarpeta,tam,mod}], truncado}`. Solo se ve `.claude/agents` entre los ocultos. |
 | GET | `/api/oficina/archivo?ruta=<rel>` | Vista previa: `{texto, truncado}` (`.md .markdown .txt .json .csv .tsv .log`, tope 512 KB, se corta), `{base64, mime}` (`.png .jpg .jpeg .gif .webp`, tope 2 MB: 413) o `{sinVista:true}`; siempre `rel, nombre, tam, mod, ruta` (absoluta). |
