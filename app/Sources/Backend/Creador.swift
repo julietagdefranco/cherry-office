@@ -747,7 +747,7 @@ struct HerramientasCreador: MCPHerramientas {
              "description": "Los conectores de la cuenta de claude.ai (Calendar, Gmail, Drive…) con sus herramientas y si están disponibles.",
              "inputSchema": ["type": "object", "properties": [String: Any]()]],
             Self.proponer("departamento", "departamento", datos: "{id?, nombre*, mision?, color?}"),
-            Self.proponer("agente", "agente", datos: "{id?, nombre*, rol*, departamento* (id o tarjeta:x), prompt*, description?, modelo?, chips?, limites?:{solo?,proponer?}, conectores?, permisos?}. \(ref)"),
+            Self.proponer("agente", "agente", datos: "{id?, nombre*, rol*, departamento* (id o tarjeta:x), prompt*, description?, modelo?, chips?, limites?:{solo?,proponer?}, conectores?, permisos? ([\"coordinador\"] para quien coordina la oficina)}. \(ref)"),
             Self.proponer("flujo", "flujo de trabajo", datos: "{id?, nombre*, descripcion?, pasos*:[{id?, nombre*, quien* (id de agente, tarjeta:x o persona), consigna?, recibe?, recibeDe?, entrega*, aprobacion* (true o false, tiene que venir explícita), plazoDias?, esperaDias?}]}. \(ref)"),
             Self.proponer("regla", "regla de la oficina", datos: "{id?, texto*}"),
             Self.proponer("conector", "conector para un agente", datos: "{agente* (id o tarjeta:x), servidor*, leer?, actuar?} con nombres completos de herramientas (ver listar_conectores). \(ref)"),
