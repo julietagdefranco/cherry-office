@@ -18,5 +18,10 @@
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "mammoth": "^1.13.0",
+    "unpdf": "^2.2.0"
   }
 }

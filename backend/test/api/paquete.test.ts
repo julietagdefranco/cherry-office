@@ -1,15 +1,39 @@
 // Port de app/Tests/BackendTests/PaqueteTests.swift.
 // Exportar una oficina a .zip e importarla en otra «compu» (otro sandbox: otra carpeta personal, otra hq.db).
-// Los fixtures de zip usan /usr/bin/ditto, /usr/bin/zipinfo y /usr/bin/python3 (solo macOS por ahora, igual que el test Swift).
-// Sin acceso a internals: `PaqueteRouter.rutasAbsolutas/descomprimido` quedan para los unit tests del port.
-import { execFileSync } from 'node:child_process'
+// Los fixtures de zip se arman y se leen con fflate (sin ditto/zipinfo/python): corren igual en macOS y Windows.
+// Sin acceso a internals: `PaqueteRouter.rutasAbsolutas/descomprimido` quedan para los unit tests del port (test/unit/paquete.test.ts).
 import fs from 'node:fs'
+import path from 'node:path'
+import { strToU8, unzipSync, zipSync, type Zippable } from 'fflate'
 import { describe, expect, test } from 'vitest'
 import { Fix, Sandbox, U, dict, escribir, esperar, existe, leerTexto, lista, listar, llamar, sinPrivate, str, type Backend, type Resp } from '../support/sandbox.js'
 
-/** Corre un binario del sistema; devuelve [ok, salida]. (mac-only fixture) */
-function correr(exe: string, args: string[]): [boolean, string] {
-  try { return [true, execFileSync(exe, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })] } catch { return [false, ''] }
+/** Nombres de las entradas de un .zip (equivale a `zipinfo -1`). */
+function nombresZip(zip: string): string[] {
+  const nombres: string[] = []
+  unzipSync(fs.readFileSync(zip), { filter: (f) => { nombres.push(f.name); return false } })
+  return nombres
+}
+
+const unix = (modo: number) => ({ os: 3, attrs: (modo << 16) >>> 0 })
+
+/** Zip de una carpeta, con su carpeta como raíz (equivale a `ditto -c -k --keepParent`). Los enlaces simbólicos quedan como tales. */
+function zipearCarpeta(dir: string, zip: string): boolean {
+  const raiz = path.basename(dir)
+  const z: Zippable = { [raiz + '/']: [new Uint8Array(0), unix(0o040755)] }
+  const ir = (d: string, rel: string) => {
+    for (const n of fs.readdirSync(d).sort()) {
+      const p = path.join(d, n)
+      const r = `${rel}/${n}`
+      const st = fs.lstatSync(p)
+      if (st.isSymbolicLink()) z[r] = [strToU8(fs.readlinkSync(p)), { ...unix(0o120755), level: 0 }]
+      else if (st.isDirectory()) { z[r + '/'] = [new Uint8Array(0), unix(0o040755)]; ir(p, r) }
+      else z[r] = [fs.readFileSync(p), unix(0o100644)]
+    }
+  }
+  ir(dir, raiz)
+  fs.writeFileSync(zip, zipSync(z))
+  return true
 }
 
 const claves = (o: Record<string, unknown>) => Object.keys(o).sort()
@@ -47,7 +71,7 @@ async function exportar(f: Fix, destino?: string): Promise<Resp> {
   return f.post('/api/oficina/exportar', { destino: dir })
 }
 
-const entradas = (zip: string) => correr('/usr/bin/zipinfo', ['-1', zip])[1].split('\n').filter((l) => l !== '')
+const entradas = (zip: string) => nombresZip(zip)
 
 const importar = (b: Backend, zip: string) => llamar(b, 'POST', '/api/oficinas/importar', { body: { archivo: zip } })
 
@@ -139,7 +163,7 @@ describe('Exportar e importar oficinas', () => {
   test('importar: un .zip hecho a mano con la carpeta (sin índice) también se abre, con aviso', async () => {
     const f = await Fix.crear({ agentes: [{ id: 'betty', depto: 'direccion' }] })
     const zip = f.sb.root + '/a-mano.zip'
-    expect(correr('/usr/bin/ditto', ['-c', '-k', '--keepParent', f.carpeta, zip])[0]).toBe(true)
+    expect(zipearCarpeta(f.carpeta, zip)).toBe(true)
     const sb2 = new Sandbox()
     const b2 = await sb2.backend({ oficina: false })
     const r = await importar(b2, zip)
@@ -156,7 +180,7 @@ describe('Exportar e importar oficinas', () => {
     of.vinculos = [{ id: 'lejos', ruta: '/Users/otra-persona/Drive', alcance: 'oficina' }]
     fs.writeFileSync(f.ruta('oficina.json'), JSON.stringify(of))
     const zip = f.sb.root + '/a-mano.zip'
-    expect(correr('/usr/bin/ditto', ['-c', '-k', '--keepParent', f.carpeta, zip])[0]).toBe(true)
+    expect(zipearCarpeta(f.carpeta, zip)).toBe(true)
     const sb2 = new Sandbox()
     const b2 = await sb2.backend({ oficina: false })
     const r = await importar(b2, zip)
@@ -177,7 +201,7 @@ describe('Exportar e importar oficinas', () => {
       fs.mkdirSync(dir + '/Oficina', { recursive: true })
       armar(dir + '/Oficina')
       const zip = sb.root + `/${nombre}.zip`
-      expect(correr('/usr/bin/ditto', ['-c', '-k', '--keepParent', dir + '/Oficina', zip])[0]).toBe(true)
+      expect(zipearCarpeta(dir + '/Oficina', zip)).toBe(true)
       return zip
     }
     // sin oficina.json
@@ -187,17 +211,18 @@ describe('Exportar e importar oficinas', () => {
     const malo = zipDe('malo', (d) => escribir('{no es json', d + '/oficina.json'))
     expect((await importar(b, malo)).status).toBe(400)
     // con un enlace simbólico
-    const conEnlace = zipDe('enlace', (d) => {
-      escribir(JSON.stringify({ version: 1, nombre: 'X', duenio: '', departamentos: [{ id: 'a', nombre: 'A', color: '#123456' }], agentes: [] }), d + '/oficina.json')
-      fs.symlinkSync('/etc', d + '/afuera')
-    })
+    const conEnlace = sb.root + '/enlace.zip'
+    fs.writeFileSync(conEnlace, zipSync({
+      'Oficina/oficina.json': strToU8(JSON.stringify({ version: 1, nombre: 'X', duenio: '', departamentos: [{ id: 'a', nombre: 'A', color: '#123456' }], agentes: [] })),
+      'Oficina/afuera': [strToU8('/etc'), { ...unix(0o120755), level: 0 }],
+    }))
     const r = await importar(b, conEnlace)
     expect(r.status).toBe(400)
     expect(str(r.obj.error)).toContain('enlaces simbólicos')
     // con rutas que salen de la carpeta (zip-slip)
     const slip = sb.root + '/slip.zip'
-    const py = "import zipfile,sys\nz=zipfile.ZipFile(sys.argv[1],'w')\nz.writestr('Oficina/oficina.json','{}')\nz.writestr('../../afuera.txt','x')\nz.close()\n"
-    if (existe('/usr/bin/python3') && correr('/usr/bin/python3', ['-I', '-c', py, slip])[0]) {
+    fs.writeFileSync(slip, zipSync({ 'Oficina/oficina.json': strToU8('{}'), '../../afuera.txt': strToU8('x') }))
+    {
       const s = await importar(b, slip)
       expect(s.status).toBe(400)
       expect(str(s.obj.error)).toContain('rutas inválidas')
@@ -245,6 +270,5 @@ describe('Exportar e importar oficinas', () => {
     expect(lista(con.obj.carpetas).map((c) => str(c.nombre))).toEqual(['sub'])
   })
 
-  // interno (unit test del port): PaqueteRouter.rutasAbsolutas (rutas /Users/... en un texto) y PaqueteRouter.descomprimido (parseo de zipinfo -t)
-  test.skip('rutas absolutas de otra compu en un texto', () => {})
+  // interno: PaqueteRouter.rutasAbsolutas y el tope de tamaño descomprimido, reescritos como unit tests en test/unit/paquete.test.ts
 })

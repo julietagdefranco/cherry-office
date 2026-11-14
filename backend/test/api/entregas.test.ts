@@ -1,26 +1,8 @@
 // Port de app/Tests/BackendTests/EntregasTests.swift.
-// Sin acceso a internals: la suite de lógica pura (EventoClaude.parsear, CajaArchivos, ArchivosEntrega, TextoEntrega) queda como skip
-// para los unit tests del port, y el callback `avisos.alCrear` (notificación nativa) se omite en «un chat que solo responde…».
+// Sin acceso a internals: la suite de lógica pura (ArchivosEntrega, TextoEntrega) está en test/unit/entregas.test.ts
+// (EventoClaude.parsear y CajaArchivos viven en el runner), y el callback `avisos.alCrear` (notificación nativa) se omite en «un chat que solo responde…».
 import { describe, expect, test } from 'vitest'
 import { Fix, Sandbox, U, chat, esperar, llamar, lista, str, type Obj } from '../support/sandbox.js'
-
-describe('Entregas: lógica pura', () => {
-  test.skip('un Write/Edit/NotebookEdit emite también .archivo con la ruta completa; Read no', () => {
-    // interno (unit test del port): EventoClaude.parsear de líneas stream-json (Write/NotebookEdit -> herramienta + archivo; Read -> solo herramienta).
-  })
-
-  test.skip('CajaArchivos junta rutas sin repetir y reenvía los eventos', () => {
-    // interno (unit test del port): CajaArchivos.observador acumula rutas únicas y reenvía todos los eventos.
-  })
-
-  test.skip('relativos: solo lo de adentro de la oficina, sin notas internas ni rutas con ..', () => {
-    // interno (unit test del port): ArchivosEntrega.relativos / enEntregables filtran rutas fuera de la oficina, notas internas y «..».
-  })
-
-  test.skip('resumen y título recortan y aplanan saltos de línea', () => {
-    // interno (unit test del port): TextoEntrega.resumen (280) y titulo (70) recortan y aplanan saltos de línea.
-  })
-})
 
 const entregas = async (f: Fix, q: Record<string, string> = {}): Promise<Obj[]> => lista((await f.get('/api/entregas', q)).obj.entregas)
 const num = (v: unknown) => (typeof v === 'number' ? v : 0)

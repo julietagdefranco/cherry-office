@@ -9,10 +9,13 @@ import { Config } from './config.js'
 import { Entregas } from './entregas.js'
 import { ExploradorRouter } from './explorador.js'
 import { HQLog } from './log.js'
+import './modulos.js'
+import { validacionesExtra } from './oficina.js'
 import { Oficinas } from './oficinas.js'
 import { Router, type APIHandler } from './router.js'
 import { infoClaude, rutasChat } from './rutas-chat.js'
 import { rutasOficinas } from './rutas-oficinas.js'
+import { modulosRegistrados, type Servicios } from './servicios.js'
 import { Store } from './store.js'
 
 export type OpcionesBackend = {
@@ -29,8 +32,7 @@ export interface Backend {
   readonly store: Store
   readonly oficinas: Oficinas
   readonly runner: ClaudeRunner
-  readonly avisosStore: Avisos
-  readonly entregas: Entregas
+  readonly servicios: Servicios
   readonly router: APIHandler
   /** Avisos nuevos (`'aviso'`, {aviso, nombre}): notificaciones nativas e insignia en la etapa 2. */
   readonly avisos: EventEmitter
@@ -42,36 +44,55 @@ export function createBackend({ config, claudePath, env = process.env }: Opcione
   const log = new HQLog(config.datosDir)
   const store = new Store(path.join(config.datosDir, 'hq.db'))
   const oficinas = new Oficinas(config, log)
-  const router = new Router()
-  const avisos = new EventEmitter()
-
+  const canal = new EventEmitter()
   const resolver = new ClaudePathResolver({ fijo: claudePath, explicito: config.claudeBin, env, home: config.home })
   const runner = new ClaudeRunner(config, resolver, log, { env })
-  const avisosStore = new Avisos(store, avisos)
-  const entregas = new Entregas(store, avisosStore)
+  const avisos = new Avisos(store, canal)
+  const entregas = new Entregas(store, avisos)
+
+  const s: Servicios = {
+    config, store, runner, oficinas, avisos, entregas, log, env, canal,
+    router: undefined as unknown as Router,
+    huecos: {}, alAbrir: [], validaciones: [], alCerrar: [], despuesDeProcesos: [], alArrancar: [],
+  }
+  const router = new Router(() => s.listo?.() ?? Promise.resolve())
+  ;(s as { router: Router }).router = router
 
   router.explorador = new ExploradorRouter(config, oficinas, log)
-  router.nucleo.push(rutasOficinas({ config, oficinas, claude: infoClaude(runner) }))
-  router.nucleo.push(rutasChat({ config, store, runner, oficinas, avisos: avisosStore, entregas, log }))
+  router.nucleo.push(rutasOficinas({ config, oficinas, claude: infoClaude(runner), alAbrir: s.alAbrir }))
+  router.nucleo.push(rutasChat({
+    config, store, runner, oficinas, avisos, entregas, log,
+    mcp: () => s.mcp?.(), catalogo: () => s.catalogo?.(),
+    corridas: (o) => s.corridas?.(o) ?? [], creadorVersion: (o) => s.creadorVersion?.(o) ?? 0,
+  }))
+
+  for (const m of modulosRegistrados()) m.instalar(s)
+  // las validaciones de los módulos aplican a toda lectura/escritura de oficina.json
+  validacionesExtra.length = 0
+  validacionesExtra.push(...s.validaciones)
 
   log.info(`arranque oficinasDir=${config.oficinasDir} claude=${runner.claudePath ?? 'no'}`)
+  void (async () => {
+    for (const f of s.alArrancar) {
+      try {
+        await f()
+      } catch (e) {
+        log.error(`arranque: ${e instanceof Error ? e.message : e}`)
+      }
+    }
+  })()
   // chequeo de arranque, sin bloquear
   void runner.authStatus(30)
+
   let cerrado = false
   return {
-    config,
-    log,
-    store,
-    oficinas,
-    runner,
-    avisosStore,
-    entregas,
-    router,
-    avisos,
+    config, log, store, oficinas, runner, servicios: s, router, avisos: canal,
     async shutdown() {
       if (cerrado) return
       cerrado = true
+      for (const f of s.alCerrar) await f()
       await runner.shutdown()
+      for (const f of s.despuesDeProcesos) await f()
       store.close()
       log.info('shutdown')
     },

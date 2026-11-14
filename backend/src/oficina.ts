@@ -3,13 +3,15 @@
 //
 // La decodificación imita a Codable: tipos estrictos en los campos conocidos (un tipo equivocado = oficina.json
 // inválido), claves desconocidas descartadas, opcionales ausentes = undefined (no se escriben).
-// `tareas`, `flujos` y `reglas` se conservan tal cual hasta que se porten sus módulos (paso 4): ahí se tipan y validan.
+// `tareas`, `flujos` y `reglas` se tipan con sus módulos (tareas.ts, modelo-flujos.ts); sus validaciones se registran en `validacionesExtra`.
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, type Obj } from './json.js'
 import { jsonSwift } from './json-swift.js'
+import { decodificarFlujo, decodificarRegla, type FlujoDef, type Regla } from './modelo-flujos.js'
+import { decodificarTarea, type TareaProgramada } from './tareas.js'
 import { Slug, Validar, largo } from './validar.js'
 
 export type Avatar = Partial<Record<(typeof clavesAvatar)[number], string>>
@@ -52,9 +54,9 @@ export type Oficina = {
   agentes: AgenteDef[]
   vinculos?: Vinculo[]
   biblioteca?: BibliotecaCfg
-  tareas?: unknown[]
-  flujos?: unknown[]
-  reglas?: unknown[]
+  tareas?: TareaProgramada[]
+  flujos?: FlujoDef[]
+  reglas?: Regla[]
 }
 
 // MARK: - decodificación (como Codable)
@@ -129,9 +131,9 @@ function decodificarOficina(v: unknown): Oficina {
       const b = obj(x)
       return sinUndefined({ lecturaAutomatica: optBool(b.lecturaAutomatica), maxMB: optInt(b.maxMB), maxArchivos: optInt(b.maxArchivos), maxTotalMB: optInt(b.maxTotalMB) })
     }),
-    tareas: lista(o.tareas),
-    flujos: lista(o.flujos),
-    reglas: lista(o.reglas),
+    tareas: lista(o.tareas)?.map(decodificarTarea),
+    flujos: lista(o.flujos)?.map(decodificarFlujo),
+    reglas: lista(o.reglas)?.map(decodificarRegla),
   })
 }
 
