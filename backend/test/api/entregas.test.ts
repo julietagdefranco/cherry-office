@@ -20,7 +20,7 @@ describe('Entregas (API)', () => {
     expect(str(es[0]!.origen)).toBe('chat')
     expect(str(es[0]!.agente)).toBe('marce')
     expect(str(es[0]!.sid)).toBe(U.b)
-    expect(es[0]!.archivos).toEqual(['archivos/entregables/informe.md'])
+    expect(es[0]!.archivos, JSON.stringify(es[0]!.archivos)).toEqual(['archivos/entregables/informe.md'])
     expect(str(es[0]!.estado)).toBe('sin_revisar')
     const titulo = str(es[0]!.titulo)
     expect(titulo.startsWith('Armá el informe')).toBe(true)
@@ -88,7 +88,7 @@ describe('Entregas (API)', () => {
     expect(es[0]!.padre).toBe(vieja)
     expect(str(es[0]!.sid)).toBe(U.a)
     expect(str(es[0]!.estado)).toBe('sin_revisar')
-    expect(es[0]!.archivos).toEqual(['archivos/entregables/informe.md'])
+    expect(es[0]!.archivos, JSON.stringify(es[0]!.archivos)).toEqual(['archivos/entregables/informe.md'])
     expect(str(es[1]!.estado)).toBe('cambios')
     expect((await f.get('/api/entregas')).obj.sinRevisar).toBe(1)
     // retomó la misma conversación, con el pedido

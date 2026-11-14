@@ -1,6 +1,6 @@
 // Prepara el backend contra el que corre la suite de paridad.
-//   HQ_BACKEND=swift (default mientras no exista el port): compila `oficina-dev` del backend Swift.
-//   HQ_BACKEND=ts: compila el backend TypeScript (`backend/src/dev.ts` → `dist/src/dev.js`).
+//   HQ_BACKEND=swift (default en macOS): compila `oficina-dev` del backend Swift.
+//   HQ_BACKEND=ts (default en Windows y Linux): compila el backend TypeScript (`backend/src/dev.ts` → `dist/src/dev.js`).
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -20,7 +20,8 @@ declare module 'vitest' {
 }
 
 export default function setup(project: TestProject) {
-  const cual = (process.env.HQ_BACKEND ?? 'swift').toLowerCase()
+  // por defecto: Swift en macOS (la referencia), TS en el resto (no hay Swift para comparar)
+  const cual = (process.env.HQ_BACKEND ?? (process.platform === 'darwin' ? 'swift' : 'ts')).toLowerCase()
   let cmd: ComandoServidor
   if (cual === 'swift') {
     const app = path.join(raizRepo, 'app')

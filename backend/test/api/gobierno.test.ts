@@ -10,8 +10,9 @@
 //   (CREADOR_LLAMAR), que llama al servidor MCP con el token real de esa corrida.
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { Fix, Sandbox, U, chat, dict, dormir, esperar, existe, leerTexto, lista, llamar, str, type Obj } from '../support/sandbox.js'
+import { Fix, Sandbox, U, chat, codigoClaudeFalso, dict, dormir, esperar, existe, leerTexto, lista, llamar, scriptNode, str, type Obj } from '../support/sandbox.js'
 
 const leerCal = 'mcp__claude_ai_Google_Calendar__list_events'
 const verCal = 'mcp__claude_ai_Google_Calendar__get_event'
@@ -39,42 +40,43 @@ const nfc = (l: string[]) => l.map((x) => x.normalize('NFC'))
 const ultima = (f: Fix) => nfc(f.sb.llamadas.at(-1)!)
 const conPrompt = (f: Fix, t: string) => f.sb.llamadas.map(nfc).filter((a) => (a.at(-1) ?? '').includes(t))
 
-const initCatalogo = String.raw`echo '{"type":"system","subtype":"init","mcp_servers":[{"name":"claude.ai Google Calendar","status":"connected","source":"claudeai"},{"name":"claude.ai Gmail","status":"connected","source":"claudeai"},{"name":"hq","status":"connected","source":"project"}],"tools":["Read","${leerCal}","${verCal}","${crearCal}","${leerMail}","${enviarMail}","mcp__hq__colegas"]}'`
+const initCatalogo = String.raw`{"type":"system","subtype":"init","mcp_servers":[{"name":"claude.ai Google Calendar","status":"connected","source":"claudeai"},{"name":"claude.ai Gmail","status":"connected","source":"claudeai"},{"name":"hq","status":"connected","source":"project"}],"tools":["Read","${leerCal}","${verCal}","${crearCal}","${leerMail}","${enviarMail}","mcp__hq__colegas"]}`
 
 /**
  * Deja en el sandbox un `claude` que responde con el `system/init` del catálogo de Swift (Calendar y Gmail conectados)
  * cuando es la corrida de detección («Respondé solo: ok») y en cualquier otro caso delega en el claude falso común.
  */
 function claudeMezcla(sb: Sandbox) {
-  fs.copyFileSync(sb.bin, `${sb.binDir}/claude-base`)
-  fs.chmodSync(`${sb.binDir}/claude-base`, 0o755)
-  const s = `#!/bin/bash
-D="$(cd "$(dirname "$0")" && pwd)"
-if [[ "\${@: -1}" == *"solo: ok" ]]; then   # (sin la tilde: Swift pasa los argumentos en NFD)
-  ${initCatalogo}
-  echo '{"type":"result","result":"ok","is_error":false}'
-  exit 0
-fi
-exec "$D/claude-base" "$@"
-`
-  fs.writeFileSync(sb.bin, s)
-  fs.chmodSync(sb.bin, 0o755)
+  fs.writeFileSync(path.join(sb.binDir, 'claude-base.cjs'), codigoClaudeFalso())
+  scriptNode(sb.bin.replace(/\.cjs$/, ''), `const fs = require('node:fs')
+const path = require('node:path')
+const a = process.argv.slice(2)
+let msg
+if (a.includes('--')) msg = a[a.length - 1]
+else { msg = fs.readFileSync(0, 'utf8'); globalThis.__hqMensajeStdin = msg }
+if (msg.normalize('NFC').endsWith('solo: ok')) {
+  process.stdout.write(${JSON.stringify(initCatalogo)} + '\\n')
+  process.stdout.write('{"type":"result","result":"ok","is_error":false}\\n')
+} else {
+  require(path.join(__dirname, 'claude-base.cjs'))
+}
+`)
 }
 
 /** Un claude falso que emite un `system/init` con conectores y anota sus argumentos y el entorno. */
 function claudeConInit(sb: Sandbox): string {
-  const bin = `${sb.root}/bin/claude-init`
-  const s = String.raw`#!/bin/bash
-D="$(cd "$(dirname "$0")" && pwd)"
-if [[ "$1" == "auth" ]]; then echo '{"loggedIn":true}'; exit 0; fi
-printf '%s\x1f' "$@" >> "$D/det.log"; echo "NB=${'${MCP_CONNECTION_NONBLOCKING:--}'}" >> "$D/det.log"
-echo '{"type":"system","subtype":"hook_started"}'
-echo '{"type":"system","subtype":"init","mcp_servers":[{"name":"claude.ai Google Calendar","status":"connected","source":"claudeai"},{"name":"claude.ai Gmail","status":"needs-auth","source":"claudeai"},{"name":"hq","status":"connected","source":"project"}],"tools":["Read","mcp__claude_ai_Google_Calendar__list_events","mcp__claude_ai_Google_Calendar__create_event","mcp__hq__colegas"]}'
-echo '{"type":"result","result":"ok","is_error":false}'
-`
-  fs.writeFileSync(bin, s, { mode: 0o755 })
-  fs.chmodSync(bin, 0o755)
-  return bin
+  return scriptNode(`${sb.root}/bin/claude-init`, String.raw`const fs = require('node:fs')
+const path = require('node:path')
+const D = path.dirname(fs.realpathSync(process.argv[1]))
+let a = process.argv.slice(2)
+if (a[0] === 'auth') { process.stdout.write('{"loggedIn":true}\n'); return }
+if (!a.includes('--')) a = [...a, '--', fs.readFileSync(0, 'utf8')]
+fs.appendFileSync(path.join(D, 'det.log'), a.map((x) => x + '\x1f').join(''))
+fs.appendFileSync(path.join(D, 'det.log'), 'NB=' + (process.env.MCP_CONNECTION_NONBLOCKING || '-') + '\n')
+process.stdout.write('{"type":"system","subtype":"hook_started"}\n')
+process.stdout.write('{"type":"system","subtype":"init","mcp_servers":[{"name":"claude.ai Google Calendar","status":"connected","source":"claudeai"},{"name":"claude.ai Gmail","status":"needs-auth","source":"claudeai"},{"name":"hq","status":"connected","source":"project"}],"tools":["Read","mcp__claude_ai_Google_Calendar__list_events","mcp__claude_ai_Google_Calendar__create_event","mcp__hq__colegas"]}\n')
+process.stdout.write('{"type":"result","result":"ok","is_error":false}\n')
+`)
 }
 
 type Propuesta = { esError: boolean; texto: string }

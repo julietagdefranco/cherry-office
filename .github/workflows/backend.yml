@@ -1,0 +1,59 @@
+# Tests del backend TypeScript en Windows y Linux (en macOS se corren a mano, también contra el backend Swift).
+#
+# Corre la suite de paridad contra el backend TS con el `claude` falso (backend/test/fixtures/claude-fake.cjs):
+# no usa el claude real ni ninguna cuenta.
+# - Windows: el mensaje viaja por la entrada estándar (el runner lo hace siempre ahí).
+# - Linux: dos pasadas, con el mensaje como argumento (igual que en Mac) y por la entrada estándar.
+name: Backend
+
+on:
+  push:
+    paths: ["backend/**", "oficina/**", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["backend/**", "oficina/**", ".github/workflows/backend.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      HQ_BACKEND: ts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Dependencias
+        run: npm ci
+
+      - name: Tipos
+        run: npx tsc --noEmit
+
+      - name: Tests
+        run: npx vitest run
+
+      - name: Tests con el mensaje por la entrada estándar
+        if: runner.os == 'Linux'
+        run: npx vitest run test/api
+        env:
+          HQ_MENSAJE_STDIN: "1"

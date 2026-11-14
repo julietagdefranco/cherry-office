@@ -3,7 +3,7 @@
 // Sin acceso a internals (Permisos, Programador, MCPTokens, HerramientasCompuestas, routers extra…): esos tests/aserciones quedan para los unit tests del port.
 import fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
-import { Fix, Sandbox, U, chat, contratar, escribir, leerTexto, lista, llamar } from '../support/sandbox.js'
+import { Fix, Sandbox, U, chat, contratar, escribir, leerTexto, lista, llamar, scriptNode } from '../support/sandbox.js'
 
 const fix = () => Fix.crear({ deps: ['Dirección'], agentes: [{ id: 'marce', depto: 'direccion', rol: 'Directora' }], env: { HQ_PROGRAMADOR: '0' } })
 
@@ -32,11 +32,12 @@ describe('Cableado de ejecución', () => {
   test('entorno: MCP_CONNECTION_NONBLOCKING=false llega al proceso hijo de ejecutarChat (sin conectores no se toca)', async () => {
     const sb = new Sandbox()
     // claude falso mínimo que anota la variable (o «-») y responde bien
-    const bin = `${sb.root}/bin/claude-env`
     const salida = `${sb.root}/bin/env.log`
     // (solo los turnos de agente: la llamada sin --agent es el resumen del título del chat, que no es ejecutarChat)
-    escribir(`#!/bin/bash\n[[ " $* " == *" --agent "* ]] && echo "\${MCP_CONNECTION_NONBLOCKING:--}" >> "${salida}"\necho '{"result":"ok","is_error":false}'\n`, bin)
-    fs.chmodSync(bin, 0o755)
+    const bin = scriptNode(`${sb.root}/bin/claude-env`, `const fs = require('node:fs')
+if (process.argv.slice(2).includes('--agent')) fs.appendFileSync(${JSON.stringify(salida)}, (process.env.MCP_CONNECTION_NONBLOCKING || '-') + '\\n')
+process.stdout.write('{"result":"ok","is_error":false}\\n')
+`)
     const b = await sb.backend({ oficina: false, claudePath: bin })
     const r = await llamar(b, 'POST', '/api/oficinas', { body: { nombre: 'Taller', duenio: 'Ana', departamentos: ['Dirección'] } })
     expect(r.status).toBe(200)

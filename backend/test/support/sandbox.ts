@@ -1,6 +1,6 @@
 // Arnés de paridad: port de app/Tests/BackendTests/TestSupport.swift a caja negra por HTTP.
 //
-// Cada test arma un Sandbox (HOME, datos y oficinas en un temporal + el `claude` falso de fixtures/claude-fake.sh)
+// Cada test arma un Sandbox (HOME, datos y oficinas en un temporal + el `claude` falso de fixtures/claude-fake.cjs)
 // y levanta su propio servidor de desarrollo (Swift u TS, según HQ_BACKEND) apuntando a ese sandbox.
 // Nunca toca ~/Próspera, ~/.claude ni los datos reales.
 //
@@ -25,7 +25,7 @@ import { inject, onTestFinished } from 'vitest'
 
 const aqui = path.dirname(fileURLToPath(import.meta.url))
 export const raizRepo = path.resolve(aqui, '../../..')
-const scriptClaude = path.resolve(aqui, '../fixtures/claude-fake.sh')
+const scriptClaude = path.resolve(aqui, '../fixtures/claude-fake.cjs')
 
 export const agentesPorDefecto = ['betty', 'don-armando', 'marce', 'catalina', 'patricia', 'sofia', 'mario', 'nicolas']
 
@@ -71,12 +71,10 @@ export class Sandbox {
     this.home = path.join(this.root, 'home')
     this.proyecto = path.join(this.home, 'Próspera')
     this.datos = path.join(this.root, 'datos')
-    this.bin = path.join(this.root, 'bin', 'claude')
-    fs.mkdirSync(this.binDir, { recursive: true })
+    fs.mkdirSync(path.join(this.root, 'bin'), { recursive: true })
     fs.mkdirSync(this.home, { recursive: true })
     if (proyecto) fs.mkdirSync(this.proyecto, { recursive: true })
-    fs.copyFileSync(scriptClaude, this.bin)
-    fs.chmodSync(this.bin, 0o755)
+    this.bin = scriptNode(path.join(this.root, 'bin', 'claude'), fs.readFileSync(scriptClaude, 'utf8'))
     onTestFinished(() => this.cerrar())
   }
 
@@ -233,6 +231,7 @@ export class Backend {
       PORT: String(puerto),
       LANG: 'en_US.UTF-8',
       TMPDIR: os.tmpdir(),
+      ...(process.env.HQ_MENSAJE_STDIN ? { HQ_MENSAJE_STDIN: process.env.HQ_MENSAJE_STDIN } : {}),
       ...(op.env ?? {}),
     }
     const proc = spawn(cmd.exe, cmd.args, { cwd: sb.root, env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -374,6 +373,23 @@ export function contratar(b: Backend, { id, nombre, depto, rol, extra = {} }: { 
 }
 
 // MARK: - utilidades
+
+/** Código del `claude` falso común (para envolverlo en otro script). */
+export const codigoClaudeFalso = () => fs.readFileSync(scriptClaude, 'utf8')
+
+/** Escribe un script de Node (CommonJS) que se puede usar como `claude`: en macOS/Linux, `ruta` ejecutable con un
+ *  shebang al node actual (así lo lanzan tanto Swift como el runner TS); en Windows, `ruta.cjs` (el runner TS lanza
+ *  los .cjs con node). Devuelve la ruta para CLAUDE_BIN / `claudePath`. */
+export function scriptNode(ruta: string, codigo: string): string {
+  fs.mkdirSync(path.dirname(ruta), { recursive: true })
+  if (process.platform === 'win32') {
+    fs.writeFileSync(ruta + '.cjs', codigo)
+    return ruta + '.cjs'
+  }
+  fs.writeFileSync(ruta, `#!${process.execPath}\n${codigo}`, { mode: 0o755 })
+  fs.chmodSync(ruta, 0o755)
+  return ruta
+}
 
 export const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms))
 

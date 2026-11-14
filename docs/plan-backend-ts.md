@@ -60,8 +60,18 @@ ClaudeLocator, ClaudeRunner (spawn, separador de líneas stream-json, una cola p
 8. Paquete (zip con chequeos de zip-slip y tamaño total), Importar (solo Mac), Migracion (mínima: se saltea si `meta.migracion_legacy_v1` ya está).
 
 ### 5. Windows
-- Correr la suite completa en un runner `windows-latest` (job nuevo en CI que corre en cada PR que toque `backend/`).
-- Prueba manual en una PC con Windows y Claude Code real: abrir oficina, chatear, consultar a un colega (MCP), tarea programada, subir PDF, exportar e importar.
+Hecho:
+- `claude` falso en Node (`backend/test/fixtures/claude-fake.cjs`): la misma suite corre en macOS (contra Swift y TS), Linux y Windows. Los fixtures de zip usan `fflate` (sin ditto, zipinfo ni python3).
+- El runner manda el mensaje por la entrada estándar en Windows (probado con el claude real en Mac: mismo resultado y mismo tiempo que por argumento). `HQ_MENSAJE_STDIN=1` fuerza ese camino en Mac/Linux.
+- Un `.js`/`.cjs` como `claude` se lanza con node; un shim `.cmd` de npm se resuelve a `node …/cli.js`; el árbol de procesos se mata con `taskkill /T`.
+- CI: `.github/workflows/backend.yml` corre tipos y la suite contra TS en `windows-latest` y `ubuntu-latest` (en Linux, también con el mensaje por stdin).
+
+Pendiente, a mano en una PC con Windows y Claude Code con sesión iniciada (`cd backend && npm ci && npm run dev`, abrir http://localhost:8765):
+1. Que encuentre `claude` (instalador nativo `claude.exe` y, aparte, instalación por npm) y que `/api/estado` diga `auth: true`.
+2. Crear una oficina, contratar un agente y chatear (dos mensajes: el segundo retoma la sesión). Un mensaje largo (más de 40 mil caracteres) también tiene que andar.
+3. Permisos de escritura: pedirle al agente que actualice sus notas (`conocimiento/agentes/<id>.md`) y que deje un archivo en `archivos/entregables/<id>/`. Si Claude Code no toma las reglas `Edit(//C:/…)`, ajustar `regla()` en `backend/src/permisos.ts` (riesgo 2).
+4. Consultar a un colega (servidor MCP), una reunión corta, una tarea programada con «Probar ahora», subir un PDF a la biblioteca, exportar e importar la oficina.
+5. Cerrar el servidor con Ctrl+C en pleno chat: no tiene que quedar ningún `claude` vivo (Administrador de tareas).
 
 ## Riesgos (de mayor a menor)
 1. **Ejecutar `claude` en Windows.** Los shims `.cmd` necesitan `shell: true` y ahí el quoting del JSON y los saltos de línea se rompen; preferir `claude.exe` o resolver el shim a `node …/cli.js`. Límite de línea de comandos. Kill del árbol con `taskkill /T /F`. `Path` vs `PATH` en el entorno. **Spike al inicio del paso 3:** mensaje por stdin con `-p` (sin la espera de 3 s que hoy se evita con stdin vacío) y lanzamiento en Windows.

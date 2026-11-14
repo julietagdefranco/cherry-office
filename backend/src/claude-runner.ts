@@ -5,8 +5,9 @@
 // - No hay SIGTERM: se mata el árbol con `taskkill /T` (sin /F primero, con /F después de la gracia).
 // - Un shim `.cmd` (instalación por npm) se resuelve a `node …/cli.js` para no pasar los argumentos por cmd.exe,
 //   que rompe el quoting del JSON de --mcp-config y de los saltos de línea.
-// - El mensaje viaja como argumento, igual que en Mac. Windows corta la línea de comandos en ~32 mil caracteres: el
-//   paso a stdin queda para el spike de Windows (plan, paso 5).
+// - El mensaje viaja por la entrada estándar (`claude -p` lo lee de ahí si no hay `--`; probado con el claude real:
+//   mismo resultado y mismo tiempo): Windows corta la línea de comandos en ~32 mil caracteres. En Mac y Linux sigue
+//   como argumento, igual que la app Swift (HQ_MENSAJE_STDIN=1 fuerza stdin para probar ese camino).
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -76,16 +77,29 @@ class Proceso {
   }
 
   /** Corre y espera. Rechaza si no pudo arrancar (ENOENT, EACCES…) o se canceló antes. */
-  correr(exe: string, args: string[], op: { cwd?: string; env: Record<string, string>; timeout: number; grace: number; alLinea?: (l: string) => void },
+  correr(exe: string, args: string[], op: { cwd?: string; env: Record<string, string>; timeout: number; grace: number; alLinea?: (l: string) => void; stdin?: boolean },
     alEmpezar: () => void, alTerminar: () => void): Promise<ProcResult> {
     return new Promise((resolve, reject) => {
       if (this.cancelado) return reject(new Error('cancelado'))
       const [bin, pre] = resolverEjecutable(exe)
+      // mensaje por la entrada estándar: `-- <mensaje>` sale de los argumentos (tope de la línea de comandos en Windows)
+      let entrada: string | undefined
+      let argv = args
+      if (op.stdin && args.length >= 2 && args[args.length - 2] === '--') {
+        entrada = args[args.length - 1]
+        argv = args.slice(0, -2)
+      }
       let h: ChildProcess
       try {
-        h = spawn(bin, [...pre, ...args], { cwd: op.cwd, env: op.env, stdio: ['ignore', 'pipe', 'pipe'], detached: !esWindows, windowsHide: true })
+        h = spawn(bin, [...pre, ...argv], {
+          cwd: op.cwd, env: op.env, stdio: [entrada === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], detached: !esWindows, windowsHide: true,
+        })
       } catch (e) {
         return reject(e)
+      }
+      if (entrada !== undefined) {
+        h.stdin!.on('error', () => {})
+        h.stdin!.end(entrada)
       }
       this.hijo = h
       const so: Buffer[] = []
@@ -145,8 +159,10 @@ class Proceso {
 
 const signalNumero: Partial<Record<NodeJS.Signals, number>> = { SIGTERM: 15, SIGKILL: 9, SIGINT: 2 }
 
-/** En Windows, un shim `.cmd`/`.bat` de npm se ejecuta como `node <cli.js>` (sin cmd.exe). */
+/** Cómo lanzar `exe`: un script de Node (.js/.cjs/.mjs) con el node actual; en Windows, un shim `.cmd`/`.bat` de npm
+ *  como `node <cli.js>` (sin cmd.exe). */
 export function resolverEjecutable(exe: string): [string, string[]] {
+  if (/\.(c|m)?js$/i.test(exe)) return [process.execPath, [exe]]
   if (!esWindows || !/\.(cmd|bat)$/i.test(exe)) return [exe, []]
   const dir = path.dirname(exe)
   const cli = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
@@ -222,10 +238,14 @@ export class ClaudeRunner {
     const n = parseInt((env.HQ_MAX_CLAUDE ?? '').trim(), 10)
     this.limite = new Limite(Math.max(1, maxConcurrentes ?? (n >= 1 ? n : ClaudeRunner.maxClaudePorDefecto)))
     this.grace = grace
+    this.mensajePorStdin = esWindows || env.HQ_MENSAJE_STDIN === '1'
   }
 
   /** Gracia entre terminar y matar (segundos). */
   readonly grace: number
+  /** El mensaje va por la entrada estándar en vez de como último argumento: siempre en Windows (la línea de comandos
+   *  tiene un tope de ~32 mil caracteres y el mensaje puede pasar los 100 mil), o con HQ_MENSAJE_STDIN=1 (tests). */
+  readonly mensajePorStdin: boolean
 
   get claudePath() { return this.resolver.path() }
   get procesosVivos() { return this.vivos.size }
@@ -342,7 +362,7 @@ export class ClaudeRunner {
     await this.limite.adquirir()
     try {
       if (this.cerrado) throw new ClaudeError('cerrando')
-      return await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea },
+      return await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea, stdin: this.mensajePorStdin },
         () => this.vivos.add(p), () => this.vivos.delete(p))
     } catch (e) {
       if (e instanceof ClaudeError) throw e

@@ -4,7 +4,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { Sandbox, U, chat, esperar, historial, llamar, msgs, sinPrivate, vivo } from '../support/sandbox.js'
+import { Sandbox, U, chat, esperar, historial, llamar, msgs, scriptNode, sinPrivate, vivo } from '../support/sandbox.js'
 
 const mensajeLogin = "Claude Code todavía no tiene la sesión iniciada. Usá «Iniciar sesión» en la app o corré 'claude auth login' en la Terminal."
 
@@ -196,8 +196,12 @@ describe('ClaudeRunner', () => {
   test('shutdown() mata el proceso que ignora SIGTERM (kill tras la gracia)', async () => {
     const sb = new Sandbox()
     // claude falso que ignora SIGTERM
-    const terco = path.join(sb.root, 'bin', 'terco')
-    fs.writeFileSync(terco, '#!/bin/bash\ntrap \'\' TERM\necho $$ > "$(dirname "$0")/terco.pid"\nwhile true; do sleep 0.1; done\n', { mode: 0o755 })
+    const terco = scriptNode(path.join(sb.root, 'bin', 'terco'), `const fs = require('node:fs')
+const path = require('node:path')
+process.on('SIGTERM', () => {})
+fs.writeFileSync(path.join(path.dirname(fs.realpathSync(process.argv[1])), 'terco.pid'), String(process.pid) + '\\n')
+setInterval(() => {}, 100)
+`)
     const b = await sb.backend({ claudePath: terco })
     const tarea = chat(b, { message: 'x' }).then(() => undefined, () => undefined)
     const pidPath = path.join(sb.root, 'bin', 'terco.pid')
@@ -257,8 +261,11 @@ describe('ClaudeRunner', () => {
 
   test('el claude hijo corre con cwd = carpeta del proyecto', async () => {
     const sb = new Sandbox()
-    const pwdBin = path.join(sb.root, 'bin', 'pwdclaude')
-    fs.writeFileSync(pwdBin, '#!/bin/bash\npwd -P > "$(dirname "$0")/cwd.txt"\necho \'{"result":"ok","is_error":false}\'\n', { mode: 0o755 })
+    const pwdBin = scriptNode(path.join(sb.root, 'bin', 'pwdclaude'), `const fs = require('node:fs')
+const path = require('node:path')
+fs.writeFileSync(path.join(path.dirname(fs.realpathSync(process.argv[1])), 'cwd.txt'), process.cwd() + '\\n')
+process.stdout.write('{"result":"ok","is_error":false}\\n')
+`)
     const b = await sb.backend({ claudePath: pwdBin })
     await chat(b)
     const cwd = fs.readFileSync(path.join(sb.root, 'bin', 'cwd.txt'), 'utf8').trim()
