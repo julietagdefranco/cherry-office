@@ -1,7 +1,7 @@
 {
   "name": "oficina",
   "productName": "Oficina",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "description": "Oficina: tu oficina de agentes de Claude (Mac y Windows).",
   "main": "dist/main.cjs",
