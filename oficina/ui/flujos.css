@@ -52,7 +52,7 @@ ol.pasos b { font-weight: inherit; }
 .paso-intento-t { color: var(--tenue); }
 .paso-nota { font-size: 12px; color: var(--suave); border-left: 2px solid var(--linea-fuerte); padding-left: 8px; margin: 0 0 2px 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .paso-acc { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-.insignia .giro { width: 10px; height: 10px; vertical-align: -1px; border-width: 1.5px; }
+.insignia .giro { width: 10px; height: 10px; border-width: 1.5px; box-sizing: border-box; margin-right: 5px; }
 .btn.peligro-suave { color: var(--peligro); border-color: var(--linea-fuerte); }
 .btn.peligro-suave:hover { background: var(--panel-2); border-color: var(--peligro); }
 
@@ -94,3 +94,17 @@ ol.pasos b { font-weight: inherit; }
   .flu-paso-cab select.campo { flex: 1 1 100%; }
   .flu-pie .btn { flex-basis: 100%; }
 }
+
+/* intento: acciones, en vivo y consultas a colegas */
+.paso-intento-acc { display: inline-flex; gap: 4px; margin-left: auto; }
+.paso-vivo { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--texto); background: var(--panel-2); border: 1px solid var(--linea); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+.paso-vivo .giro { width: 10px; height: 10px; border-width: 1.5px; box-sizing: border-box; }
+.paso-vivo-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paso-vivo-hace { color: var(--tenue); flex: none; }
+.paso-consultas { font-size: 12px; }
+.paso-consultas summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--suave); list-style: none; }
+.paso-consultas summary::-webkit-details-marker { display: none; }
+.paso-consultas summary svg { width: 13px; height: 13px; }
+.paso-consulta { margin: 6px 0 0 19px; padding-left: 8px; border-left: 2px solid var(--linea); display: grid; gap: 3px; }
+.paso-consulta-r { color: var(--suave); white-space: pre-wrap; }
+.paso-consulta-r .giro { width: 10px; height: 10px; border-width: 1.5px; vertical-align: -1px; }

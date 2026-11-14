@@ -130,7 +130,7 @@ App.Flujos = (function () {
 
   function firma(r) {
     return r.corrida.estado + '|' + r.corrida.paso + '|' + (r.pasos || []).map(function (p) {
-      return (p.intentos || []).map(function (i) { return i.id + ':' + i.estado + ':' + (i.entrega ? i.entrega.id + i.entrega.estado : ''); }).join(',');
+      return (p.intentos || []).map(function (i) { return i.id + ':' + i.estado + ':' + (i.entrega ? i.entrega.id + i.entrega.estado : '') + ':' + (i.consultas || []).length + ':' + (i.sid || ''); }).join(',');
     }).join(';');
   }
 
@@ -190,7 +190,7 @@ App.Flujos = (function () {
     var cabeza = h('div.paso-cab',
       h('div.paso-tit', (i + 1) + '. ' + (def.nombre || 'Paso')),
       est ? h('span.insignia' + (est === 'error' ? '.error' : est === 'listo' || est === 'saltado' ? '.ok' : est === 'esperando_aprobacion' || est === 'esperando_persona' ? '.aviso' : ''),
-        est === 'corriendo' ? [h('span.giro'), ' ' + ESTADO_PASO[est]] : ESTADO_PASO[est] || est) : null);
+        est === 'corriendo' ? [h('span.giro'), ESTADO_PASO[est]] : ESTADO_PASO[est] || est) : null);
     var quienEl = h('div.paso-quien', marca(quien, 48), h('span' + (sin ? '.sin' : ''), sin ? 'Sin asignar' : nom));
     var datos = h('div.paso-datos',
       def.recibe ? h('div', h('b', 'Recibe: '), def.recibe) : null,
@@ -209,8 +209,16 @@ App.Flujos = (function () {
           ints.length > 1 ? h('span.paso-intento-n', 'Intento ' + it.intento) : null,
           h('span.paso-intento-t', (ints.length > 1 ? (ESTADO_PASO[it.estado] || it.estado) + ' · ' : '') +
             (it.estado === 'pendiente' && it.despues ? 'arranca ' + App.fecha(it.despues) : App.hace(it.fin || it.inicio))),
-          it.entrega ? h('button.btn.chico.fantasma', { title: it.entrega.titulo, onclick: function () { App.Entregables.abrir(it.entrega.id); } }, App.icono('abrir'), 'Ver la entrega') : null);
+          h('span.paso-intento-acc',
+            it.sid && it.agente ? h('button.btn.chico.fantasma', { title: 'Lo que se le pidió y lo que respondió; podés seguir escribiéndole', onclick: function () { App.Agente.abrirSesion(it.agente, it.sid); } }, App.icono('reunion'), 'Conversación') : null,
+            it.entrega ? h('button.btn.chico.fantasma', { title: it.entrega.titulo, onclick: function () { App.Entregables.abrir(it.entrega.id); } }, App.icono('abrir'), 'Ver la entrega') : null));
         lista.appendChild(fila);
+        if (it.estado === 'corriendo') {
+          var vivo = h('div.paso-vivo', { 'data-agente': it.agente || def.quien });
+          pintarVivo(vivo);
+          lista.appendChild(vivo);
+        }
+        if (it.consultas && it.consultas.length) lista.appendChild(consultasIntento(it.consultas));
         if (it.nota) lista.appendChild(h('div.paso-nota', it.nota));
       });
       cuerpo.appendChild(lista);
@@ -229,6 +237,29 @@ App.Flujos = (function () {
       }
     }
     return item;
+  }
+
+  /* ---------------- en vivo: qué está haciendo el agente del paso ---------------- */
+  var VERBO = { pensando: 'Pensando', leyendo: 'Leyendo', escribiendo: 'Escribiendo', buscando: 'Buscando', consultando: 'Consultando a', trabajando: 'Trabajando' };
+  function pintarVivo(el) {
+    var t = (App.E.actividad || {})[el.getAttribute('data-agente')];
+    App.vaciar(el);
+    if (!t) { App.add(el, h('span.giro'), h('span', 'Arrancando…')); return; }
+    App.add(el, h('span.giro'),
+      h('span.paso-vivo-txt', (VERBO[t.estado] || 'Trabajando') + (t.objetivo ? ' ' + t.objetivo : '…')),
+      t.desde ? h('span.paso-vivo-hace', App.hace(t.desde)) : null);
+  }
+  function pintarVivos() { document.querySelectorAll('.paso-vivo[data-agente]').forEach(pintarVivo); }
+
+  /* lo que el agente le preguntó a sus colegas en ese intento */
+  function consultasIntento(cs) {
+    var det = h('details.paso-consultas', h('summary', App.icono('reunion'), cs.length === 1 ? 'Consultó a ' + cs[0].aNombre : cs.length + ' consultas a colegas'));
+    cs.forEach(function (q) {
+      det.appendChild(h('div.paso-consulta',
+        h('div.paso-consulta-p', h('b', q.aNombre + ': '), q.pregunta),
+        q.respuesta ? h('div.paso-consulta-r', q.respuesta) : q.error ? h('div.paso-consulta-r.error-txt', q.error) : h('div.paso-consulta-r', h('span.giro'), ' Esperando respuesta…')));
+    });
+    return det;
   }
 
   /* ---------------- «Te toca»: archivos, nota y Hecho ---------------- */
@@ -580,6 +611,7 @@ App.Flujos = (function () {
 
   /* ---------------- actividad: insignia, lista viva y pieza en el 3D ---------------- */
   function alActividad(r) {
+    pintarVivos();
     var cs = r.corridas || [];
     var nuevo = {};
     cs.forEach(function (c) { nuevo[c.id] = { paso: c.paso, quien: c.quien, estado: c.estado }; });

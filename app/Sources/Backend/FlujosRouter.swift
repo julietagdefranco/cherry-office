@@ -159,6 +159,23 @@ struct FlujosRouter: SubRouter {
                 } else {
                     j["entrega"] = NSNull()
                 }
+                // la conversación del intento (está desde que arranca: el pedido se guarda antes de correr) y sus consultas a colegas
+                if let xid = p.ejecucion, let ej = await store.ejecucion(xid) {
+                    j["sid"] = ej.sid
+                    j["agente"] = ej.agente
+                    j["ejecucionEstado"] = ej.estado
+                    if let c = ej.costo { j["costoEjecucion"] = c }
+                    let cons = await store.consultasDe(oficina: act.carpeta, sid: ej.sid)
+                    if !cons.isEmpty {
+                        func nombre(_ id: String) -> String { act.oficina.agente(id)?.nombre ?? id }
+                        j["consultas"] = cons.map { f -> [String: Any] in
+                            var d: [String: Any] = ["a": f.a, "aNombre": nombre(f.a), "pregunta": String(f.pregunta.prefix(400)), "ts": f.ts]
+                            if let r = f.respuesta { d["respuesta"] = String(r.prefix(600)) }
+                            if let e = f.error { d["error"] = e }
+                            return d
+                        }
+                    }
+                }
                 lista.append(j)
             }
             pasos.append(["indice": i, "def": pf.json, "sinAsignar": pf.quien != "persona" && act.oficina.agente(pf.quien) == nil,
