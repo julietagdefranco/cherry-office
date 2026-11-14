@@ -282,7 +282,8 @@
       var limpiar = function (l) { return l.map(function (t) { return t.trim(); }).filter(Boolean); };
       var cuerpoPatch = {
         limites: { solo: limpiar(solo), proponer: limpiar(proponer) },
-        permisos: checkCoord.checked ? ['coordinador'] : []
+        /* conserva los demás permisos del agente: el check solo pone o saca «coordinador» */
+        permisos: (a.permisos || []).filter(function (x) { return x !== 'coordinador'; }).concat(checkCoord.checked ? ['coordinador'] : [])
       };
       if (Object.keys(tocado).length && catalogo) cuerpoPatch.conectores = App.Ajustes.nuevosConectores(a, catalogo.servidores, tocado);
       guardar.disabled = true; err.textContent = '';

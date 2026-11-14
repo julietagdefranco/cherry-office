@@ -72,10 +72,9 @@ App.Parte = (function () {
       h('div.parte-txt', h('div.parte-tit', a.texto), a.creado ? h('div.parte-sub', App.hace(a.creado)) : null));
   }
   function abrirAviso(a) {
-    if (a.tipo === 'flujo' && App.Flujos && App.Flujos.verCorrida) {
-      api().post('/api/avisos/visto', { id: a.id }).catch(function () {});
-      App.Flujos.verCorrida(a.ref);
-    } else if (App.Avisos) App.Avisos.abrir(a.id);
+    /* App.Avisos.abrir ya manda los de flujo a App.Flujos.verCorrida y los marca vistos sin desincronizar el banner */
+    if (App.Avisos) App.Avisos.abrir(a.id);
+    else if (a.tipo === 'flujo' && App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(a.ref);
   }
 
   function filaEntrega(e) {
