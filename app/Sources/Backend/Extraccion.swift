@@ -180,6 +180,7 @@ extension ClaudeRunner {
         try verificar(carpeta: cwd)
         var a = ["-p"] + Self.formatoSalida + ["--tools", "Read"]
         for d in dirs { a += ["--add-dir", d] }
+        a += ["--allowedTools", "Read"] + Self.sinConectores
         return try await resultado(a + ["--", prompt], timeout: timeout, cwd: cwd, obs: obs)
     }
 }

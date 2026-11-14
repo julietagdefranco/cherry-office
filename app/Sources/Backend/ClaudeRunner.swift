@@ -308,10 +308,13 @@ public final class ClaudeRunner: Sendable {
     public func correrSinAgente(prompt: String, timeout: TimeInterval? = nil, cwd: String? = nil,
                                 modelo: String? = nil, obs: Observador? = nil) async throws -> String {
         try verificar(carpeta: cwd)
-        var args = ["-p"] + Self.formatoSalida + ["--tools", ""]
+        var args = ["-p"] + Self.formatoSalida + ["--tools", ""] + Self.sinConectores
         if let modelo { args += ["--model", modelo] }
         return try await resultado(args + ["--", prompt], timeout: timeout ?? config.timeout, cwd: cwd, obs: obs)
     }
+
+    /// Para corridas sin agente: `dontAsk` (no hereda el `defaultMode` del usuario) y sin conectores de claude.ai (plan §3).
+    static let sinConectores = ["--permission-mode", "dontAsk", "--disallowedTools", "mcp__claude_ai_*"]
 
     /// `--output-format stream-json --verbose`: un evento JSON por línea (actividad en vivo) y el `result` al final.
     public static let formatoSalida = ["--output-format", "stream-json", "--verbose"]

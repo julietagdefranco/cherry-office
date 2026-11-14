@@ -43,6 +43,8 @@ struct AgentesTests {
         let l = try #require(f.sb.llamadas.last)
         #expect(!l.contains("--agent"))
         #expect(Sandbox.valor(l, "--tools") == "")
+        #expect(Sandbox.valor(l, "--permission-mode") == "dontAsk")
+        #expect(Sandbox.valor(l, "--disallowedTools") == "mcp__claude_ai_*")
         #expect(Sandbox.valor(l, "--output-format") == "stream-json")
         #expect(l.prefix(1) == ["-p"])
         #expect(!l.contains("--allowedTools"))

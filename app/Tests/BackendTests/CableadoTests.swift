@@ -88,6 +88,25 @@ struct CableadoTests {
         #expect(Permisos.entorno(ctx) == ["MCP_CONNECTION_NONBLOCKING": "false"])
     }
 
+    @Test("entorno: MCP_CONNECTION_NONBLOCKING=false llega al proceso hijo de ejecutarChat (sin conectores no se toca)")
+    func entornoLlegaAlHijo() async throws {
+        let sb = Sandbox(); defer { withExtendedLifetime(sb) {} }
+        // claude falso mínimo que anota la variable (o «-») y responde bien
+        let bin = sb.root + "/bin/claude-env"
+        let salida = sb.root + "/bin/env.log"
+        let s = "#!/bin/bash\necho \"${MCP_CONNECTION_NONBLOCKING:--}\" >> \"\(salida)\"\necho '{\"result\":\"ok\",\"is_error\":false}'\n"
+        FileManager.default.createFile(atPath: bin, contents: Data(s.utf8), attributes: [.posixPermissions: 0o755])
+        let runner = ClaudeRunner(config: sb.config(), resolver: ClaudePathResolver(fijo: bin), log: HQLog(dir: nil))
+        var ctx = ContextoOficina(carpeta: sb.root, escritura: [])
+        _ = try await runner.ejecutarChat(agente: "a", mensaje: "x", sid: U.a, activa: false, oficina: ctx)
+        ctx.permitidas = ["mcp__claude_ai_Gmail__search_threads"]
+        _ = try await runner.ejecutarChat(agente: "a", mensaje: "x", sid: U.b, activa: false, oficina: ctx)
+        let lineas = try String(contentsOfFile: salida, encoding: .utf8).split(separator: "\n").map(String.init)
+        // sin conectores no se toca lo heredado (una sesión de Claude Code puede traer «true»); con conectores, «false»
+        let heredada = ProcessInfo.processInfo.environment["MCP_CONNECTION_NONBLOCKING"] ?? "-"
+        #expect(lineas == [heredada, "false"])
+    }
+
     @Test("turnoSoloLectura: orden exacto, con y sin instrucciones")
     func soloLectura() async throws {
         let sb = Sandbox(); defer { withExtendedLifetime(sb) {} }
