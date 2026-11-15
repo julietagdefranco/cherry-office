@@ -252,7 +252,8 @@
           h('button.nav-item', { onclick: function () { App.Reunion.abrir(); } }, App.icono('reunion'), 'Reuniones', dom.navReu),
           h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib),
           h('button.nav-item', { onclick: function () { App.Yo.irAlDespacho(); App.Entregables.abrir(); } }, App.icono('bandeja'), 'Tu bandeja', dom.navEnt),
-          h('button.nav-item', { onclick: function () { App.Deptos.abrir(); } }, App.icono('capas'), 'Departamentos')));
+          h('button.nav-item', { onclick: function () { App.Deptos.abrir(); } }, App.icono('capas'), 'Departamentos'),
+          h('button.nav-item', { onclick: function () { App.Ajustes.reglas(); } }, App.icono('regla'), 'Reglas de la oficina')));
       dom.app = h('div.app', dom.lateral,
         h('div.velo-lateral', { onclick: function () { cajon(false); } }),
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu,
@@ -357,7 +358,6 @@
       items.push('-');
       opcionesOficina().forEach(function (o) { items.push({ texto: o.texto + '…', icono: o.icono, accion: o.accion }); });
       items.push('-');
-      items.push({ texto: 'Reglas de la oficina…', icono: 'regla', accion: function () { App.Ajustes.reglas(); } });
       items.push({ texto: 'Conectores…', icono: 'enchufe', accion: function () { App.Ajustes.conectores(); } });
       items.push('-');
       items.push({ texto: 'Nombre de la oficina…', icono: 'edificio', accion: editarOficina });
