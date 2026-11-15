@@ -16,7 +16,7 @@ export type Entrega = {
   oficina: string
   /** '' = sin agente (actas de reunión). */
   agente: string
-  /** tarea | encargo | reunion | chat | cambios */
+  /** tarea | encargo | reunion | chat | cambios | pedido | espera | persona */
   origen: string
   ref: string
   titulo: string
@@ -118,7 +118,12 @@ function deFila(f: Fila): Entrega {
   return e
 }
 
+export type GanchoRegistro = (e: Entrega) => void
+
 export class Entregas {
+  /** Se llaman (síncronos, cada uno en try/catch) después de crear y avisar cada entrega, venga de donde venga. */
+  readonly alRegistrar: GanchoRegistro[] = []
+
   constructor(private readonly store: Store, private readonly avisos: Avisos) {
     store.db.exec(`
     CREATE TABLE IF NOT EXISTS entregas (
@@ -138,6 +143,7 @@ export class Entregas {
         costo REAL
     );
     CREATE INDEX IF NOT EXISTS entregas_oficina ON entregas(oficina, estado, id);
+    CREATE INDEX IF NOT EXISTS entregas_ref ON entregas(oficina, ref);
     `)
   }
 
@@ -186,11 +192,48 @@ export class Entregas {
     return this.una(oficina, id)
   }
 
+  /** La entrega más nueva con esa ref. */
+  porRef(oficina: string, ref: string): Entrega | undefined {
+    const f = this.store.db.query(`SELECT ${columnas} FROM entregas WHERE oficina=? AND ref=? ORDER BY id DESC LIMIT 1`, [oficina, ref])[0]
+    return f ? deFila(f) : undefined
+  }
+
+  /** Las entregas que tienen a `id` como padre (versiones nuevas), de la más vieja a la más nueva. */
+  hijas(oficina: string, id: number): Entrega[] {
+    return this.store.db.query(`SELECT ${columnas} FROM entregas WHERE oficina=? AND padre=? ORDER BY id`, [oficina, id]).map(deFila)
+  }
+
+  /** La primera de la cadena de versiones: sube por `padre` (hasta 10 niveles). */
+  raiz(oficina: string, e: Entrega): Entrega {
+    let x = e
+    for (let i = 0; i < 10 && x.padre !== undefined; i++) {
+      const p = this.una(oficina, x.padre)
+      if (!p) break
+      x = p
+    }
+    return x
+  }
+
+  /** La última versión de la cadena que sigue a `e` (si la persona ya pidió cambios, la más nueva de las descendientes). */
+  vigente(oficina: string, e: Entrega): Entrega {
+    let x = e
+    for (let i = 0; i < 10; i++) {
+      const h = this.hijas(oficina, x.id)
+      const ultima = h[h.length - 1]
+      if (!ultima) break
+      x = ultima
+    }
+    return x
+  }
+
   /** Crea la entrega y avisa a la app nativa («te entregó»). */
   registrar(p: { oficina: string; agente: string; nombre: string; origen: string; ref: string; titulo: string; texto: string; sid?: string; archivos?: string[]; padre?: number; costo?: number }): Entrega | undefined {
     const e = this.crear(p)
     if (!e) return undefined
     this.avisos.emitir({ id: `e${e.id}`, tipo: 'entrega', agente: p.agente, texto: e.titulo, ref: String(e.id), creado: e.creada }, p.nombre)
+    for (const g of this.alRegistrar) {
+      try { g(e) } catch {}
+    }
     return e
   }
 }
