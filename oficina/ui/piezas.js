@@ -173,7 +173,7 @@ App.Piezas = (function () {
           var g = new T.Group(); g.position.set(x, 8, 0); g.rotation.z = lado * 0.1;
           g.add(malla(def, a.colorBrazos));
           var mano = malla(d[5], a.colorPiel);
-          mano.position.set(-lado, 19, -8);
+          mano.position.set(-5 * lado, 18.9, -9.9);   // centro del hueco de 3818/3819 (s01: disco en (-5, 18.9, -9.9))
           mano.rotation.x = Math.PI / 4;
           g.add(mano);
           cuerpo.add(g);
