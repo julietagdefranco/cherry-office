@@ -56,6 +56,11 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
           .then(function (r) { return typeof r === 'string' && r ? r : null; });
       } catch (e) { return Promise.resolve(undefined); }
     },
+    /* borra la oficina abierta y manda su carpeta a la papelera; undefined si no hay app nativa */
+    borrarOficina: function (carpeta) {
+      if (!puente) return Promise.resolve(undefined);
+      try { return Promise.resolve(puente.postMessage({ accion: 'borrarOficina', carpeta: carpeta })); } catch (e) { return Promise.reject(e); }
+    },
     elegirCarpeta: function (titulo, inicio, crear) {
       if (!puente) return Promise.resolve(undefined);
       try {

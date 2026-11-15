@@ -145,6 +145,23 @@
     api.post('/api/oficinas/abrir', { carpeta: c }).then(function (r) { montar(r.carpeta, r.oficina); }).catch(App.fallo);
   }
   /* ---------------- exportar e importar ---------------- */
+  /* Borra la oficina abierta: sus chats, reuniones, tareas y el historial del Creador. En la app la carpeta va a la
+     papelera (se puede recuperar); en el navegador queda donde está. Después vuelve a la pantalla de inicio. */
+  function borrarOficina() {
+    var carpeta = E.carpeta, nombre = E.oficina.nombre;
+    var archivos = App.nativo.hay ? 'Su carpeta va a la papelera, por si te arrepentís.' : 'Su carpeta queda en ' + carpeta + ': borrala a mano si no la querés.';
+    App.confirmar('¿Borrar «' + nombre + '»?', 'Se borran sus conversaciones, reuniones, tareas y lo que charlaste con el Creador. ' + archivos, 'Borrar oficina', true).then(function (si) {
+      if (!si) return;
+      var p = App.nativo.hay ? App.nativo.borrarOficina(carpeta) : api.del('/api/oficina');
+      p.then(function (r) {
+        if (r && r.error) throw new Error(r.error);
+        if (r && r.papelera === false) App.aviso('Borré la oficina, pero no pude mandar su carpeta a la papelera: quedó en ' + carpeta + '.', true);
+        App.Agente.cerrar();
+        setTimeout(function () { location.reload(); }, r && r.papelera === false ? 2500 : 0);
+      }).catch(App.fallo);
+    });
+  }
+
   function exportarOficina() {
     var hj = App.hoja({ titulo: 'Exportar oficina', ancho: 520 });
     var destino = null, dondeTxt = h('span', { style: { color: 'var(--suave)', overflow: 'hidden', textOverflow: 'ellipsis' } }, 'Descargas');
@@ -367,6 +384,8 @@
       items.push({ texto: 'Quién dirige…', icono: 'personas', accion: function () { App.Yo.abrir(); } });
       items.push({ texto: 'Exportar oficina…', icono: 'subir', accion: exportarOficina });
       items.push({ texto: App.nativo.hay ? 'Mostrar carpeta ' + App.nativo.enExplorador : 'Ver archivos de la oficina', icono: 'carpeta', accion: function () { if (App.nativo.hay) App.nativo.revelar(E.carpeta); else App.verArchivosOficina(); } });
+      items.push('-');
+      items.push({ texto: 'Borrar oficina…', icono: 'papelera', accion: borrarOficina });
       if (App.nativo.hay) items.push({ texto: 'Acerca de', icono: 'chispa', accion: App.nativo.acerca });
       App.menu(ancla, items);
     });

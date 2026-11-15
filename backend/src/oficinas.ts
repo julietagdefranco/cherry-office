@@ -76,6 +76,9 @@ export class Oficinas {
   private recientes: Reciente[] = []
   /** Perfil global de versiones anteriores (config.json); solo para migrar la minifig a cada oficina. */
   private perfilViejo: Perfil = { nombre: '' }
+  /** Ganchos que borran lo guardado fuera de la carpeta para una ruta (hq.db): al borrar una oficina y al estrenar una
+   *  carpeta como oficina nueva (crear o importar un .zip), por si quedó algo de una anterior en esa misma ruta. */
+  readonly alOlvidar: ((dir: string) => void)[] = []
 
   constructor(readonly config: Config, readonly log: HQLog) {
     this.estadoPath = path.join(config.datosDir, 'config.json')
@@ -200,9 +203,21 @@ export class Oficinas {
       throw new ErrorAPI(500, 'No pude crear la carpeta de la oficina.')
     }
     OficinaStore.escribir(of, dir)
+    this.olvidarDatos(dir)
     this.activar(dir, n)
     this.log.info(`oficina creada nombre=${largo(n)}c departamentos=${deps.length}`)
     return new OficinaActiva(dir, of)
+  }
+
+  /** Corre los ganchos de `alOlvidar` (un error no frena la creación ni el borrado). */
+  olvidarDatos(dir: string) {
+    for (const f of this.alOlvidar) {
+      try {
+        f(dir)
+      } catch {
+        this.log.warn('no pude limpiar lo guardado de una oficina anterior en esa carpeta')
+      }
+    }
   }
 
   /** Valida `oficina.json` de la carpeta y la deja activa. */
@@ -222,6 +237,16 @@ export class Oficinas {
     actualizarMemoria(dir, o.agentes.map((a) => a.id))
     this.activar(dir, o.nombre)
     return new OficinaActiva(dir, o)
+  }
+
+  /** Borra la oficina `dir` de la app: deja de estar activa y en recientes, y se olvida lo guardado en hq.db. Los
+   *  archivos de la carpeta no se tocan (la app de escritorio los manda a la papelera). */
+  borrar(dir: string) {
+    if (this.activaCarpeta === dir) this.activaCarpeta = undefined
+    this.recientes = this.recientes.filter((r) => r.carpeta !== dir)
+    this.guardarEstado()
+    this.olvidarDatos(dir)
+    this.log.info('oficina borrada')
   }
 
   /** Deja `dir` como activa y la sube a recientes (máximo 10). Guarda config.json. */

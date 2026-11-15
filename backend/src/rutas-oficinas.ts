@@ -27,9 +27,11 @@ export function misionPatch(d: Obj): string | undefined {
   return Validar.texto(v, 'mision', ValidarAgenteExtra.maxMision, false) ?? ''
 }
 
-/** `alAbrir`: ganchos al abrir una oficina (reclamar chats de Próspera, escanear vínculos), se suman al portar esos módulos. */
-export function rutasOficinas({ config, oficinas, claude, alAbrir = [] }: {
+/** `alAbrir`: ganchos al abrir una oficina (reclamar chats de Próspera, escanear vínculos), se suman al portar esos módulos.
+ *  `ocupada`: si hay agentes trabajando en esa oficina (no se puede borrar mientras tanto). */
+export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada = () => false }: {
   config: Config; oficinas: Oficinas; claude: InfoClaude; alAbrir?: ((a: OficinaActiva) => Promise<void>)[]
+  ocupada?: (carpeta: string) => boolean
 }): RutaNucleo {
   async function estado(): Promise<Obj> {
     const bin = claude.claudePath()
@@ -93,6 +95,12 @@ export function rutasOficinas({ config, oficinas, claude, alAbrir = [] }: {
         const d = objeto(body)
         const a = oficinas.editar(Validar.texto(d.nombre, 'nombre', 80, false), Validar.texto(d.duenio, 'duenio', 80, false))
         return [200, sobreOficina(a)]
+      }
+      if (method === 'DELETE') {
+        const a = oficinas.requerirActiva()
+        if (ocupada(a.carpeta)) throw new ErrorAPI(409, 'Hay agentes trabajando en esta oficina. Esperá a que terminen para borrarla.')
+        oficinas.borrar(a.carpeta)
+        return [200, { ok: true, carpeta: a.carpeta }]
       }
       return no405
     }

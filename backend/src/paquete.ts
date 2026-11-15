@@ -490,6 +490,7 @@ export class PaqueteRouter implements SubRouter {
   /** La oficina ya está en `dest`: vínculos, rutas, biblioteca y abrirla. */
   private registrar(dest: string, of: Oficina): Obj {
     const avisos: string[] = []
+    this.oficinas.olvidarDatos(dest)
     const pathManifiesto = path.join(dest, manifiesto)
     let man: Obj | undefined
     try {

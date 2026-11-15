@@ -183,6 +183,8 @@ async function mensaje(ev: IpcMainInvokeEvent, m: unknown): Promise<unknown> {
     case 'acerca':
       acercaDe()
       return null
+    case 'borrarOficina':
+      return borrarOficina(typeof o.carpeta === 'string' ? o.carpeta : undefined)
     case 'insignia':
       insignia(typeof o.n === 'number' ? Math.max(0, Math.floor(o.n)) : 0)
       return null
@@ -210,6 +212,24 @@ async function mensaje(ev: IpcMainInvokeEvent, m: unknown): Promise<unknown> {
     }
     default:
       return null
+  }
+}
+
+/** Borra la oficina abierta (solo si es la que pidió el front): el backend la cierra y olvida lo guardado en hq.db, y
+ *  la carpeta va a la papelera (se puede recuperar). */
+async function borrarOficina(carpeta?: string): Promise<Record<string, unknown>> {
+  const estado = await api('/api/estado')
+  const activa: string | undefined = estado.oficina?.carpeta
+  if (!carpeta || carpeta !== activa) return { error: 'Esa oficina no es la que está abierta.' }
+  const r = await backend.router.handle('DELETE', '/api/oficina', {})
+  let cuerpo: Record<string, unknown> = {}
+  try { cuerpo = JSON.parse(r.json.toString('utf8')) } catch {}
+  if (r.status !== 200) return { error: typeof cuerpo.error === 'string' ? cuerpo.error : 'No pude borrar la oficina.' }
+  try {
+    await shell.trashItem(carpeta)
+    return { ok: true, papelera: true }
+  } catch {
+    return { ok: true, papelera: false }
   }
 }
 

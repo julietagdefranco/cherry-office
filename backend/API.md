@@ -21,6 +21,7 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 | POST | `/api/oficinas/abrir` | `{carpeta}` | `{carpeta, oficina}`; 404 si no hay `oficina.json`, 400 si es inválido |
 | POST | `/api/oficinas/importar-prospera` | `{origen?}` | `{carpeta, oficina, yaExistia, agentesImportados, faltantes, copiados}`; idempotente |
 | GET / PATCH | `/api/oficina` | PATCH `{nombre?, duenio?}` | `{carpeta, oficina}` |
+| DELETE | `/api/oficina` | | `{ok, carpeta}`: la oficina activa se cierra, sale de recientes y se borra todo lo suyo en `hq.db` (chats, Creador, reuniones, tareas, biblioteca, costos). La carpeta no se toca (la app de escritorio la manda a la papelera). 409 si hay agentes trabajando |
 | POST | `/api/departamentos` | `{nombre, color?, id?}` | `{departamento, oficina}` |
 | PATCH | `/api/departamentos/:id` | `{nombre?, color?}` | `{departamento, oficina}` |
 | DELETE | `/api/departamentos/:id` | `{moverA?}` (o `?moverA=`) | `{ok, oficina}`; 409 si tiene agentes y no hay `moverA`, o si es el último departamento |

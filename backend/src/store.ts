@@ -71,6 +71,33 @@ export class Store {
     this.db.run('INSERT INTO meta(clave,valor) VALUES(?,?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor', [clave, valor])
   }
 
+  // MARK: olvidar una oficina
+
+  /** Borra todo lo guardado para la carpeta `carpeta` (chats, Creador, reuniones, tareas, biblioteca, costos…): cualquier
+   *  tabla con columna `oficina`, más los hijos que cuelgan por id. Se usa al crear una oficina nueva en una carpeta
+   *  que pudo tener otra antes (borraron la carpeta y la recrearon con el mismo nombre): la nueva arranca de cero. */
+  olvidarOficina(carpeta: string) {
+    if (carpeta === '') return
+    const db = this.db
+    const tablas = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").map((f) => txt(f.name))
+    const conOficina = tablas.filter((t) => {
+      try {
+        return db.query(`PRAGMA table_info("${t.replace(/"/g, '""')}")`).some((f) => txt(f.name) === 'oficina')
+      } catch {
+        return false
+      }
+    })
+    // los hijos con clave foránea van antes que su tabla
+    conOficina.sort((a, b) => Number(b === 'turnos') - Number(a === 'turnos'))
+    db.transaccion(() => {
+      db.run('DELETE FROM mensajes WHERE sid IN (SELECT id FROM sesiones WHERE oficina=?)', [carpeta])
+      if (tablas.includes('corrida_pasos') && tablas.includes('corridas')) {
+        db.run('DELETE FROM corrida_pasos WHERE corrida IN (SELECT id FROM corridas WHERE oficina=?)', [carpeta])
+      }
+      for (const t of conOficina) db.run(`DELETE FROM "${t.replace(/"/g, '""')}" WHERE oficina=?`, [carpeta])
+    })
+  }
+
   // MARK: costos
 
   /** Guarda el costo estimado de una corrida. `agente` '' = sin agente. */

@@ -359,7 +359,17 @@ describe('Oficinas y departamentos', () => {
     expect((await f.patch('/api/oficina')).status).toBe(400)
     expect((await llamar(f.b, 'PATCH', '/api/oficina', { body: '[]' })).status).toBe(400)
     expect(f.oficinaJSON().nombre).toBe('Taller')
-    expect((await llamar(f.b, 'DELETE', '/api/oficina')).status).toBe(405)
+    expect((await llamar(f.b, 'PUT', '/api/oficina')).status).toBe(405)
+  })
+
+  test('DELETE oficina: la cierra y la saca de recientes; la carpeta queda', async () => {
+    const f = await Fix.crear()
+    const r = await llamar(f.b, 'DELETE', '/api/oficina')
+    expect(r.status).toBe(200)
+    expect((await f.get('/api/estado')).obj.oficina).toBeNull()
+    expect(lista((await f.get('/api/oficinas')).obj.oficinas)).toEqual([])
+    expect(fs.existsSync(f.carpeta)).toBe(true)
+    expect((await llamar(f.b, 'DELETE', '/api/oficina')).status).toBe(409)
   })
 
   // MARK: 409 sin oficina
