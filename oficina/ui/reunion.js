@@ -4,7 +4,7 @@
   var h = App.h, api = App.api;
   var E = App.E;
   var visto = null;         // id de la reunión que muestra el panel
-  var reloj = null, vigilando = null, cerrando = false;
+  var reloj = null, vigilando = null, cerrando = false, resumiendo = null;
   var borrador = {};        // lo que estás escribiendo, por reunión (el panel se repinta mientras hablan)
 
   /* patrones de reunión: misma lista y mismos ids que el backend (ReunionPatrones.swift / hq_reuniones.py) */
@@ -233,6 +233,7 @@
     }
     if (!r.turnos.length && r.estado !== 'en_curso') t.appendChild(h('div.vacio', 'Sin turnos.'));
     cuerpo.appendChild(t);
+    if (r.estado !== 'cerrada' && (r.resumenParcial || resumiendo === r.id)) cuerpo.appendChild(resumenParcial(r));
     if (r.sintesis) cuerpo.appendChild(sintesis(r));
     if (r.errorSintesis) cuerpo.appendChild(h('div.sintesis', h('div.error-txt', 'No se pudo armar el acta: ' + r.errorSintesis)));
     if (r.error) cuerpo.appendChild(h('div.sintesis', h('div.error-txt', r.error)));
@@ -265,6 +266,9 @@
       App.add(pie, h('div.redactar', txt, mandar), h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px', alignItems: 'center' } },
         h('span.ayuda', { style: { margin: 0 } }, 'Enter para enviar · Mayús+Enter para otra línea'),
         h('span', { style: { flex: 1 } }),
+        h('button.btn', { disabled: cerrando || resumiendo === r.id || !r.turnos.some(function (x) { return x.agente !== 'usuario' && !x.error; }),
+          title: 'Un resumen de lo dicho hasta ahora, sin cerrar la reunión', onclick: function () { resumir(r); } },
+          resumiendo === r.id ? [h('span.giro'), 'Resumiendo…'] : 'Resumen hasta acá'),
         h('button.btn', { disabled: ocupado, onclick: function () {
           api.post('/api/reuniones/' + r.id + '/ronda').then(function (d) { E.reunion = d; sincronizar(); pintarPanel(d); vigilar(d.id); }).catch(App.fallo);
         } }, 'Otra ronda'),
@@ -273,6 +277,29 @@
       if (enfocado) setTimeout(function () { txt.focus(); txt.setSelectionRange(txt.value.length, txt.value.length); }, 0);
     }
     if (scrollAbajo) cuerpo.scrollTop = cuerpo.scrollHeight;
+  }
+
+  /* resumen de lo dicho hasta ahora, sin cerrar: para pensar qué contestar */
+  function resumenParcial(r) {
+    var s = r.resumenParcial;
+    if (!s) return h('div.sintesis', h('div.ayuda', { style: { margin: 0 } }, h('span.giro'), ' Armando un resumen de lo dicho hasta ahora…'));
+    var nuevos = r.turnos.length - (s.turnos || 0);
+    return h('div.sintesis',
+      h('h4', 'Resumen hasta acá'),
+      h('div.ayuda', { style: { marginTop: 0 } }, App.fecha(s.ts) + (nuevos > 0 ? ' · desde entonces hubo ' + (nuevos === 1 ? '1 intervención más' : nuevos + ' intervenciones más') : '') + ' · la reunión sigue abierta'),
+      h('p', s.resumen || '—'),
+      s.abiertas && s.abiertas.length ? [h('h4', 'Esperan tu respuesta'), h('ul', s.abiertas.map(function (d) { return h('li', d); }))] : null,
+      s.decisiones && s.decisiones.length ? [h('h4', 'Lo que ya parece acordado'), h('ul', s.decisiones.map(function (d) { return h('li', d); }))] : null,
+      s.pendientes && s.pendientes.length ? [h('h4', 'Próximos pasos propuestos'), h('ul', s.pendientes.map(function (p) { return h('li', p.quien ? [h('b', p.quien + ': '), p.que] : p.que); }))] : null);
+  }
+
+  function resumir(r) {
+    resumiendo = r.id; pintarPanel(E.reunion && E.reunion.id === r.id ? E.reunion : r);
+    api.post('/api/reuniones/' + r.id + '/resumen').then(function (d) {
+      resumiendo = null;
+      if (E.reunion && E.reunion.id === d.id) E.reunion = d;
+      pintarPanel(d);
+    }).catch(function (e) { resumiendo = null; App.fallo(e); pintarPanel(E.reunion && E.reunion.id === r.id ? E.reunion : r); });
   }
 
   function sintesis(r) {
