@@ -1,8 +1,9 @@
 // Dependencias entre agentes (docs/plan-dependencias.md): tablas, stores y, en los pasos siguientes, herramientas MCP,
 // gancho de entregas, relanzamiento y barrido. En proceso (sin servidor HTTP), con el `claude` falso del sandbox.
 import { describe, expect, test } from 'vitest'
-import { dependenciasDe, esperaJSON, herramientasDependencias, vencimiento } from '../../src/dependencias.js'
+import { dependenciasDe, esperaJSON, esperasVencidas, herramientasDependencias, vencimiento } from '../../src/dependencias.js'
 import { mcpDe } from '../../src/consultas.js'
+import { Parte } from '../../src/parte.js'
 import type { MCPHerramientas } from '../../src/mcp-protocolo.js'
 import { Sandbox, U, esperar } from '../support/sandbox.js'
 import { arrancar, llamar, oficina } from '../support/en-proceso.js'
@@ -645,5 +646,41 @@ describe('barrido', () => {
     await p.dep.barrer()
     expect(p.dep.pedidos.uno(p.carpeta, ped.id)).toMatchObject({ estado: 'fallido', error: 'Interrumpida: la app se cerró mientras corría.' })
     expect(p.dep.esperas.una(p.carpeta, x.id)!.estado).toBe('esperando')
+  })
+})
+
+// MARK: - parte y avisos
+
+describe('esperas vencidas: parte y avisos', () => {
+  test('solo las `esperando` que pasaron su plazo; el bloqueo del parte y el aviso «espera:<id>» salen solos y «visto» los apaga', async () => {
+    const p = await preparar()
+    const mk = (que: string, haceDias: number, plazo: number, estado = 'esperando') => {
+      const x = p.dep.esperas.crear({ oficina: p.carpeta, agente: 'marce', esperaA: 'arqui', que, ref: 'pedido:' + que.length, grupo: 'sid:' + que, accion: 'continuar', origen: 'mcp', plazoDias: plazo, estado })!
+      p.s.store.db.run('UPDATE esperas SET creada=? WHERE id=?', [Date.now() / 1000 - haceDias * 86400, x.id])
+      return x
+    }
+    const vencida = mk('el mapeo', 3, 2)
+    mk('en plazo', 1, 2)
+    mk('lista ya', 5, 2, 'lista')
+    const v = esperasVencidas(p.s, p.carpeta, new Date())
+    expect(v.map((x) => x.id)).toEqual([vencida.id])
+    expect(v[0]).toMatchObject({ agenteNombre: 'Marce', esperaANombre: 'Arqui', que: 'el mapeo', plazo: 2 })
+
+    const parte = Parte.armar(p.s, p.b.oficinas.activa()!) as Record<string, any>
+    const bloqueo = parte.bloqueos.find((b: any) => b.tipo === 'espera')
+    expect(bloqueo.texto).toBe('«Marce» espera a Arqui («el mapeo») hace 3 días.')
+    expect(bloqueo.ref).toBe(String(vencida.id))
+    expect(parte.esperas.map((e: any) => e.id).sort()).toEqual(p.dep.esperas.lista(p.carpeta, { estados: ['esperando', 'lista'] }).map((e) => e.id).sort())
+
+    const aviso = p.s.avisos.pendientes(p.carpeta).find((a) => a.tipo === 'espera')!
+    expect(aviso).toMatchObject({ id: `espera:${vencida.id}`, agente: 'marce', ref: String(vencida.id) })
+    expect(aviso.texto).toBe('«el mapeo»: Marce espera a Arqui hace 3 días')
+    expect(Math.abs(aviso.creado - (Date.now() / 1000 - 3 * 86400 + 2 * 86400))).toBeLessThan(5) // creada + plazo
+    expect(p.s.avisos.vistos(p.carpeta, { id: 'espera:9999' })).toBe(0)
+    expect(p.s.avisos.vistos(p.carpeta, { id: 'espera:x' })).toBe(0)
+    expect(p.s.avisos.vistos(p.carpeta, { id: `espera:${vencida.id}` })).toBe(1)
+    expect(p.s.avisos.pendientes(p.carpeta).some((a) => a.tipo === 'espera')).toBe(false)
+    // el bloqueo del parte sigue (la persona vio el aviso, pero la espera sigue trabada); el coordinador lo recibe igual
+    expect(Parte.bloqueos(p.s, p.b.oficinas.activa()!, new Date()).some((b) => b.tipo === 'espera')).toBe(true)
   })
 })

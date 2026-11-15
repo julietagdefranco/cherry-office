@@ -1,6 +1,6 @@
 // «Te necesita» (Avisos.swift). Dos clases de avisos:
 // - guardados: una respuesta lista, un error, una tarea que terminó. Se marcan como vistos.
-// - calculados al leer: una reunión que espera, una corrida de flujo que espera, propuestas de la biblioteca. Salen
+// - calculados al leer: una reunión que espera, una corrida de flujo que espera, una espera vencida entre agentes, propuestas de la biblioteca. Salen
 //   solos cuando se resuelve lo que los causa. Sus tablas las crean los módulos de reuniones, flujos y biblioteca: si
 //   todavía no existen, simplemente no aportan avisos.
 import type { EventEmitter } from 'node:events'
@@ -10,9 +10,9 @@ import type { Store } from './store.js'
 import { largo, prefijo } from './validar.js'
 
 export type Aviso = {
-  /** "a<n>" guardado | "reunion:<id>" | "flujo:<corrida>" | "propuestas" | "e<n>" (entrega, solo en el canal) */
+  /** "a<n>" guardado | "reunion:<id>" | "flujo:<corrida>" | "espera:<id>" | "propuestas" | "e<n>" (entrega, solo en el canal) */
   id: string
-  /** respuesta | error | tarea | reunion | flujo | propuestas | entrega */
+  /** respuesta | error | tarea | reunion | flujo | espera | propuestas | entrega */
   tipo: string
   agente: string
   texto: string
@@ -63,7 +63,7 @@ export class Avisos {
     }
   }
 
-  /** Marca como vistos: un guardado ("a<n>"), una reunión ("reunion:<id>"), una corrida ("flujo:<n>"), todos los de un
+  /** Marca como vistos: un guardado ("a<n>"), una reunión ("reunion:<id>"), una corrida ("flujo:<n>"), una espera vencida ("espera:<n>"), todos los de un
    *  agente, o todos los de la oficina. */
   vistos(oficina: string, { id, agente }: { id?: string; agente?: string } = {}): number {
     const db = this.store.db
@@ -72,6 +72,11 @@ export class Avisos {
         const n = Number(id.slice('flujo:'.length))
         if (!Number.isInteger(n)) return 0
         return this.marcarCorridaVista?.(oficina, n) ? 1 : 0
+      }
+      if (id?.startsWith('espera:')) {
+        const n = Number(id.slice('espera:'.length))
+        if (!Number.isInteger(n)) return 0
+        return this.marcarEsperaVista?.(oficina, n) ? 1 : 0
       }
       if (id?.startsWith('reunion:')) {
         return db.run("UPDATE reuniones SET vista=1 WHERE oficina=? AND id=? AND estado='esperando'", [oficina, id.slice('reunion:'.length)])
@@ -90,6 +95,9 @@ export class Avisos {
 
   /** Lo pone el módulo de flujos: marca vista una corrida que espera a la persona. */
   marcarCorridaVista?: (oficina: string, id: number) => boolean
+
+  /** Lo pone el módulo de dependencias: marca vista una espera vencida. */
+  marcarEsperaVista?: (oficina: string, id: number) => boolean
 
   /** Pendientes de la oficina, del más viejo al más nuevo: guardados sin ver + calculados. */
   pendientes(oficina: string): Aviso[] {

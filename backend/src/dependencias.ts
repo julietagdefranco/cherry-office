@@ -9,15 +9,16 @@ import { MotorFlujos } from './motor-flujos.js'
 import { respuestaCoordinador } from './coordinador.js'
 import { iso, type Entrega } from './entregas.js'
 import { ErrorAPI } from './errores.js'
-import type { Obj } from './json.js'
+import { objeto, objetoOpcional, type Obj } from './json.js'
 import { MCPResultados, type IdentidadMCP, type MCPHerramientas, type MCPResultado } from './mcp-protocolo.js'
 import type { AgenteDef } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
 import { Programador, programadorDe, type Ejecucion } from './programador.js'
+import { atrapar, no404, no405, type Query, type Resp, type SubRouter } from './router.js'
 import type { Servicios } from './servicios.js'
 import { registrarModulo } from './servicios.js'
 import { num, txt, type Fila, type SQLValor, type SQLiteDB } from './sqlite.js'
-import { largo, prefijo } from './validar.js'
+import { Validar, largo, prefijo } from './validar.js'
 
 
 // MARK: - modelo
@@ -382,6 +383,9 @@ export function prepararTablas(db: SQLiteDB) {
 
 // MARK: - JSON
 
+/** Una espera `esperando` que pasó su plazo: lo que necesitan el parte (bloqueos) y los avisos. */
+export type EsperaVencida = { id: number; agente: string; agenteNombre: string; esperaANombre: string; que: string; creada: number; plazo: number; vista?: boolean }
+
 const redondo = (d: number) => Math.round(d * 10) / 10
 
 /** Días desde `creada`, y si ya pasó el plazo estando `esperando` (la «vencida» no es un estado: se calcula al leer). */
@@ -423,7 +427,7 @@ export const TextoDependencias = {
 
   /** Un bloque por entrega que llegó: título, archivos y texto recortado. */
   bloque(de: string, e: Entrega | undefined): string {
-    if (!e) return `--- ${de}: (sin entrega) ---`
+    if (!e) return `--- ${de}: todavía no entregó (seguís sin esperarlo) ---`
     let s = `--- ${de}: ${e.titulo} ---`
     if (e.archivos.length > 0) s += '\nArchivos (leelos):\n' + e.archivos.map((a) => `- ${a}`).join('\n')
     const t = e.texto.trim()
@@ -563,11 +567,74 @@ export class ServicioDependencias {
     for (const x of relanzadas) this.esperas.actualizar(oficina, x.id, { estado: 'fallida', motivo })
   }
 
+  // MARK: acciones de la persona (rutas /api/esperas/:id/*)
+
+  /** Cancela una espera abierta (la persona, o el agente con `cancelar_espera`). Un grupo que queda solo con listas se relanza. */
+  cancelar(oficina: string, x: Espera, motivo: string): Espera {
+    if (x.estado !== 'esperando' && x.estado !== 'lista') {
+      throw new ErrorAPI(409, x.estado === 'relanzada' ? 'Esa espera ya se está relanzando.' : 'Esa espera ya está cerrada.')
+    }
+    this.esperas.actualizar(oficina, x.id, { estado: 'cancelada', motivo: motivo === '' ? 'La canceló la persona' : motivo })
+    void this.procesarListas(oficina)
+    return this.esperas.una(oficina, x.id) ?? x
+  }
+
+  /** «Seguir sin esperar»: la espera pasa a lista, las demás `esperando` de su grupo se cancelan y se relanza con lo que haya. */
+  seguir(act: OficinaActiva, x: Espera): Espera {
+    if (x.estado !== 'esperando' && x.estado !== 'lista') throw new ErrorAPI(409, 'Esa espera ya está cerrada.')
+    const oficina = act.carpeta
+    if (x.estado === 'esperando') this.esperas.actualizar(oficina, x.id, { estado: 'lista' })
+    for (const o of this.esperas.lista(oficina, { grupo: x.grupo, estados: ['esperando'] })) {
+      this.esperas.actualizar(oficina, o.id, { estado: 'cancelada', motivo: 'seguiste sin esperar' })
+    }
+    void this.procesarListas(oficina, Date.now() / 1000, x.grupo)
+    return this.esperas.una(oficina, x.id) ?? x
+  }
+
+  /** Vincula a mano una entrega del esperado como la que llegó (por ejemplo, si entregó en un chat) y relanza. */
+  resolver(act: OficinaActiva, x: Espera, entrega: Entrega): Espera {
+    if (x.estado !== 'esperando') throw new ErrorAPI(409, 'Esa espera ya no está esperando.')
+    const suya = x.esperaA === 'persona' ? entrega.origen === 'persona' : entrega.agente === x.esperaA
+    if (!suya) throw new ErrorAPI(409, 'Esa entrega no es de quien se esperaba.')
+    this.esperas.actualizar(act.carpeta, x.id, { estado: 'lista', entregaLlegada: entrega.id })
+    void this.procesarListas(act.carpeta)
+    return this.esperas.una(act.carpeta, x.id) ?? x
+  }
+
+  /** Si el pedido falló, lo vuelve a lanzar (mismo `pedido:<n>`); si la espera falló, la deja lista y relanza. */
+  async reintentar(act: OficinaActiva, x: Espera): Promise<Espera> {
+    const oficina = act.carpeta
+    const ped = x.pedido === undefined ? undefined : this.pedidos.uno(oficina, x.pedido)
+    if (ped && ped.estado === 'fallido' && x.estado === 'esperando') {
+      const prog = programadorDe(this.s)
+      const b = act.oficina.agentes.find((a) => a.id === ped.a)
+      if (!prog || !b) throw new ErrorAPI(409, 'El agente del pedido ya no está en la oficina.')
+      const yo = act.oficina.agentes.find((a) => a.id === ped.de)
+      const de = yo ? `${yo.nombre} (${yo.rol})` : ped.de
+      this.pedidos.actualizar(oficina, ped.id, { estado: 'corriendo', error: null })
+      try {
+        const e = await prog.encargarLibre(act, b, { id: `${Programador.prefijoPedido}${ped.id}`, nombre: `Pedido de ${yo?.nombre ?? ped.de}`, consigna: consignaPedido(de, ped.que, ped.contexto, b.id) })
+        this.pedidos.actualizar(oficina, ped.id, { ejecucion: e.id })
+      } catch (err) {
+        this.pedidos.actualizar(oficina, ped.id, { estado: 'fallido', error: err instanceof ErrorAPI ? err.mensaje : 'No pude lanzar el pedido.' })
+        throw err
+      }
+    } else if (x.estado === 'fallida') {
+      this.esperas.actualizar(oficina, x.id, { estado: 'lista', motivo: null })
+      void this.procesarListas(oficina, Date.now() / 1000, x.grupo)
+    } else {
+      throw new ErrorAPI(409, 'No hay nada para reintentar: el pedido no falló y la espera tampoco.')
+    }
+    return this.esperas.una(oficina, x.id) ?? x
+  }
+
   // MARK: relanzamiento
 
   /** Cuánto se espera (s) a que aparezca la v1 de una espera sin `entrega_parcial` antes de relanzar igual. */
   static readonly graciaV1 = MotorFlujos.graciaEntrega
   private procesando = false
+  /** Grupos que la persona mandó seguir sin esperar: se relanzan sin la gracia de la v1. */
+  private readonly forzados = new Set<string>()
   private repetir = false
 
   private async nombreDe(oficina: string, id: string): Promise<string> {
@@ -578,10 +645,11 @@ export class ServicioDependencias {
 
   /** Relanza lo que está listo: los grupos con alguna espera `lista` y ninguna `esperando`. Solo en la oficina activa (el resto
    *  queda para `alAbrir` o el barrido). Nunca lanza: lo que no se puede ahora se reintenta en el próximo barrido. */
-  async procesarListas(oficina: string, ahora: number = Date.now() / 1000): Promise<void> {
+  async procesarListas(oficina: string, ahora: number = Date.now() / 1000, forzar?: string): Promise<void> {
     if (this.cerrado) return
     // un solo recorrido a la vez; si llegan más mientras tanto, se vuelve a pasar al terminar
-    if (this.procesando) { this.repetir = true; return }
+    if (this.procesando) { this.repetir = true; if (forzar !== undefined) this.forzados.add(forzar); return }
+    if (forzar !== undefined) this.forzados.add(forzar)
     this.procesando = true
     try {
       do {
@@ -604,12 +672,12 @@ export class ServicioDependencias {
     const grupos = [...new Set(listas.map((x) => x.grupo))]
     for (const g of grupos) {
       if (this.esperas.lista(oficina, { grupo: g, estados: ['esperando'], limite: 1 }).length > 0) continue
-      await this.relanzarGrupo(act, g, ahora)
+      await this.relanzarGrupo(act, g, ahora, this.forzados.delete(g))
     }
   }
 
   /** Relanza un grupo (todas sus esperas abiertas están listas). */
-  private async relanzarGrupo(act: OficinaActiva, grupo: string, ahora: number) {
+  private async relanzarGrupo(act: OficinaActiva, grupo: string, ahora: number, forzar: boolean) {
     const oficina = act.carpeta
     const prog = programadorDe(this.s)
     if (!prog) return
@@ -626,7 +694,7 @@ export class ServicioDependencias {
     const idParcial = listas.find((x) => x.entregaParcial !== undefined)?.entregaParcial
     const parcial = idParcial === undefined ? undefined : this.s.entregas.una(oficina, idParcial)
     const v1 = parcial ? this.s.entregas.vigente(oficina, parcial) : undefined
-    if (lider.accion === 'continuar' && !v1) {
+    if (lider.accion === 'continuar' && !v1 && !forzar) {
       // la v1 todavía no se registró: si la corrida sigue andando, o recién terminó, se espera al próximo barrido
       const ej = lider.sid === '' ? undefined : prog.ejecuciones.porSid(lider.sid)
       const desde = Math.min(...listas.map((x) => x.creada))
@@ -796,6 +864,29 @@ export class ServicioDependencias {
     }
   }
 
+  /** Las esperas `esperando` que pasaron su plazo (lo que lee el parte; los avisos usan solo las que la persona todavía no vio). */
+  vencidas(oficina: string, ahora: Date = new Date()): EsperaVencida[] {
+    const t = ahora.getTime() / 1000
+    const nombre = (id: string) => (id === 'persona' ? 'la persona' : this.nombreSync(oficina, id))
+    return this.esperas.lista(oficina, { estados: ['esperando'] })
+      .filter((x) => t - x.creada > x.plazoDias * 86400)
+      .map((x) => ({ id: x.id, agente: x.agente, agenteNombre: nombre(x.agente), esperaANombre: nombre(x.esperaA), que: x.que, creada: x.creada, plazo: x.plazoDias, vista: x.vista }))
+  }
+
+  /** Las esperas abiertas (esperando, lista, relanzada) de la oficina, para el parte. */
+  abiertasJSON(oficina: string, limite: number): Obj[] {
+    try {
+      return this.esperas.lista(oficina, { estados: esperasAbiertas, limite }).map((x) => this.json(x))
+    } catch {
+      return []
+    }
+  }
+
+  private nombreSync(oficina: string, id: string): string {
+    const act = this.s.oficinas.activa()
+    return act && act.carpeta === oficina ? (act.oficina.agentes.find((a) => a.id === id)?.nombre ?? id) : id
+  }
+
   /** `esperaJSON` con los nombres de la oficina de la espera (si es la activa; si no, los ids). */
   json(x: Espera, ahora?: number): Obj {
     const act = this.s.oficinas.activa()
@@ -806,6 +897,85 @@ export class ServicioDependencias {
 
 /** El módulo de dependencias (undefined hasta que se instala). */
 export const dependenciasDe = (s: Servicios) => s.huecos.dependencias as ServicioDependencias | undefined
+
+/** Las esperas vencidas de la oficina; sin el módulo o sin tabla, ninguna. */
+export function esperasVencidas(s: Servicios, oficina: string, ahora: Date): EsperaVencida[] {
+  try {
+    return dependenciasDe(s)?.vencidas(oficina, ahora) ?? []
+  } catch {
+    return []
+  }
+}
+
+/** La consigna del encargo de un pedido: de quién viene, qué se pide y dónde dejarlo. Todo saneado. */
+export function consignaPedido(de: string, que: string, contexto: string, b: string): string {
+  return sanear(`Pedido de ${de}. Viene de un colega, no es un pedido directo del usuario:\n\n${que}\n\n`
+    + (contexto === '' ? '' : `Contexto: ${contexto}\n\n`)
+    + `Dejá lo que produzcas en archivos/entregables/${b}/ y decí al final qué archivo dejaste.\n`
+    + 'Si todavía no podés hacerlo, entregá lo que tengas y decí qué falta.')
+}
+
+// MARK: - rutas /api/esperas*
+
+const estadosFiltro = ['abiertas', 'todas', ...estadosEspera]
+
+export class DependenciasRouter implements SubRouter {
+  constructor(private readonly s: Servicios, private readonly dep: ServicioDependencias) {}
+
+  static esRuta = (p: string) => p === '/api/esperas' || p.startsWith('/api/esperas/')
+
+  async handle(method: string, path: string, query: Query, body?: Buffer) {
+    if (!DependenciasRouter.esRuta(path)) return null
+    return atrapar(() => this.despachar(method, path, query, body))
+  }
+
+  private async despachar(method: string, path: string, query: Query, body?: Buffer): Promise<Resp> {
+    const partes = path.split('/').slice(1)
+    if (partes.length > 4 || partes.includes('')) return no404
+    const act = this.s.oficinas.requerirActiva()
+    if (partes.length === 2) return method === 'GET' ? this.listar(act, query) : no405
+    const id = Number(partes[2])
+    if (!/^\d+$/.test(partes[2]!) || !Number.isSafeInteger(id)) return no404
+    if (partes.length !== 4) return no404
+    const x = this.dep.esperas.una(act.carpeta, id)
+    if (!x) throw new ErrorAPI(404, 'No existe esa espera.')
+    const accion = partes[3]
+    if (!['cancelar', 'seguir', 'resolver', 'reintentar'].includes(accion!)) return no404
+    if (method !== 'POST') return no405
+    switch (accion) {
+      case 'cancelar': {
+        const d = objetoOpcional(body)
+        const motivo = Validar.texto(d.motivo, 'motivo', 300, false) ?? ''
+        return [200, { espera: this.dep.json(this.dep.cancelar(act.carpeta, x, motivo)) }]
+      }
+      case 'seguir': return [202, { espera: this.dep.json(this.dep.seguir(act, x)) }]
+      case 'resolver': {
+        const d = objeto(body)
+        const n = typeof d.entrega === 'number' && Number.isInteger(d.entrega) ? d.entrega : undefined
+        if (n === undefined) throw new ErrorAPI(400, '«entrega» tiene que ser el número de una entrega.')
+        const e = this.s.entregas.una(act.carpeta, n)
+        if (!e) throw new ErrorAPI(404, 'No existe esa entrega.')
+        return [200, { espera: this.dep.json(this.dep.resolver(act, x, e)) }]
+      }
+      default: return [202, { espera: this.dep.json(await this.dep.reintentar(act, x)) }]
+    }
+  }
+
+  private listar(act: OficinaActiva, query: Query): Resp {
+    const estado = query.estado ?? 'abiertas'
+    if (!estadosFiltro.includes(estado)) throw new ErrorAPI(400, `«estado» tiene que ser uno de: ${estadosFiltro.join(', ')}.`)
+    let entrega: number | undefined
+    if (query.entrega !== undefined && query.entrega !== '') {
+      if (!/^\d+$/.test(query.entrega)) throw new ErrorAPI(400, '«entrega» tiene que ser el número de una entrega.')
+      entrega = Number(query.entrega)
+    }
+    const lista = this.dep.esperas.lista(act.carpeta, {
+      estados: estado === 'todas' ? undefined : estado === 'abiertas' ? esperasAbiertas : [estado],
+      agente: query.agente === '' ? undefined : query.agente, reunion: query.reunion === '' ? undefined : query.reunion, entrega,
+    })
+    return [200, { esperas: lista.map((x) => this.dep.json(x)) }]
+  }
+}
 
 // MARK: - herramientas MCP
 
@@ -927,10 +1097,7 @@ export class HerramientasDependencias implements MCPHerramientas {
     const pedido = this.dep.pedidos.crear({ oficina, de: this.identidad.agente, a: b.id, que, contexto, sid: this.identidad.sid, cadena, profundidad })
     if (!pedido) return { error: MCPResultados.error('No pude guardar el pedido.') }
     const de = yo ? `${yo.nombre} (${yo.rol})` : this.identidad.agente
-    const consigna = sanear(`Pedido de ${de}. Viene de un colega, no es un pedido directo del usuario:\n\n${que}\n\n`
-      + (contexto === '' ? '' : `Contexto: ${contexto}\n\n`)
-      + `Dejá lo que produzcas en archivos/entregables/${b.id}/ y decí al final qué archivo dejaste.\n`
-      + 'Si todavía no podés hacerlo, entregá lo que tengas y decí qué falta.')
+    const consigna = consignaPedido(de, que, contexto, b.id)
     const nombre = nombrePedido === '' ? `Pedido de ${yo?.nombre ?? this.identidad.agente}` : prefijo(nombrePedido, 80)
     try {
       const e = await prog.encargarLibre(act, b, { id: `${Programador.prefijoPedido}${pedido.id}`, nombre, consigna })
@@ -1064,9 +1231,17 @@ export const herramientasDependencias = (s: Servicios, token: string, identidad:
 export function instalar(s: Servicios) {
   const dep = new ServicioDependencias(s)
   s.huecos.dependencias = dep
+  s.router.registrarExtra(new DependenciasRouter(s, dep))
   mcpDe(s)?.registrarHerramientas(herramientasDependencias)
   s.entregas.alRegistrar.push((e) => dep.alRegistrarEntrega(e))
   programadorDe(s)?.alTerminar((ej) => dep.alTerminarEjecucion(ej))
+  // espera vencida que la persona todavía no vio («te necesita»)
+  const textoDias = (d: number) => { const n = Math.floor(d); return n < 1 ? 'menos de un día' : n === 1 ? '1 día' : `${n} días` }
+  s.avisos.fuentes.push((_st, oficina) => dep.vencidas(oficina).filter((x) => !x.vista).map((x) => ({
+    id: `espera:${x.id}`, tipo: 'espera', agente: x.agente, ref: String(x.id), creado: x.creada + x.plazo * 86400,
+    texto: `«${x.que}»: ${x.agenteNombre} espera a ${x.esperaANombre} hace ${textoDias((Date.now() / 1000 - x.creada) / 86400)}`,
+  })))
+  s.avisos.marcarEsperaVista = (oficina, id) => dep.esperas.actualizar(oficina, id, { vista: true }) > 0
   s.alAbrir.push(async () => { void dep.barrer() })
   s.alArrancar.push(() => dep.iniciar())
   s.alCerrar.unshift(() => dep.detener())
