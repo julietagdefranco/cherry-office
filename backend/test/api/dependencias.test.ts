@@ -269,9 +269,13 @@ describe('Dependencias entre pendientes de una reunión (API)', () => {
     expect(f.sb.llamadasConPrompt('Mandar la propuesta')).toEqual([])
     expect((await f.post(`/api/reuniones/${id}/pendientes/0/hecho`)).status).toBe(409)
     expect((await f.post(`/api/reuniones/${id}/pendientes/9/hecho`)).status).toBe(404)
+    const avisosPendiente = async () => lista((await f.get('/api/avisos')).obj.avisos).filter((a) => str(a.tipo) === 'pendiente' && str(a.ref) === id)
+    expect((await avisosPendiente()).length).toBe(1)
     const h = await f.post(`/api/reuniones/${id}/pendientes/2/hecho`, { nota: 'Lo revisé con el abogado.' })
     expect(h.status, JSON.stringify(h.obj)).toBe(200)
     expect(lista(h.obj.pendientesEstado)[2]!.hecho).toBeGreaterThan(0)
+    // era el único pendiente de la persona: se apaga el «necesita tu parte»
+    expect(await avisosPendiente()).toEqual([])
     const propia = (await entregasDe(f, `encargo:${id}:2`))[0]!
     expect([str(propia.origen), str(propia.agente), str(propia.estado), str(propia.titulo)]).toEqual(['persona', '', 'revisada', 'Revisar el contrato a mano'])
     expect(await esperar(async () => (await entregasDe(f, `encargo:${id}:3`)).length === 1, 20)).toBe(true)

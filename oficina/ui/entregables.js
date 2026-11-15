@@ -209,7 +209,7 @@ App.Entregables = (function () {
           : x.estado === 'lista' ? 'Ya llegó lo de ' + x.esperaANombre + ' («' + x.que + '»): ' + x.agenteNombre + ' va a rehacer la versión completa.'
           : x.estado === 'relanzada' ? x.agenteNombre + ' está haciendo la versión completa con lo de ' + x.esperaANombre + '…'
           : 'No se pudo hacer la versión completa' + (x.motivo ? ': ' + x.motivo : '.');
-        if (pedidoFallo) texto += ' El pedido falló.';
+        if (pedidoFallo) texto += ' · el pedido falló';
         if (x.estado === 'esperando' || x.estado === 'lista') {
           botones.push(h('button.btn.chico', { onclick: function () {
             api().post('/api/esperas/' + x.id + '/seguir').then(function () { despuesDeEspera(e, 'Listo: ' + x.agenteNombre + ' sigue sin esperar.'); }).catch(App.fallo);
@@ -226,12 +226,30 @@ App.Entregables = (function () {
         filas.push(h('div.entrega-accion', h('h4', App.icono('reloj'), ' En espera'), h('div.acc-res', texto),
           h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } }, botones)));
       }
+      if (x.entregaParcial === e.id && x.estado === 'hecha' && x.entregaNueva && x.entregaNueva !== e.id) {
+        filas.push(h('div.entrega-accion', h('h4', 'Ya está la versión completa'), h('div.acc-res', 'Llegó lo de ' + x.esperaANombre + ' y ' + x.agenteNombre + ' rehízo esta entrega.'),
+          h('div', h('button.btn.chico', { onclick: function () { verEntrega(x.entregaNueva); } }, 'Ver la versión completa'))));
+      }
       if (x.entregaNueva === e.id) {
         filas.push(h('div.entrega-accion', h('h4', 'Versión completa'), h('div.acc-res', 'Llegó lo de ' + x.esperaANombre + ' («' + x.que + '») y esta es la versión completa.'),
           x.entregaLlegada ? h('div', h('button.btn.chico.fantasma', { onclick: function () { verEntrega(x.entregaLlegada); } }, 'Ver lo que entregó ' + x.esperaANombre)) : null));
       }
     });
     App.add(caja, filas);
+    /* mientras la espera siga abierta, se vuelve a mirar cada 4 s: cuando llega lo que faltaba, el bloque se actualiza solo */
+    var abiertas = (esperas || []).some(function (x) { return x.entregaParcial === e.id && (x.estado === 'esperando' || x.estado === 'lista' || x.estado === 'relanzada'); });
+    var firma = function (l) { return JSON.stringify((l || []).map(function (x) { return [x.id, x.estado, x.pedido && x.pedido.estado, x.entregaNueva, x.vencida]; })); };
+    var vigilar = function () {
+      setTimeout(function () {
+        if (!abiertoPanel() || abierta !== e.id || !caja.isConnected) return;
+        api().get('/api/esperas', { entrega: e.id, estado: 'todas' }).then(function (r) {
+          if (!abiertoPanel() || abierta !== e.id || !caja.isConnected) return;
+          /* solo se repinta si algo cambió (repintar igual cortaría un clic a mitad de camino) */
+          if (firma(r.esperas) !== firma(esperas)) pintarEspera(e, r.esperas || [], caja); else vigilar();
+        }).catch(function () {});
+      }, 4000);
+    };
+    if (abiertas) vigilar();
   }
 
   /* ---------------- acción hacia afuera (plan §8) ---------------- */

@@ -1373,6 +1373,10 @@ export class ReunionesRouter implements SubRouter {
     })
     if (!e) throw new ErrorAPI(500, 'No pude guardar la entrega.')
     this.s.entregas.marcar(a.carpeta, e.id, 'revisada')
+    // si ya no queda ningún pendiente de la persona sin hacer, se apaga el aviso «necesita tu parte» de la reunión
+    const quedan = ps.some((q, i) => (q.usuario || PendientesReunion.agente(q.quien, a.oficina) === undefined)
+      && this.s.entregas.porRef(a.carpeta, Programador.idEncargo(id, i))?.origen !== 'persona')
+    if (!quedan) this.s.avisos.vistosPorRef(a.carpeta, 'pendiente', id)
     return this.respuestaPendientes(id, a)
   }
 }

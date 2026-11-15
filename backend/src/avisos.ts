@@ -93,6 +93,15 @@ export class Avisos {
     }
   }
 
+  /** Marca vistos los guardados sin ver de un tipo y una ref (p. ej. el «necesita tu parte» de una reunión cuando ya no queda nada). */
+  vistosPorRef(oficina: string, tipo: string, ref: string): number {
+    try {
+      return this.store.db.run('UPDATE avisos SET visto=1 WHERE oficina=? AND tipo=? AND ref=? AND visto=0', [oficina, tipo, ref])
+    } catch {
+      return 0
+    }
+  }
+
   /** Lo pone el módulo de flujos: marca vista una corrida que espera a la persona. */
   marcarCorridaVista?: (oficina: string, id: number) => boolean
 

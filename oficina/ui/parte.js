@@ -131,7 +131,7 @@ App.Parte = (function () {
 
   function filaEspera(x) {
     var ag = App.agente(x.agente);
-    var estado = x.estado === 'lista' ? 'ya llegó, falta relanzar' : x.estado === 'relanzada' ? 'haciendo la versión completa' : (x.vencida ? 'vencida hace ' + diasTxt(x.dias) : 'hace ' + diasTxt(x.dias));
+    var estado = x.estado === 'lista' ? 'ya llegó, falta relanzar' : x.estado === 'relanzada' ? 'haciendo la versión completa' : (x.vencida ? 'vencida hace ' + diasTxt(x.dias) : App.hace(x.creada));
     return h('button.parte-fila', { onclick: function () { abrirEspera(x); } },
       ag ? App.retratoImg(ag, 'retrato', 64) : h('div.retrato.parte-ico', App.icono('reloj')),
       h('div.parte-txt', h('div.parte-tit', x.agenteNombre + ' espera a ' + x.esperaANombre), h('div.parte-sub', x.que + ' · ' + estado)));

@@ -298,7 +298,8 @@
   }
 
   function nombresDe(ids) {
-    return (ids || []).map(function (id) { return id === 'persona' ? 'vos' : ((App.agente(id) || {}).nombre || id); }).join(', ');
+    var ns = (ids || []).map(function (id) { return id === 'persona' ? 'vos' : ((App.agente(id) || {}).nombre || id); });
+    return ns.length < 2 ? ns.join('') : ns.slice(0, -1).join(', ') + (ns[ns.length - 1] === 'vos' ? ' y a vos' : ' y ' + ns[ns.length - 1]);
   }
 
   /* «Ya lo hice»: la nota es opcional; deja una entrega tuya que libera a quien esperaba este pendiente */
