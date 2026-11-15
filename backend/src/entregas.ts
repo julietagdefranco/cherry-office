@@ -227,10 +227,10 @@ export class Entregas {
   }
 
   /** Crea la entrega y avisa a la app nativa («te entregó»). */
-  registrar(p: { oficina: string; agente: string; nombre: string; origen: string; ref: string; titulo: string; texto: string; sid?: string; archivos?: string[]; padre?: number; costo?: number }): Entrega | undefined {
+  registrar(p: { oficina: string; agente: string; nombre: string; origen: string; ref: string; titulo: string; texto: string; sid?: string; archivos?: string[]; padre?: number; costo?: number; silenciosa?: boolean }): Entrega | undefined {
     const e = this.crear(p)
     if (!e) return undefined
-    this.avisos.emitir({ id: `e${e.id}`, tipo: 'entrega', agente: p.agente, texto: e.titulo, ref: String(e.id), creado: e.creada }, p.nombre)
+    if (!p.silenciosa) this.avisos.emitir({ id: `e${e.id}`, tipo: 'entrega', agente: p.agente, texto: e.titulo, ref: String(e.id), creado: e.creada }, p.nombre)
     for (const g of this.alRegistrar) {
       try { g(e) } catch {}
     }

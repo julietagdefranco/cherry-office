@@ -567,6 +567,56 @@ export class ServicioDependencias {
     for (const x of relanzadas) this.esperas.actualizar(oficina, x.id, { estado: 'fallida', motivo })
   }
 
+  // MARK: dependencias entre pendientes de reunión (las usa ReunionesRouter)
+
+  /** La entrega que cumple `ref` de parte de `quien` (id de agente o `persona`): la última versión de la cadena, si no es parcial. */
+  entregaDe(oficina: string, ref: string, quien: string): Entrega | undefined {
+    const cand = this.s.entregas.porRef(oficina, ref)
+    if (!cand) return undefined
+    const v = this.s.entregas.vigente(oficina, cand)
+    if (quien === 'persona' ? v.origen !== 'persona' : v.agente !== quien) return undefined
+    return this.esParcial(v) ? undefined : v
+  }
+
+  /** Las esperas abiertas de un grupo (`reunion:<id>:<n>`). */
+  abiertasDeGrupo(oficina: string, grupo: string): Espera[] {
+    return this.esperas.lista(oficina, { grupo, estados: esperasAbiertas })
+  }
+
+  /** Cancela las esperas que todavía no arrancaron (`esperando` o `lista`) de un grupo. Devuelve cuántas. */
+  cancelarGrupo(oficina: string, grupo: string, motivo: string): number {
+    let n = 0
+    for (const x of this.esperas.lista(oficina, { grupo, estados: ['esperando', 'lista'] })) n += this.esperas.actualizar(oficina, x.id, { estado: 'cancelada', motivo })
+    return n
+  }
+
+  /** El pendiente `pendiente` de la reunión `reunion` queda esperando a sus dependencias: una espera por cada una
+   *  (`encargar`, atada a `encargo:<reunión>:<m>`). 409 si alguna ya lo espera a él (deadlock). */
+  esperarPendientes(p: { act: OficinaActiva; reunion: string; pendiente: number; def: AgenteDef; nombre: string; consigna: string; dependencias: { indice: number; quien: string; que: string }[] }): Espera[] {
+    const oficina = p.act.carpeta
+    for (const d of p.dependencias) {
+      if (d.quien !== 'persona' && d.quien !== p.def.id && this.esperaA(oficina, d.quien, p.def.id)) {
+        throw new ErrorAPI(409, `«${d.que}» depende de lo que está esperando este pendiente: no se pueden esperar entre sí.`)
+      }
+    }
+    const grupo = `reunion:${p.reunion}:${p.pendiente}`
+    const creadas: Espera[] = []
+    for (const d of p.dependencias) {
+      const x = this.esperas.crear({
+        oficina, agente: p.def.id, esperaA: d.quien, que: prefijo(d.que, ServicioDependencias.maxQueEspera), ref: `${Programador.prefijoEncargo}${p.reunion}:${d.indice}`,
+        grupo, accion: 'encargar', origen: 'reunion', reunion: p.reunion, pendiente: p.pendiente, tarea: Programador.idEncargo(p.reunion, p.pendiente), nombre: p.nombre, consigna: p.consigna,
+      })
+      if (x) creadas.push(x)
+    }
+    // si alguna dependencia entregó mientras tanto, queda lista enseguida
+    for (const x of creadas) {
+      const v = this.entregaDe(oficina, x.ref, x.esperaA)
+      if (v) this.esperas.actualizar(oficina, x.id, { estado: 'lista', entregaLlegada: v.id })
+    }
+    void this.procesarListas(oficina)
+    return creadas
+  }
+
   // MARK: acciones de la persona (rutas /api/esperas/:id/*)
 
   /** Cancela una espera abierta (la persona, o el agente con `cancelar_espera`). Un grupo que queda solo con listas se relanza. */

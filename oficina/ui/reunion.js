@@ -265,18 +265,89 @@
       s.decisiones && s.decisiones.length ? [h('h4', 'Decisiones'), h('ul', s.decisiones.map(function (d) { return h('li', d); }))] : null,
       s.pendientes && s.pendientes.length ? [h('h4', 'Pendientes'), h('ul.pendientes', s.pendientes.map(function (p, i) {
         return h('li', h('div', h('b', p.quien + ': '), p.que), accionesPendiente(r, p, i, (r.pendientesEstado || [])[i]));
-      }))] : null,
+      })), accionesGenerales(r, s)] : null,
       r.acta ? h('div.ayuda', { style: { marginTop: '10px' } }, 'Acta guardada en ' + r.acta + '. Las decisiones se sumaron a la memoria de la oficina.') : null,
       r.salidaRuta ? h('div.ayuda', 'Archivo de salida: ' + r.salida) : null);
   }
 
   /* ---------------- pendientes que se ejecutan ---------------- */
+  /* «Encargar todo» (si hay más de un encargable sin encargo) y «Pasar a flujo» (si algún pendiente depende de otro) */
+  function accionesGenerales(r, s) {
+    var ests = r.pendientesEstado || [];
+    var porEncargar = ests.filter(function (e) { return e.encargable && !e.encargo && !e.espera; }).length;
+    var hayDeps = (s.pendientes || []).some(function (p) { return p.depende_de && p.depende_de.length; });
+    if (porEncargar < 2 && !hayDeps) return null;
+    var fila = h('div.acciones-pendiente', { style: { marginTop: '8px' } });
+    if (porEncargar > 1) {
+      fila.appendChild(h('button.btn.chico', { onclick: function (ev) {
+        ev.currentTarget.disabled = true;
+        api.post('/api/reuniones/' + r.id + '/pendientes/encargar-todos').then(function (d) {
+          r.pendientesEstado = d.pendientesEstado; pintarPanel(r); vigilarPendientes(r.id);
+          App.aviso('Encargado: los que dependen de otros arrancan cuando esos entreguen.');
+        }).catch(function (e) { App.fallo(e); pintarPanel(r); });
+      } }, 'Encargar todo'));
+    }
+    if (hayDeps) {
+      fila.appendChild(h('button.btn.chico.fantasma', { title: 'Arma un flujo con estos pasos para repetirlo otra vez', onclick: function () {
+        api.post('/api/reuniones/' + r.id + '/flujo').then(function (d) {
+          if (App.Flujos && App.Flujos.editor) App.Flujos.editor(null, d.borrador);
+        }).catch(App.fallo);
+      } }, App.icono('flujo'), 'Pasar a flujo'));
+    }
+    return fila;
+  }
+
+  function nombresDe(ids) {
+    return (ids || []).map(function (id) { return id === 'persona' ? 'vos' : ((App.agente(id) || {}).nombre || id); }).join(', ');
+  }
+
+  /* «Ya lo hice»: la nota es opcional; deja una entrega tuya que libera a quien esperaba este pendiente */
+  function yaLoHice(r, i, p) {
+    var hj = App.hoja({ titulo: 'Ya lo hice', ancho: 480 });
+    var txt = h('textarea.campo', { rows: 4, maxlength: 4000, autofocus: true, placeholder: 'Opcional: contá qué hiciste o dónde quedó, para quien lo estaba esperando.' });
+    var err = h('div.error-txt');
+    App.add(hj.cuerpo, h('div.fila-campo', h('label.etiqueta-campo', '«' + p.que + '»'), txt), err);
+    var ok = h('button.btn.primario', { onclick: function () {
+      ok.disabled = true; err.textContent = '';
+      api.post('/api/reuniones/' + r.id + '/pendientes/' + i + '/hecho', { nota: txt.value.trim() || undefined }).then(function (d) {
+        hj.cerrar(); r.pendientesEstado = d.pendientesEstado; pintarPanel(r); vigilarPendientes(r.id);
+        App.aviso('Anotado: quien lo esperaba ya puede seguir.');
+      }).catch(function (e) { err.textContent = e.message; ok.disabled = false; });
+    } }, 'Ya lo hice');
+    App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), ok);
+  }
+
   /* debajo de cada pendiente del acta: «Hacelo ahora» / «Convertir en tarea», o en qué quedó (trabajando, entregado, revisado) */
   function accionesPendiente(r, p, i, est) {
     if (!est) return null;
     var fila = h('div.acciones-pendiente');
-    var enc = est.encargo;
-    if (enc && enc.estado === 'corriendo') {
+    var enc = est.encargo, esp = est.espera;
+    if (est.dependeDe && est.dependeDe.length) {
+      fila.appendChild(h('span.insignia', { title: 'Tiene que esperar a que estos pendientes estén hechos' }, 'Depende de ' + est.dependeDe.map(function (d) { return d + 1; }).join(', ')));
+    }
+    if (esp) {
+      var texto = esp.estado === 'relanzada' ? 'Arrancando…' : esp.estado === 'lista' ? 'Ya llegó todo, arranca enseguida' : 'Esperando a ' + nombresDe(esp.esperaA);
+      fila.appendChild(h('span.insignia.aviso', esp.estado === 'esperando' ? App.icono('reloj') : h('span.giro'), ' ' + texto));
+      vigilarPendientes(r.id);
+      if (esp.estado !== 'relanzada') {
+        fila.appendChild(h('button.btn.chico', { title: 'Lo hace ahora, con lo que haya', onclick: function (ev) {
+          ev.currentTarget.disabled = true;
+          api.post('/api/reuniones/' + r.id + '/pendientes/' + i + '/encargar', { forzar: true }).then(function (d) {
+            r.pendientesEstado = d.pendientesEstado; pintarPanel(r); vigilarPendientes(r.id);
+            App.aviso('Arrancó sin esperar.');
+          }).catch(function (e) { App.fallo(e); pintarPanel(r); });
+        } }, 'Arrancar igual'));
+        fila.appendChild(h('button.btn.chico.fantasma', { onclick: function (ev) {
+          ev.currentTarget.disabled = true;
+          Promise.all((esp.ids || []).map(function (id) { return api.post('/api/esperas/' + id + '/cancelar').catch(function () {}); })).then(function () {
+            App.aviso('Espera cancelada.'); refrescar(r.id);
+          });
+        } }, 'Cancelar espera'));
+      }
+    }
+    if (est.hecho) {
+      fila.appendChild(h('span.insignia.ok', 'Hecho por vos'));
+    } else if (enc && enc.estado === 'corriendo') {
       fila.appendChild(h('span.insignia.aviso', h('span.giro'), ' Trabajando en esto…'));
       vigilarPendientes(r.id);
     } else if (enc && enc.entrega) {
@@ -286,7 +357,7 @@
     } else if (enc && enc.estado === 'error') {
       fila.appendChild(h('span.insignia.error', { title: enc.error || '' }, 'Falló'));
     }
-    if (est.encargable && !(enc && enc.estado === 'corriendo')) {
+    if (est.encargable && !(enc && enc.estado === 'corriendo') && !esp) {
       fila.appendChild(h('button.btn.chico' + (enc ? '.fantasma' : ''), { onclick: function (ev) {
         ev.currentTarget.disabled = true;
         api.post('/api/reuniones/' + r.id + '/pendientes/' + i + '/encargar').then(function (d) {
@@ -300,10 +371,9 @@
           consigna: 'Pendiente de la reunión «' + r.tema + '»' + (r.acta ? ' (acta: ' + r.acta + ')' : '') + ': ' + p.que,
           origen: { reunion: r.id, pendiente: i }, unica: true }, function () { refrescar(r.id); });
       } }, 'Convertir en tarea'));
-    } else if (!est.agente) {
-      fila.appendChild(h('span.ayuda', { style: { margin: 0 } }, 'Te toca a vos.'));
-    } else if (!est.encargable && !enc) {
-      fila.appendChild(h('span.ayuda', { style: { margin: 0 } }, 'Necesita tu parte: ' + ((App.agente(est.agente) || {}).nombre || 'el agente') + ' no lo puede hacer solo.'));
+    } else if (!est.encargable && !est.hecho) {
+      fila.appendChild(h('span.ayuda', { style: { margin: 0 } }, !est.agente ? 'Te toca a vos.' : 'Necesita tu parte: ' + ((App.agente(est.agente) || {}).nombre || 'el agente') + ' no lo puede hacer solo.'));
+      if (!enc) fila.appendChild(h('button.btn.chico', { title: 'Marcalo como hecho: lo que dependa de esto puede seguir', onclick: function () { yaLoHice(r, i, p); } }, 'Ya lo hice'));
     }
     (est.tareas || []).forEach(function (t) { fila.appendChild(h('span.insignia', { title: 'Tarea programada que salió de este pendiente' }, 'Tarea: ' + t.nombre)); });
     return fila.childNodes.length ? fila : null;
@@ -320,7 +390,7 @@
     relojPend = setTimeout(function () {
       if (visto !== id) return;
       refrescar(id).then(function (d) {
-        if ((d.pendientesEstado || []).some(function (e) { return e.encargo && e.encargo.estado === 'corriendo'; })) vigilarPendientes(id);
+        if ((d.pendientesEstado || []).some(function (e) { return (e.encargo && e.encargo.estado === 'corriendo') || e.espera; })) vigilarPendientes(id);
       }).catch(function () { /* se reintenta al volver a abrir */ });
     }, 3000);
   }

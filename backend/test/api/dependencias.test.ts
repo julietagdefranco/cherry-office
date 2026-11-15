@@ -2,7 +2,7 @@
 // Siempre con el claude falso y HQ_PROGRAMADOR=0. El servidor corre en otro proceso: lo que necesita `barrer` (despedidos,
 // reconciliación) se prueba en test/unit/dependencias.test.ts.
 import { describe, expect, test } from 'vitest'
-import { Fix, Sandbox, chat, esperar, lista, str, type Obj, U } from '../support/sandbox.js'
+import { Fix, Sandbox, chat, dict, esperar, lista, str, type Obj, U } from '../support/sandbox.js'
 
 const entregas = async (f: Fix, q: Record<string, string> = {}): Promise<Obj[]> => lista((await f.get('/api/entregas', q)).obj.entregas)
 const esperas = async (f: Fix, q: Record<string, string> = {}): Promise<Obj[]> => lista((await f.get('/api/esperas', q)).obj.esperas)
@@ -173,5 +173,130 @@ describe('Dependencias (API)', () => {
     expect(lista(parte.bloqueos).some((b) => str(b.tipo) === 'espera')).toBe(false)
     expect(lista((await f.get('/api/avisos')).obj.avisos).some((a) => str(a.tipo) === 'espera')).toBe(false)
     f.sb.abrirPuerta()
+  })
+})
+
+// MARK: - dependencias entre pendientes de una reunión
+
+const sintesis = {
+  resumen: 'Se acordó el plan.', decisiones: ['Arrancar'],
+  pendientes: [
+    { quien: 'Marce', que: 'Armar el mapeo ENTREGA:archivos/entregables/marce/mapeo.md y avisar', necesita_usuario: false, depende_de: [] },
+    { quien: 'Pato', que: 'Armar el informe ENTREGA:archivos/entregables/pato/informe.md usando el mapeo', necesita_usuario: false, depende_de: [1] },
+    { quien: 'Ana', que: 'Revisar el contrato a mano', necesita_usuario: false, depende_de: [] },
+    { quien: 'Pato', que: 'Mandar la propuesta ENTREGA:archivos/entregables/pato/propuesta.md ya revisada', necesita_usuario: false, depende_de: [3] },
+  ],
+}
+
+async function reunionConDependencias(f: Fix): Promise<string> {
+  f.sb.responder('acta', JSON.stringify(sintesis))
+  const r = await f.post('/api/reuniones', { tema: 'lanzamiento', agentes: ['marce', 'pato'] })
+  const id = str(r.obj.id)
+  expect(await esperar(async () => str((await f.get(`/api/reuniones/${id}`)).obj.estado) === 'esperando', 15)).toBe(true)
+  const c = await f.post(`/api/reuniones/${id}/cerrar`)
+  expect(c.status, JSON.stringify(c.obj)).toBe(200)
+  return id
+}
+
+const estadoPend = async (f: Fix, id: string): Promise<Obj[]> => lista((await f.get(`/api/reuniones/${id}`)).obj.pendientesEstado)
+const fixReunion = () => Fix.crear({ agentes: [{ id: 'marce', depto: 'direccion' }, { id: 'pato', depto: 'direccion' }], env: { HQ_PROGRAMADOR: '0' } })
+const entregasDe = async (f: Fix, ref: string) => (await entregas(f)).filter((e) => str(e.ref) === ref)
+
+describe('Dependencias entre pendientes de una reunión (API)', () => {
+  test('la síntesis guarda depende_de 0-based y el estado de los pendientes lo muestra; el acta lo escribe 1-based', async () => {
+    const f = await fixReunion()
+    const id = await reunionConDependencias(f)
+    const r = (await f.get(`/api/reuniones/${id}`)).obj
+    expect(lista((r.sintesis as Obj).pendientes).map((p) => p.depende_de)).toEqual([undefined, [0], undefined, [2]])
+    const est = await estadoPend(f, id)
+    expect(est.map((e) => e.dependeDe)).toEqual([[], [0], [], [2]])
+    expect(est.map((e) => e.agente)).toEqual(['marce', 'pato', null, 'pato'])
+    expect(est.every((e) => e.espera === undefined)).toBe(true)
+    const acta = f.leer(str(r.acta))
+    expect(acta).toContain('Armar el informe')
+    expect(acta).toContain('_(después de 1)_')
+    expect(acta).toContain('_(después de 3)_')
+  })
+
+  test('encargar un pendiente que depende de otro: encarga el otro en cascada, queda esperando y corre cuando el otro entrega, con su archivo en la consigna', async () => {
+    const f = await fixReunion()
+    const id = await reunionConDependencias(f)
+    f.sb.modo('marce', 'puerta') // la cascada queda trabada hasta que se abra la puerta
+    const r = await f.post(`/api/reuniones/${id}/pendientes/1/encargar`)
+    expect(r.status, JSON.stringify(r.obj)).toBe(202)
+    const e1 = lista(r.obj.pendientesEstado)[1]!
+    expect(e1.espera).toMatchObject({ estado: 'esperando', esperaA: ['marce'], esperando: [0] })
+    expect(await esperar(async () => f.sb.llamadasConPrompt('Armar el mapeo').length >= 1)).toBe(true)
+    // el 2 no corrió todavía
+    expect(f.sb.llamadasConPrompt('Armar el informe')).toEqual([])
+    // volver a encargar el mismo no duplica nada
+    expect((await f.post(`/api/reuniones/${id}/pendientes/1/encargar`)).status).toBe(202)
+    expect(f.sb.llamadasConPrompt('Armar el mapeo').length).toBe(1)
+    expect((await esperas(f)).length).toBe(1)
+
+    f.sb.abrirPuerta()
+    expect(await esperar(async () => (await entregasDe(f, `encargo:${id}:1`)).length === 1, 20)).toBe(true)
+    const consigna = f.sb.llamadasConPrompt('Armar el informe')[0]!.at(-1)!
+    expect(consigna).toContain('Lo que entregaron los pendientes de los que depende este')
+    expect(consigna).toContain('archivos/entregables/marce/mapeo.md')
+    const est = await estadoPend(f, id)
+    expect(est[1]!.espera).toBeUndefined()
+    expect(str(dict(est[1]!.encargo).estado)).toBe('ok')
+    expect((await esperas(f, { estado: 'hecha', reunion: id })).length).toBe(1)
+  })
+
+  test('forzar: arranca enseguida sin esperar y cancela la espera abierta', async () => {
+    const f = await fixReunion()
+    const id = await reunionConDependencias(f)
+    f.sb.modo('marce', 'puerta')
+    expect((await f.post(`/api/reuniones/${id}/pendientes/1/encargar`)).status).toBe(202)
+    expect((await esperas(f)).length).toBe(1)
+    const r = await f.post(`/api/reuniones/${id}/pendientes/1/encargar`, { forzar: true })
+    expect(r.status, JSON.stringify(r.obj)).toBe(202)
+    expect(await esperar(async () => (await entregasDe(f, `encargo:${id}:1`)).length === 1, 20)).toBe(true)
+    expect(f.sb.llamadasConPrompt('Armar el informe')[0]!.at(-1)).not.toContain('Lo que entregaron los pendientes')
+    const todas = await esperas(f, { estado: 'todas' })
+    expect(todas.map((x) => [x.estado, x.motivo])).toEqual([['cancelada', 'Arrancó igual, sin esperar']])
+    f.sb.abrirPuerta()
+  })
+
+  test('un pendiente de la persona: «hecho» la libera a quien la esperaba; si es de un agente encargable, 409', async () => {
+    const f = await fixReunion()
+    const id = await reunionConDependencias(f)
+    const r = await f.post(`/api/reuniones/${id}/pendientes/3/encargar`)
+    expect(r.status, JSON.stringify(r.obj)).toBe(202)
+    expect(lista(r.obj.pendientesEstado)[3]!.espera).toMatchObject({ estado: 'esperando', esperaA: ['persona'], esperando: [2] })
+    expect(f.sb.llamadasConPrompt('Mandar la propuesta')).toEqual([])
+    expect((await f.post(`/api/reuniones/${id}/pendientes/0/hecho`)).status).toBe(409)
+    expect((await f.post(`/api/reuniones/${id}/pendientes/9/hecho`)).status).toBe(404)
+    const h = await f.post(`/api/reuniones/${id}/pendientes/2/hecho`, { nota: 'Lo revisé con el abogado.' })
+    expect(h.status, JSON.stringify(h.obj)).toBe(200)
+    expect(lista(h.obj.pendientesEstado)[2]!.hecho).toBeGreaterThan(0)
+    const propia = (await entregasDe(f, `encargo:${id}:2`))[0]!
+    expect([str(propia.origen), str(propia.agente), str(propia.estado), str(propia.titulo)]).toEqual(['persona', '', 'revisada', 'Revisar el contrato a mano'])
+    expect(await esperar(async () => (await entregasDe(f, `encargo:${id}:3`)).length === 1, 20)).toBe(true)
+    const consigna = f.sb.llamadasConPrompt('Mandar la propuesta')[0]!.at(-1)!
+    expect(consigna).toContain('Lo revisé con el abogado.')
+    expect(consigna).toContain('--- la persona: Revisar el contrato a mano ---')
+  })
+
+  test('encargar-todos: arranca los que no dependen de nadie y deja esperando a los demás; los de la persona no se tocan', async () => {
+    const f = await fixReunion()
+    const id = await reunionConDependencias(f)
+    const r = await f.post(`/api/reuniones/${id}/pendientes/encargar-todos`)
+    expect(r.status, JSON.stringify(r.obj)).toBe(202)
+    expect(await esperar(async () => (await entregasDe(f, `encargo:${id}:1`)).length === 1, 20)).toBe(true)
+    expect((await entregasDe(f, `encargo:${id}:0`)).length).toBe(1)
+    expect((await entregasDe(f, `encargo:${id}:2`)).length).toBe(0) // de la persona
+    const est = await estadoPend(f, id)
+    expect(est[3]!.espera).toMatchObject({ estado: 'esperando', esperaA: ['persona'] })
+    expect(est[3]!.encargo).toBeUndefined()
+    expect(f.sb.llamadasConPrompt('Mandar la propuesta')).toEqual([])
+    // una segunda vez no repite lo que ya corrió
+    expect((await f.post(`/api/reuniones/${id}/pendientes/encargar-todos`)).status).toBe(202)
+    const encargosDeMarce = f.sb.llamadas.filter((l) => Sandbox.valor(l, '--agent') === 'marce' && l.at(-1)!.includes('Pendiente de la reunión'))
+    expect(encargosDeMarce.length).toBe(1)
+    expect((await f.post(`/api/reuniones/${U.c}/pendientes/encargar-todos`)).status).toBe(404)
+    expect((await f.get(`/api/reuniones/${id}/pendientes/encargar-todos`)).status).toBe(405)
   })
 })
