@@ -157,6 +157,18 @@ export class Sandbox {
     fs.writeFileSync(path.join(this.binDir, 'creador.calls'), llamadas.map((l) => JSON.stringify(l)).join('\n') + '\n')
   }
 
+  /** Las llamadas MCP que hará `agente` cuando el mensaje lleve MCP_LLAMAR (se usan una sola vez): `[{name, arguments}]`. */
+  llamadasMCP(agente: string, llamadas: Obj[]) {
+    fs.writeFileSync(path.join(this.binDir, `llamadas.${agente}`), llamadas.map((l) => JSON.stringify(l)).join('\n') + '\n')
+  }
+
+  /** Respuestas JSON-RPC a las llamadas MCP de `agente` (`mcp.<agente>.out`), en orden. */
+  salidasMCP(agente: string): Obj[] {
+    return leerTexto(path.join(this.binDir, `mcp.${agente}.out`)).split('\n').flatMap((l) => {
+      try { const o = JSON.parse(l); return o && typeof o === 'object' ? [o] : [] } catch { return [] }
+    })
+  }
+
   /** Respuestas JSON-RPC del servidor MCP a las llamadas de `llamadasCreador` (una por llamada, en orden). */
   get salidasCreador(): Obj[] {
     return leerTexto(path.join(this.binDir, 'creador.out')).split('\n').flatMap((l) => {

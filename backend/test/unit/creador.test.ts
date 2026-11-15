@@ -66,7 +66,7 @@ describe('El Creador (en proceso)', () => {
     const { mcp, carpeta, h } = await banco()
     const t = mcp.tokens.emitir({ oficina: carpeta, agente: 'x', sid: U.b, perfil: 'agente' })
     const a = mcp.consultas.herramientas(t, { oficina: carpeta, agente: 'x', sid: U.b, perfil: 'agente' })
-    expect((a.definiciones as O[]).map((d) => d.name)).toEqual(['colegas', 'consultar'])
+    expect((a.definiciones as O[]).map((d) => d.name)).toEqual(['colegas', 'consultar', 'pedir'])
     expect(await a.llamar('proponer_regla', {})).toBeUndefined()
     expect(await h.llamar('colegas', {})).toBeUndefined()
   })

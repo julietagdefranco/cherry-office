@@ -175,8 +175,8 @@ describe('Acciones (en proceso)', () => {
     expect(HerramientasMCPAgente.lista(act.oficina, nico)).not.toContain('mcp__hq__proponer_accion')
     const mcp = mcpDe(s)!
     const id = (a: string) => ({ oficina: carpeta, agente: a, sid: U.a, perfil: 'agente' })
-    expect(nombres(mcp.consultas.herramientas('t', id('marce')))).toEqual(['colegas', 'consultar', 'proponer_accion'])
-    expect(nombres(mcp.consultas.herramientas('t', id('nico')))).toEqual(['colegas', 'consultar'])
+    expect(nombres(mcp.consultas.herramientas('t', id('marce')))).toEqual(['colegas', 'consultar', 'proponer_accion', 'pedir'])
+    expect(nombres(mcp.consultas.herramientas('t', id('nico')))).toEqual(['colegas', 'consultar', 'pedir'])
     // y sin asignación nico no puede proponer aunque llame por nombre
     expect(await mcp.consultas.herramientas('t', id('nico')).llamar('proponer_accion', { herramienta: crearCal, resumen: 'x' })).toBeUndefined()
   })

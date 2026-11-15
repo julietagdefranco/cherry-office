@@ -102,7 +102,7 @@ describe('Consultas entre agentes (MCP)', () => {
     expect((await rpc(url, 'inventado', 'tools/list')).status).toBe(401)
     const ok = await rpc(url, t, 'tools/list')
     expect(ok.status).toBe(200)
-    expect(lista(dict(ok.obj.result).tools).map((x) => str(x.name))).toEqual(['colegas', 'consultar', 'pedir_permiso'])   // el token de un chat es interactivo
+    expect(lista(dict(ok.obj.result).tools).map((x) => str(x.name))).toEqual(['colegas', 'consultar', 'pedir_permiso', 'pedir'])   // el token de un chat es interactivo
 
     // GET (el sondeo SSE de claude) y otras rutas
     expect((await crudo(url, 'GET')).status).toBe(405)
@@ -165,7 +165,7 @@ describe('Consultas entre agentes (MCP)', () => {
     const hq = dict(dict(o.mcpServers).hq)
     expect(str(hq.type) === 'http' && /^http:\/\/127\.0\.0\.1:/.test(str(hq.url)) && str(hq.url).endsWith('/mcp')).toBe(true)
     expect(str(dict(hq.headers).Authorization)).toBe('Bearer ${HQ_MCP_TOKEN}')
-    expect(Sandbox.valor(l, '--tools')?.endsWith(',mcp__hq__consultar,mcp__hq__colegas')).toBe(true)
+    expect(Sandbox.valor(l, '--tools')?.endsWith(',mcp__hq__consultar,mcp__hq__colegas,mcp__hq__pedir')).toBe(true)
     const reglas = Sandbox.reglas(l)
     expect(reglas.includes('mcp__hq__consultar') && reglas.includes('mcp__hq__colegas')).toBe(true)
     expect(l.slice(-2)).toEqual(['--', 'hola'])

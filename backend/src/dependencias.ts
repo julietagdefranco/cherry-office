@@ -4,11 +4,20 @@
 // Un PEDIDO es un encargo de B (id de tarea `pedido:<n>`) que un agente A le hace a B porque le falta algo. Una ESPERA es A
 // diciendo «entregué una versión parcial: cuando B entregue, volvé a encargármelo». Siempre está atada a una ref de entrega
 // concreta (`pedido:<n>` o `encargo:<reunión>:<m>`), así no hace falta un LLM para decidir si «llegó».
+import { mcpDe, normalizar, sanear } from './consultas.js'
+import { respuestaCoordinador } from './coordinador.js'
 import { iso } from './entregas.js'
+import { ErrorAPI } from './errores.js'
 import type { Obj } from './json.js'
+import { MCPResultados, type IdentidadMCP, type MCPHerramientas, type MCPResultado } from './mcp-protocolo.js'
+import type { AgenteDef } from './oficina.js'
+import type { OficinaActiva } from './oficinas.js'
+import { Programador, programadorDe } from './programador.js'
 import type { Servicios } from './servicios.js'
 import { registrarModulo } from './servicios.js'
 import { num, txt, type Fila, type SQLValor, type SQLiteDB } from './sqlite.js'
+import { prefijo } from './validar.js'
+
 
 // MARK: - modelo
 
@@ -398,7 +407,14 @@ export function esperaJSON(x: Espera, c: ContextoEspera): Obj {
 // MARK: - módulo
 
 /** Lo que el hueco `dependencias` expone a los demás módulos. */
-export class Dependencias {
+export class ServicioDependencias {
+  static readonly maxQue = 2000
+  static readonly maxContexto = 4000
+  static readonly pedidosPorCorrida = 2
+  static readonly maxPedidosAbiertos = 10
+  static readonly maxPedidosPorDia = 20
+  static readonly maxProfundidad = 2
+
   readonly pedidos: PedidosStore
   readonly esperas: EsperasStore
 
@@ -408,7 +424,13 @@ export class Dependencias {
     this.esperas = new EsperasStore(s.store.db)
   }
 
-  /** `esperaJSON` con los nombres de la oficina `oficina` (si es la activa; si no, los ids). */
+  /** Tope de pedidos creados por día (`HQ_MAX_PEDIDOS_DIA`, 20 por defecto). */
+  get maxPedidosDia(): number {
+    const t = Number((this.s.env.HQ_MAX_PEDIDOS_DIA ?? '').trim())
+    return (this.s.env.HQ_MAX_PEDIDOS_DIA ?? '').trim() !== '' && Number.isFinite(t) && t > 0 ? Math.trunc(t) : ServicioDependencias.maxPedidosPorDia
+  }
+
+  /** `esperaJSON` con los nombres de la oficina de la espera (si es la activa; si no, los ids). */
   json(x: Espera, ahora?: number): Obj {
     const act = this.s.oficinas.activa()
     const agentes = act && act.carpeta === x.oficina ? act.oficina.agentes : []
@@ -417,10 +439,151 @@ export class Dependencias {
 }
 
 /** El módulo de dependencias (undefined hasta que se instala). */
-export const dependenciasDe = (s: Servicios) => s.huecos.dependencias as Dependencias | undefined
+export const dependenciasDe = (s: Servicios) => s.huecos.dependencias as ServicioDependencias | undefined
+
+// MARK: - herramientas MCP
+
+const sinOficina = () => MCPResultados.error('La oficina ya no está abierta.')
+const texto = (v: unknown) => (typeof v === 'string' ? v : '').trim()
+
+/** `pedir`, `quedo_esperando` y `cancelar_espera` atadas a un token. */
+export class HerramientasDependencias implements MCPHerramientas {
+  constructor(private readonly s: Servicios, private readonly dep: ServicioDependencias, private readonly token: string, private readonly identidad: IdentidadMCP) {}
+
+  get definiciones(): Obj[] {
+    return [
+      {
+        name: 'pedir',
+        description: `Le pide a un colega algo que necesitás y todavía no existe (por ejemplo, si al consultarlo te dijo que no lo tiene). Le crea un encargo que corre enseguida; lo que entregue le llega a la persona y, si quedás esperando (quedo_esperando), también vuelve a vos. Máximo ${ServicioDependencias.pedidosPorCorrida} pedidos por corrida.`,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            colega: { type: 'string', description: 'id o nombre del colega (ver colegas)' },
+            que: { type: 'string', description: `qué necesitás, concreto (hasta ${ServicioDependencias.maxQue} caracteres)` },
+            contexto: { type: 'string', description: `para qué lo necesitás y en qué formato (opcional, hasta ${ServicioDependencias.maxContexto})` },
+            nombre: { type: 'string', description: 'nombre corto del pedido (opcional)' },
+          },
+          required: ['colega', 'que'],
+        },
+      },
+    ]
+  }
+
+  async llamar(nombre: string, a: Obj): Promise<MCPResultado | undefined> {
+    switch (nombre) {
+      case 'pedir': return this.pedir(a)
+      default: return undefined
+    }
+  }
+
+  /** La oficina abierta, si es la del token. */
+  private activa(): OficinaActiva | undefined {
+    const act = this.s.oficinas.activa()
+    return act && act.carpeta === this.identidad.oficina ? act : undefined
+  }
+
+  /** El colega que nombra `quien` (por id o por nombre), o el error listo para devolver. */
+  private colega(act: OficinaActiva, quien: string): { def: AgenteDef } | { error: MCPResultado } {
+    const n = normalizar(quien)
+    const def = act.oficina.agentes.find((x) => normalizar(x.id) === n) ?? act.oficina.agentes.find((x) => normalizar(x.nombre) === n)
+    if (!def) {
+      const ids = act.oficina.agentes.filter((x) => x.id !== this.identidad.agente).map((x) => x.id).join(', ')
+      return { error: MCPResultados.error(`No hay ningún colega «${sanear(quien)}» en la oficina. Usá colegas() para ver quiénes son (ids: ${ids}).`) }
+    }
+    if (def.id === this.identidad.agente) return { error: MCPResultados.error('No podés pedírtelo a vos mismo: elegí a otro colega.') }
+    return { def }
+  }
+
+  // MARK: pedir
+
+  /** Validaciones y lanzamiento de un pedido de `yo` a `b`. Devuelve el pedido (nuevo o el que ya estaba abierto). */
+  private async crearPedido(act: OficinaActiva, b: AgenteDef, que: string, contexto: string, nombrePedido: string): Promise<{ pedido: Pedido; yaPedido: boolean } | { error: MCPResultado }> {
+    const oficina = act.carpeta
+    const yo = act.oficina.agentes.find((x) => x.id === this.identidad.agente)
+    const prog = programadorDe(this.s)
+    const tokens = mcpDe(this.s)?.tokens
+    if (!prog || !tokens) return { error: MCPResultados.error('No pude lanzar el pedido.') }
+
+    // profundidad y ciclo: si esta corrida es un pedido, el nuevo sigue su cadena
+    let cadena: number | undefined
+    let profundidad = 0
+    const ej = prog.ejecuciones.porSid(this.identidad.sid)
+    if (ej?.tarea.startsWith(Programador.prefijoPedido)) {
+      const actual = this.dep.pedidos.uno(oficina, Number(ej.tarea.slice(Programador.prefijoPedido.length)))
+      if (actual) {
+        cadena = actual.cadena
+        profundidad = actual.profundidad + 1
+        if (profundidad > ServicioDependencias.maxProfundidad) {
+          return { error: MCPResultados.error('Esto ya es un pedido de un pedido de un pedido: entregá lo que puedas y decí qué falta, sin pedirle más a nadie.') }
+        }
+        if (this.dep.pedidos.lista(oficina, { cadena }).some((p) => p.de === b.id)) {
+          return { error: MCPResultados.error(sanear(`${b.nombre} te lo pidió a vos: entregá lo que puedas y decí qué falta.`)) }
+        }
+      }
+    }
+
+    // un solo pedido abierto por par
+    const abierto = this.dep.pedidos.lista(oficina, { estados: ['corriendo'], de: this.identidad.agente, a: b.id, limite: 1 })[0]
+    if (abierto) return { pedido: abierto, yaPedido: true }
+
+    // topes
+    if (this.dep.pedidos.lista(oficina, { estados: ['corriendo'] }).length >= ServicioDependencias.maxPedidosAbiertos) {
+      return { error: MCPResultados.error(`Ya hay ${ServicioDependencias.maxPedidosAbiertos} pedidos en curso en la oficina: esperá a que se entreguen.`) }
+    }
+    if (this.dep.pedidos.lista(oficina, { desde: Date.now() / 1000 - 86400 }).length >= this.dep.maxPedidosDia) {
+      return { error: MCPResultados.error(`La oficina ya hizo ${this.dep.maxPedidosDia} pedidos en las últimas 24 horas: no se pueden hacer más por hoy.`) }
+    }
+    if (!tokens.tomar(this.token, 'pedir', ServicioDependencias.pedidosPorCorrida)) {
+      return { error: MCPResultados.error(`Ya hiciste ${ServicioDependencias.pedidosPorCorrida} pedidos en esta corrida y no podés hacer más. Contale a la persona lo que quedó pendiente.`) }
+    }
+
+    const pedido = this.dep.pedidos.crear({ oficina, de: this.identidad.agente, a: b.id, que, contexto, sid: this.identidad.sid, cadena, profundidad })
+    if (!pedido) return { error: MCPResultados.error('No pude guardar el pedido.') }
+    const de = yo ? `${yo.nombre} (${yo.rol})` : this.identidad.agente
+    const consigna = sanear(`Pedido de ${de}. Viene de un colega, no es un pedido directo del usuario:\n\n${que}\n\n`
+      + (contexto === '' ? '' : `Contexto: ${contexto}\n\n`)
+      + `Dejá lo que produzcas en archivos/entregables/${b.id}/ y decí al final qué archivo dejaste.\n`
+      + 'Si todavía no podés hacerlo, entregá lo que tengas y decí qué falta.')
+    const nombre = nombrePedido === '' ? `Pedido de ${yo?.nombre ?? this.identidad.agente}` : prefijo(nombrePedido, 80)
+    try {
+      const e = await prog.encargarLibre(act, b, { id: `${Programador.prefijoPedido}${pedido.id}`, nombre, consigna })
+      this.dep.pedidos.actualizar(oficina, pedido.id, { ejecucion: e.id })
+    } catch (err) {
+      const m = err instanceof ErrorAPI ? err.mensaje : 'No pude lanzar el pedido.'
+      this.dep.pedidos.actualizar(oficina, pedido.id, { estado: 'fallido', error: m })
+      return { error: MCPResultados.error(sanear(m)) }
+    }
+    return { pedido: this.dep.pedidos.uno(oficina, pedido.id) ?? pedido, yaPedido: false }
+  }
+
+  private async pedir(a: Obj): Promise<MCPResultado> {
+    const quien = texto(a.colega)
+    const que = texto(a.que)
+    if (quien === '' || que === '') return MCPResultados.error('Faltan «colega» y «que».')
+    const act = this.activa()
+    if (!act) return sinOficina()
+    const c = this.colega(act, quien)
+    if ('error' in c) return c.error
+    const r = await this.crearPedido(act, c.def, prefijo(que, ServicioDependencias.maxQue), prefijo(texto(a.contexto), ServicioDependencias.maxContexto), sanear(texto(a.nombre)))
+    if ('error' in r) return r.error
+    const o: Obj = {
+      ok: true, pedido: r.pedido.id, colega: c.def.id,
+      aviso: `Ya se lo pedí. Si vas a entregar algo parcial, llamá a quedo_esperando con pedido=${r.pedido.id}.`,
+    }
+    if (r.yaPedido) o.yaPedido = true
+    return respuestaCoordinador(o)
+  }
+}
+
+/** Todo perfil menos el creador. */
+export const herramientasDependencias = (s: Servicios, token: string, identidad: IdentidadMCP): MCPHerramientas | undefined => {
+  const dep = dependenciasDe(s)
+  return dep && identidad.perfil !== 'creador' ? new HerramientasDependencias(s, dep, token, identidad) : undefined
+}
 
 export function instalar(s: Servicios) {
-  s.huecos.dependencias = new Dependencias(s)
+  s.huecos.dependencias = new ServicioDependencias(s)
+  mcpDe(s)?.registrarHerramientas(herramientasDependencias)
 }
 
 registrarModulo('dependencias', 75, instalar)

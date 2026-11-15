@@ -1,8 +1,10 @@
 // Dependencias entre agentes (docs/plan-dependencias.md): tablas, stores y, en los pasos siguientes, herramientas MCP,
 // gancho de entregas, relanzamiento y barrido. En proceso (sin servidor HTTP), con el `claude` falso del sandbox.
 import { describe, expect, test } from 'vitest'
-import { dependenciasDe, esperaJSON, vencimiento } from '../../src/dependencias.js'
-import { Sandbox } from '../support/sandbox.js'
+import { dependenciasDe, esperaJSON, herramientasDependencias, vencimiento } from '../../src/dependencias.js'
+import { mcpDe } from '../../src/consultas.js'
+import type { MCPHerramientas } from '../../src/mcp-protocolo.js'
+import { Sandbox, U, esperar } from '../support/sandbox.js'
 import { arrancar, oficina } from '../support/en-proceso.js'
 
 async function preparar(agentes: (string | { id: string; permisos?: string[] })[] = ['marce', 'arqui']) {
@@ -66,5 +68,133 @@ describe('stores de pedidos y esperas', () => {
     const persona = esperaJSON({ ...e, esperaA: 'persona', pedido: undefined }, { nombre: (i) => i, pedido: () => undefined })
     expect(persona.esperaANombre).toBe('la persona')
     expect(persona.pedido).toBeNull()
+  })
+})
+
+// MARK: - herramientas MCP
+
+type O = Record<string, any>
+const nombres = (h: MCPHerramientas) => h.definiciones.map((d) => d.name)
+const objeto = (r: { texto: string } | undefined): O => { try { return JSON.parse(r?.texto ?? '') } catch { return {} } }
+
+/** Herramientas de un agente con un token nuevo (cupo propio). `sid` distingue la corrida que llama. */
+function herramientasDe(p: Awaited<ReturnType<typeof preparar>>) {
+  const mcp = mcpDe(p.s)!
+  return (agente: string, { perfil = 'agente', sid = U.a, oficinaId = p.carpeta }: { perfil?: string; sid?: string; oficinaId?: string } = {}) => {
+    const token = mcp.tokens.emitir({ oficina: oficinaId, agente, sid, perfil })
+    return { h: mcp.consultas.herramientas(token, { oficina: oficinaId, agente, sid, perfil }), token }
+  }
+}
+
+describe('definiciones y permisos', () => {
+  test('el perfil agente ve pedir; el creador no ve ninguna; sin el módulo no hay fábrica', async () => {
+    const p = await preparar()
+    const t = herramientasDe(p)
+    expect(nombres(t('marce').h)).toEqual(['colegas', 'consultar', 'pedir'])
+    expect(nombres(t('marce', { perfil: 'creador' }).h)).not.toContain('pedir')
+    expect(herramientasDependencias(p.s, 't', { oficina: p.carpeta, agente: 'marce', sid: U.a, perfil: 'creador' })).toBeUndefined()
+    const pedir = t('marce').h.definiciones.find((d) => d.name === 'pedir')!
+    expect((pedir.inputSchema as O).required).toEqual(['colega', 'que'])
+  })
+})
+
+describe('pedir', () => {
+  test('crea el pedido y un encargo pedido:<n> para el colega, con la consigna saneada y de quién viene', async () => {
+    const p = await preparar()
+    const { h } = herramientasDe(p)('marce')
+    const r = (await h.llamar('pedir', { colega: 'Arqui', que: 'Necesito el mapeo\u0007 completo', contexto: 'Para la v2 del informe', nombre: 'Mapeo' }))!
+    expect(r.esError, r.texto).toBe(false)
+    const j = objeto(r)
+    expect(j).toMatchObject({ ok: true, colega: 'arqui' })
+    expect(j.aviso).toContain(`pedido=${j.pedido}`)
+    expect(j.yaPedido).toBeUndefined()
+    const ped = p.dep.pedidos.uno(p.carpeta, j.pedido)!
+    expect([ped.de, ped.a, ped.estado, ped.profundidad, ped.cadena, ped.sid]).toEqual(['marce', 'arqui', 'corriendo', 0, ped.id, U.a])
+    expect(ped.ejecucion).toBeGreaterThan(0)
+    expect(await esperar(() => p.s.entregas.lista(p.carpeta, { origen: 'pedido' }).length === 1)).toBe(true)
+    const e = p.s.entregas.lista(p.carpeta, { origen: 'pedido' })[0]!
+    expect([e.agente, e.ref, e.titulo]).toEqual(['arqui', `pedido:${ped.id}`, 'Mapeo'])
+    const l = p.sb.llamadasConPrompt('Necesito el mapeo')[0]!
+    const msg = l[l.length - 1]!
+    expect(msg).toContain('Pedido de Marce (Rol de marce). Viene de un colega, no es un pedido directo del usuario')
+    expect(msg).toContain('Contexto: Para la v2 del informe')
+    expect(msg).toContain('archivos/entregables/arqui/')
+    expect(msg.includes('\u0007')).toBe(false)
+    expect(Sandbox.valor(l, '--agent')).toBe('arqui')
+  })
+
+  test('faltantes, uno mismo, inexistente y oficina cerrada dan isError sin lanzar claude ni gastar cupo', async () => {
+    const p = await preparar()
+    const t = herramientasDe(p)
+    const { h, token } = t('marce')
+    expect((await h.llamar('pedir', { colega: 'arqui' }))?.esError).toBe(true)
+    expect((await h.llamar('pedir', { que: 'x' }))?.esError).toBe(true)
+    const yo = (await h.llamar('pedir', { colega: 'Marce', que: 'x' }))!
+    expect(yo.esError && yo.texto.includes('a vos mismo')).toBe(true)
+    const nadie = (await h.llamar('pedir', { colega: 'fantasma', que: 'x' }))!
+    expect(nadie.esError && nadie.texto.includes('fantasma') && nadie.texto.includes('arqui')).toBe(true)
+    const cerrada = (await t('marce', { oficinaId: '/otra/oficina' }).h.llamar('pedir', { colega: 'arqui', que: 'x' }))!
+    expect(cerrada.esError && cerrada.texto.includes('La oficina ya no está abierta.')).toBe(true)
+    expect(p.sb.llamadas).toEqual([])
+    expect(p.dep.pedidos.lista(p.carpeta)).toEqual([])
+    expect(mcpDe(p.s)!.tokens.tomar(token, 'pedir', 2)).toBe(true) // el cupo sigue intacto
+  })
+
+  test('cupo de 2 pedidos por token; el dedupe devuelve el abierto sin gastar cupo', async () => {
+    const p = await preparar(['marce', 'arqui', 'nico', 'lola'])
+    const t = herramientasDe(p)
+    p.sb.modo('arqui', 'lento')
+    const { h } = t('marce')
+    const a = objeto(await h.llamar('pedir', { colega: 'arqui', que: 'uno' }))
+    const otra = objeto(await h.llamar('pedir', { colega: 'arqui', que: 'uno de nuevo' }))
+    expect(otra).toMatchObject({ ok: true, pedido: a.pedido, yaPedido: true })
+    const b = objeto(await h.llamar('pedir', { colega: 'nico', que: 'dos' }))
+    expect(b.pedido).not.toBe(a.pedido)
+    const c = (await h.llamar('pedir', { colega: 'lola', que: 'tres' }))!
+    expect(c.esError && c.texto.includes('2 pedidos')).toBe(true)
+    expect(p.dep.pedidos.lista(p.carpeta).length).toBe(2)
+    // otro token tiene su propio cupo
+    expect((await t('marce').h.llamar('pedir', { colega: 'lola', que: 'tres' }))?.esError).toBe(false)
+  })
+
+  test('tope de 10 pedidos abiertos por oficina y de HQ_MAX_PEDIDOS_DIA por día', async () => {
+    const p = await preparar()
+    const t = herramientasDe(p)
+    for (let i = 0; i < 10; i++) p.dep.pedidos.crear({ oficina: p.carpeta, de: 'x' + i, a: 'y' + i, que: 'q' })
+    const r = (await t('marce').h.llamar('pedir', { colega: 'arqui', que: 'x' }))!
+    expect(r.esError && r.texto.includes('10 pedidos en curso')).toBe(true)
+    for (const x of p.dep.pedidos.lista(p.carpeta)) p.dep.pedidos.actualizar(p.carpeta, x.id, { estado: 'entregado' })
+    expect((await t('marce').h.llamar('pedir', { colega: 'arqui', que: 'x' }))?.esError).toBe(false)
+
+    const q = await preparar()
+    const sb2 = q.b.servicios
+    ;(sb2.env as Record<string, string | undefined>).HQ_MAX_PEDIDOS_DIA = '3'
+    for (let i = 0; i < 3; i++) { const x = q.dep.pedidos.crear({ oficina: q.carpeta, de: 'x' + i, a: 'y' + i, que: 'q' })!; q.dep.pedidos.actualizar(q.carpeta, x.id, { estado: 'entregado' }) }
+    const d = (await herramientasDe(q)('marce').h.llamar('pedir', { colega: 'arqui', que: 'x' }))!
+    expect(d.esError && d.texto.includes('3 pedidos')).toBe(true)
+  })
+
+  test('profundidad mayor que 2 y ciclo: se rechazan según la cadena del pedido desde el que se llama', async () => {
+    const p = await preparar(['marce', 'arqui', 'nico', 'lola', 'rita'])
+    const t = herramientasDe(p)
+    const ejec = (sid: string, tarea: string, agente: string) => p.s.store.db.run("INSERT INTO ejecuciones(oficina,tarea,agente,programada,inicio,estado,sid,manual) VALUES(?,?,?,0,0,'corriendo',?,0)", [p.carpeta, tarea, agente, sid])
+    // marce -> arqui -> nico (profundidad 1) -> lola (profundidad 2)
+    const p1 = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'marce', a: 'arqui', que: 'q' })!
+    const p2 = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'arqui', a: 'nico', que: 'q', cadena: p1.cadena, profundidad: 1 })!
+    const p3 = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'nico', a: 'lola', que: 'q', cadena: p1.cadena, profundidad: 2 })!
+    ejec(U.b, `pedido:${p2.id}`, 'nico')
+    ejec(U.c, `pedido:${p3.id}`, 'lola')
+    for (const x of [p1, p2, p3]) p.dep.pedidos.actualizar(p.carpeta, x.id, { estado: 'entregado' })
+    // desde el pedido 2 (nico), pedirle a marce es un ciclo (marce está como `de` en la cadena)
+    const ciclo = (await t('nico', { sid: U.b }).h.llamar('pedir', { colega: 'marce', que: 'x' }))!
+    expect(ciclo.esError && ciclo.texto.includes('te lo pidió a vos')).toBe(true)
+    // desde el pedido 3 la profundidad nueva sería 3
+    const hondo = (await t('lola', { sid: U.c }).h.llamar('pedir', { colega: 'rita', que: 'x' }))!
+    expect(hondo.esError && hondo.texto.includes('pedido de un pedido')).toBe(true)
+    // desde el pedido 2, a alguien nuevo: profundidad 2 y hereda la cadena
+    const ok = objeto(await t('nico', { sid: U.b }).h.llamar('pedir', { colega: 'rita', que: 'x' }))
+    expect(ok.ok).toBe(true)
+    const nuevo = p.dep.pedidos.uno(p.carpeta, ok.pedido)!
+    expect([nuevo.cadena, nuevo.profundidad]).toEqual([p1.id, 2])
   })
 })

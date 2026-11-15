@@ -55,6 +55,12 @@ export const Coordinador = {
   herramientasMCP: (_o: Oficina, a: AgenteDef) => (esCoordinador(a) ? Coordinador.nombresMCP.map((n) => 'mcp__hq__' + n) : []),
 }
 
+/** Herramientas de dependencias entre agentes (`pedir`, …): las ve todo agente, no solo un perfil. */
+export const Dependencias = {
+  nombresMCP: ['pedir'],
+  herramientasMCP: () => Dependencias.nombresMCP.map((n) => 'mcp__hq__' + n),
+}
+
 export const Acciones = {
   herramientaPropuesta: 'mcp__hq__proponer_accion',
   /** Herramientas de actuar que el agente tiene asignadas (nombres completos). */
@@ -69,7 +75,7 @@ export const Acciones = {
 export const HerramientasMCPAgente = {
   lista(o: Oficina, a: AgenteDef): string[] {
     const out: string[] = []
-    for (const h of [...herramientasMCP, ...Coordinador.herramientasMCP(o, a), ...Acciones.herramientasMCP(o, a)]) if (!out.includes(h)) out.push(h)
+    for (const h of [...herramientasMCP, ...Dependencias.herramientasMCP(), ...Coordinador.herramientasMCP(o, a), ...Acciones.herramientasMCP(o, a)]) if (!out.includes(h)) out.push(h)
     return out
   },
 }
