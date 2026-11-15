@@ -1,5 +1,5 @@
 // App de escritorio de la Oficina (Mac y Windows): la carcasa Electron alrededor del backend TypeScript.
-// Equivale a la app Swift (AppDelegate, HQSchemeHandler, Abrir, Notificaciones, BarraMenu, MainMenu):
+// Reemplazó a la app Swift de Mac (hasta la 0.7):
 // - La página se sirve por el esquema hq://app/ (estáticos en lista blanca y /api/* al router, en proceso: sin puerto).
 // - El front habla con la app por `window.webkit.messageHandlers.hq.postMessage` (lo expone el preload).
 // - Cerrar la ventana no cierra la app: queda en la bandeja (Windows) o en el Dock y la barra de menú (Mac).
@@ -315,13 +315,14 @@ function icono(tam?: number): Electron.NativeImage {
   return tam && !img.isEmpty() ? img.resize({ width: tam, height: tam }) : img
 }
 
-/** «Buscar actualizaciones…» o «Reiniciar para actualizar a X» (solo en la app instalada de Windows). */
+/** «Buscar actualizaciones…» o «Reiniciar para actualizar a X» (solo en la app empaquetada). */
 function itemActualizacion(): MenuItemConstructorOptions[] {
   if (!actualizaciones.disponible()) return []
   const e = actualizaciones.estadoActual()
   if (e.tipo === 'lista') return [{ label: `Reiniciar para actualizar a ${e.version}`, click: () => actualizaciones.reiniciar() }]
   if (e.tipo === 'bajando') return [{ label: `Bajando la versión ${e.version}…`, enabled: false }]
   if (e.tipo === 'buscando') return [{ label: 'Buscando actualizaciones…', enabled: false }]
+  if (e.tipo === 'manual') return [{ label: `Bajar la versión ${e.version}…`, click: () => void shell.openExternal(e.url) }]
   return [{ label: 'Buscar actualizaciones…', click: () => void actualizaciones.buscar(true) }]
 }
 
@@ -403,7 +404,7 @@ async function menuBandeja(): Promise<Menu> {
   const act = itemActualizacion()
   items.push(
     { type: 'separator' },
-    ...(act.length && actualizaciones.estadoActual().tipo === 'lista' ? act : []),
+    ...(act.length && ['lista', 'manual'].includes(actualizaciones.estadoActual().tipo) ? act : []),
     { label: 'Abrir al iniciar sesión', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
       click: (it) => app.setLoginItemSettings({ openAtLogin: it.checked }) },
     { label: 'Salir de Oficina', click: () => app.quit() },

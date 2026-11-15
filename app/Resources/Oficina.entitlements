@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Mínimo para hardened runtime. Sin App Sandbox: la app ejecuta `claude` y lee archivos del usuario.
-     WKWebView corre en procesos de WebKit firmados por Apple, así que no hace falta JIT ni
-     allow-unsigned-executable-memory. Si algún día falta algo, agregarlo acá y no aflojar el resto. -->
-<plist version="1.0">
-<dict/>
-</plist>

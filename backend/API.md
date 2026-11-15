@@ -1,64 +1,15 @@
-# Oficina para macOS (app nativa)
+# API del backend
 
-App en Swift (SwiftUI + WKWebView) que abre la misma oficina 3D y el mismo chat sin Terminal, sin server HTTP y sin Python. Plan completo en `docs/plan-app-macos.md`.
+Lo que el front (`oficina/`) le pide al backend TypeScript (`backend/src/`). Es la misma API en la app de escritorio
+(`desktop/`, por el esquema `hq://app/api/*`, en proceso) y en el modo desarrollo (`npm run dev` en `backend/`, por
+`http://localhost:8765/api/*`). Errores: `{"error": "mensaje en español"}`.
 
-## Requisitos
-- macOS 13 o superior.
-- Command Line Tools con Swift (no hace falta Xcode). `notarytool` y `stapler` vienen con las CLT.
-- Para chatear con los agentes: Claude Code instalado y con sesión iniciada (la app lo guía si falta).
-
-## Compilar
-```bash
-app/build.sh
-```
-Compila en release y arma `app/build/Oficina.app` con firma ad-hoc. El front sale de `oficina/` (única fuente), más three.js y Poppins offline de `app/Resources/vendor`.
-
-## Empaquetar (.dmg)
-```bash
-app/make-dmg.sh             # usa la .app existente (la compila si no existe)
-app/make-dmg.sh --rebuild   # fuerza build.sh primero
-```
-Genera `app/build/Oficina <versión>.dmg` (UDZO, volumen "Oficina") con la .app y un acceso a Aplicaciones. La versión sale de `CFBundleShortVersionString` en `app/Resources/Info.plist`.
-
-### Con Developer ID (sin avisos de Gatekeeper)
-```bash
-DEVELOPER_ID="Developer ID Application: Tu Nombre (TEAMID)" \
-NOTARY_PROFILE="mi-perfil" \
-app/make-dmg.sh --rebuild
-```
-- `DEVELOPER_ID`: firma la app con hardened runtime (`--options runtime --timestamp`) y los entitlements de `app/Resources/Oficina.entitlements`, y firma también el dmg.
-- `NOTARY_PROFILE` (requiere `DEVELOPER_ID`): notariza con `xcrun notarytool submit --keychain-profile ... --wait` y hace `xcrun stapler staple`. El perfil se crea una vez con `xcrun notarytool store-credentials "mi-perfil"`.
-- Sin ninguna de las dos variables queda la firma ad-hoc. El script nunca toma identidades del llavero por su cuenta.
-
-Entitlements: vacíos a propósito. No hay App Sandbox (la app ejecuta `claude` y lee archivos del usuario). WKWebView corre en procesos de WebKit firmados por Apple, así que no se necesita JIT ni `allow-unsigned-executable-memory`. Si el hardened runtime rompiera algo, agregar solo el entitlement puntual en ese archivo.
-
-> `build.sh` y `make-dmg.sh` no fueron probados con una identidad Developer ID real ni con notarización real.
-
-## Instalar
-1. Abrir el `.dmg`.
-2. Arrastrar **Oficina** a **Aplicaciones**.
-3. Expulsar el volumen y abrir la app desde Aplicaciones.
-
-## Abrir una app sin firma de Developer ID
-Con firma ad-hoc, macOS bloquea la primera apertura ("no se puede verificar el desarrollador"). Opciones:
-
-1. **Clic derecho → Abrir.** En Aplicaciones, clic derecho (o Control+clic) sobre Oficina → Abrir → confirmar Abrir. Solo hace falta la primera vez. En macOS recientes (Sequoia en adelante) este atajo ya no alcanza.
-2. **Ajustes del Sistema → Privacidad y seguridad.** Intentar abrir la app una vez, ir a esa sección, bajar hasta el aviso sobre "Oficina" y tocar **Abrir igualmente**. Confirmar con la contraseña o Touch ID.
-3. **Quitar la cuarentena** (alternativa por Terminal):
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/Oficina.app"
-   ```
-
-## Verificar el dmg a mano
-```bash
-hdiutil verify "app/build/Oficina 0.6.1.dmg"
-codesign --verify --deep --strict "/Volumes/Oficina/Oficina.app"   # con el dmg montado
-spctl -a -vv -t install "app/build/Oficina 0.6.1.dmg"                  # solo pasa si está notarizado
-```
+Las rutas se arman en `createBackend` (`backend/src/backend.ts`). Las acciones nativas (abrir archivos, elegir carpetas,
+notificaciones, bandeja) son de la carcasa Electron: `desktop/src/main.ts`.
 
 ## Agentes y oficinas
 
-El backend (`Sources/Backend`) maneja **oficinas**: cada una es una carpeta (por defecto `~/Oficinas/<Nombre>/`, o `HQ_OFICINAS_DIR`) con `oficina.json` como fuente de verdad, los agentes como agentes reales de Claude Code (`.claude/agents/<id>.md`), `conocimiento/` (`oficina.md`, `decisiones.md`, `agentes/<id>.md`), `reuniones/` y `archivos/`. La oficina activa y las recientes se guardan en `~/Library/Application Support/Próspera HQ/config.json` (`oficina_activa`, `oficinas_recientes`). El modo desarrollo (`swift run oficina-dev`, `Sources/Dev/main.swift` + `Sources/Backend/ServidorDev.swift`) sirve la misma interfaz en `http://localhost:8765` con este mismo backend.
+El backend maneja **oficinas**: cada una es una carpeta (por defecto `~/Oficinas/<Nombre>/`, o `HQ_OFICINAS_DIR`) con `oficina.json` como fuente de verdad, los agentes como agentes reales de Claude Code (`.claude/agents/<id>.md`), `conocimiento/` (`oficina.md`, `decisiones.md`, `agentes/<id>.md`), `reuniones/` y `archivos/`. La oficina activa y las recientes se guardan en `~/Library/Application Support/Próspera HQ/config.json` (`oficina_activa`, `oficinas_recientes`). El modo desarrollo (`npm run dev` en `backend/`: `src/dev.ts` + `src/servidor-dev.ts`) sirve la misma interfaz en `http://localhost:8765` con este mismo backend.
 
 Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/departamentos*` y `/api/agentes*` responden `409 {"error":"No hay una oficina abierta"}`. Errores: `{"error": "mensaje en español"}`.
 
@@ -85,13 +36,13 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 
 Los ids son slugs (`^[a-z0-9][a-z0-9-]{0,40}$`). Los chats guardados antes de las oficinas quedan con oficina vacía y pasan a «Próspera HQ» al importarla (o al abrir una carpeta con la marca `.importada-prospera`).
 
-**Importar Próspera:** `POST /api/oficinas/importar-prospera` (`Importar.swift`) crea `~/Oficinas/Próspera HQ/` (5 departamentos, 8 agentes) y copia, sin mover nada, `estado-actual.md` → `conocimiento/oficina.md`, `contexto-maestro.md` y `_equipo/` → `conocimiento/`.
+**Importar Próspera:** `POST /api/oficinas/importar-prospera` (`importar.ts`) crea `~/Oficinas/Próspera HQ/` (5 departamentos, 8 agentes) y copia, sin mover nada, `estado-actual.md` → `conocimiento/oficina.md`, `contexto-maestro.md` y `_equipo/` → `conocimiento/`.
 
 **Para reuniones** (`Backend` expone): `backend.oficinas` (`Oficinas`: `activa() -> OficinaActiva?` con `carpeta`, `oficina`, `ruta(rel)`), `backend.runner` (`correrSinAgente(prompt:timeout:cwd:)` para la síntesis, `turnoSoloLectura(agente:prompt:cwd:timeout:)` con `Read,Glob,Grep`, `conCarril(oficina:agente:_:)`), `backend.registrarReuniones(SubRouter)` para atender `/api/reuniones*`, y `Plantillas.anexarDecisiones(carpeta:decisiones:fecha:)`.
 
 ## Exportar e importar una oficina
 
-Para compartir una oficina o pasarla a otra compu. Código: `Sources/Backend/Paquete.swift` (`PaqueteRouter`, registrado en `Backend.init`) y front en `oficina/ui/app.js` (menú de la oficina, paleta ⌘K y «Importar una oficina» en la pantalla de inicio).
+Para compartir una oficina o pasarla a otra compu. Código: `backend/src/paquete.ts` (`PaqueteRouter`) y front en `oficina/ui/app.js` (menú de la oficina, paleta ⌘K y «Importar una oficina» en la pantalla de inicio).
 
 | Método | Ruta | Cuerpo | Respuesta |
 |---|---|---|---|
@@ -101,18 +52,18 @@ Para compartir una oficina o pasarla a otra compu. Código: `Sources/Backend/Paq
 - **Qué viaja:** la carpeta de la oficina (agentes, `conocimiento/`, actas, archivos subidos, fichas, texto extraído y entregables) más `.oficina-paquete.json`, con las filas de la biblioteca (ficha incluida). Al importar, los documentos con ficha y texto quedan `listo` e indexados sin llamar al bibliotecario; los demás quedan `pendiente` y se vuelven a fichar.
 - **Qué no viaja:** lo de `hq.db` (chats, estado de reuniones, entregas, avisos, costos), `archivos/.papelera/`, las carpetas vinculadas (se quitan de `oficina.json` con sus fichas), la marca `.importada-prospera`, enlaces simbólicos y `.DS_Store`.
 - **Rutas:** la ruta absoluta de la oficina en los `.md/.txt/.json` de `.claude/`, `conocimiento/` y `reuniones/` viaja como `{{OFICINA}}` y se reemplaza por la carpeta nueva al importar. Las otras rutas `/Users/…` de los `.md` de agente se informan en `avisos` (al exportar, todas; al importar, las que no existen en esta compu). Al importar también se quitan los vínculos cuya carpeta no existe.
-- **Seguridad al importar:** antes de extraer se revisa la lista con `zipinfo`: sin rutas absolutas ni `..`, sin enlaces simbólicos, hasta 50 000 entradas, 2 GB de zip y 4 GB descomprimido. Se extrae con `ditto` en una carpeta temporal y recién después se mueve a la carpeta de oficinas; si algo falla no queda nada a medias. Un .zip hecho a mano con la carpeta de una oficina también se importa (sin índice de la biblioteca, con aviso).
-- **Elegir el .zip:** en la app, `{accion:'elegirArchivo', titulo}` al handler `hq` abre un `NSOpenPanel` solo de .zip (`Abrir.swift`, `elegirArchivoZip`); en el navegador, el explorador propio con `GET /api/fs/carpetas?archivos=zip`. «Mostrar en Finder» del resultado usa `revelar`, que acepta un `.oficina.zip` aunque esté fuera de la oficina (solo lo muestra, nunca lo abre).
+- **Seguridad al importar:** antes de extraer se revisa el directorio central del zip: sin rutas absolutas ni `..`, sin enlaces simbólicos, hasta 50 000 entradas, 2 GB de zip y 4 GB descomprimido. Se extrae (`backend/src/zip.ts`, sin programas del sistema) en una carpeta temporal y recién después se mueve a la carpeta de oficinas; si algo falla no queda nada a medias. Un .zip hecho a mano con la carpeta de una oficina también se importa (sin índice de la biblioteca, con aviso).
+- **Elegir el .zip:** en la app, `{accion:'elegirArchivo', titulo}` al handler `hq` abre el diálogo del sistema solo de .zip (`desktop/src/main.ts`); en el navegador, el explorador propio con `GET /api/fs/carpetas?archivos=zip`. «Mostrar en Finder» del resultado usa `revelar`, que acepta un `.oficina.zip` aunque esté fuera de la oficina (solo lo muestra, nunca lo abre).
 
 ## Reuniones
 
-Varios agentes de la oficina activa opinan por **rondas** sobre un tema; el usuario puede intervenir, pedir otra ronda o cerrar. Al cerrar sale una síntesis (resumen, decisiones y pendientes). Código: `Sources/Backend/Reuniones.swift` (`ReunionesRouter`, registrado en `Backend.init` con `registrarReuniones`) y panel en `oficina/ui/reunion.js` (`App.Reunion.abrir()`).
+Varios agentes de la oficina activa opinan por **rondas** sobre un tema; el usuario puede intervenir, pedir otra ronda o cerrar. Al cerrar sale una síntesis (resumen, decisiones y pendientes). Código: `backend/src/reuniones.ts` (`ReunionesRouter`) y panel en `oficina/ui/reunion.js` (`App.Reunion.abrir()`).
 
 ## Tareas programadas y segundo plano
 
-Cada agente puede tener tareas (`tareas` en `oficina.json`: días ISO 1–7, hora `HH:MM`, zona IANA, consigna). Hay dos tipos: **repetida** (días + hora) y **una sola vez** (`fecha` `AAAA-MM-DD` + hora, sin días): corre una vez cuando llega su hora —aunque sea tarde, sin la ventana de 12 h—, deja una sola entrega y queda `hecha` (y en pausa); si falla no se reintenta sola («Hacer ahora» o cambiarle la fecha/hora). `POST /api/tareas` acepta `{tipo: "unica", fecha, hora}` o `{tipo: "unica", ahora: true}` (arranca enseguida); la vista suma `tipo`, `fecha`, `hecha` y `cuando` (el instante, aunque ya haya pasado). «Convertir en tarea» desde un acta abre la hoja como «Una sola vez». El actor `Programador` (`Sources/Backend/Programador.swift`, iniciado en `Backend.init` y detenido en `shutdown()`) revisa cada 30 s la oficina activa y corre las que tocan como un chat del agente (carril, permisos, actividad y costo con origen «tarea»), en una sesión nueva que queda en el historial; las corridas se guardan en la tabla `ejecuciones`. La lógica de horarios es pura y está en `Sources/Backend/Tareas.swift` (`Programacion.proxima/debeCorrer`: una vez por horario, DST correcto, puesta al día si pasaron menos de 12 h). Rutas en `TareasRouter.swift` (`/api/tareas*`, registrado con `registrarTareas`); `programador.alTerminar { ejecucion in … }` es el gancho para avisos y notificaciones. Pestaña «Tareas» de la ficha en `oficina/ui/agente.js`.
+Cada agente puede tener tareas (`tareas` en `oficina.json`: días ISO 1–7, hora `HH:MM`, zona IANA, consigna). Hay dos tipos: **repetida** (días + hora) y **una sola vez** (`fecha` `AAAA-MM-DD` + hora, sin días): corre una vez cuando llega su hora —aunque sea tarde, sin la ventana de 12 h—, deja una sola entrega y queda `hecha` (y en pausa); si falla no se reintenta sola («Hacer ahora» o cambiarle la fecha/hora). `POST /api/tareas` acepta `{tipo: "unica", fecha, hora}` o `{tipo: "unica", ahora: true}` (arranca enseguida); la vista suma `tipo`, `fecha`, `hecha` y `cuando` (el instante, aunque ya haya pasado). «Convertir en tarea» desde un acta abre la hoja como «Una sola vez». El `Programador` (`backend/src/programador.ts`, iniciado en `createBackend` y detenido en `shutdown()`) revisa cada 30 s la oficina activa y corre las que tocan como un chat del agente (carril, permisos, actividad y costo con origen «tarea»), en una sesión nueva que queda en el historial; las corridas se guardan en la tabla `ejecuciones`. La lógica de horarios es pura y está en `backend/src/tareas.ts` (`proxima`/`debeCorrer`: una vez por horario, DST correcto, puesta al día si pasaron menos de 12 h). Rutas en `TareasRouter` (`programador.ts`, `/api/tareas*`); `programador.alTerminar` es el gancho para avisos y notificaciones. Pestaña «Tareas» de la ficha en `oficina/ui/agente.js`.
 
-La app sigue viva con la ventana cerrada (`applicationShouldTerminateAfterLastWindowClosed` = false; el Dock la vuelve a abrir) y tiene un ícono en la barra de menú (`Sources/App/BarraMenu.swift`): abrir, próximas tareas, «Abrir al iniciar sesión» (`SMAppService.mainApp`, apagado por defecto) y salir. ⌘Q cierra todo. Variables de prueba: `HQ_PROGRAMADOR=0` apaga el bucle, `HQ_PROGRAMADOR_INTERVALO` (segundos) lo acelera.
+La app sigue viva con la ventana cerrada (el Dock o la bandeja la vuelven a abrir) y tiene un ícono en la barra de menú de Mac o en la bandeja de Windows (`desktop/src/main.ts`): abrir, entregas sin revisar, próximas tareas, «Abrir al iniciar sesión» (apagado por defecto) y salir. ⌘Q / Ctrl+Q cierra todo. Variables de prueba: `HQ_PROGRAMADOR=0` apaga el bucle, `HQ_PROGRAMADOR_INTERVALO` (segundos) lo acelera.
 
 | Método | Ruta | Cuerpo | Respuesta |
 |---|---|---|---|
@@ -135,7 +86,7 @@ La app sigue viva con la ventana cerrada (`applicationShouldTerminateAfterLastWi
 
 ## Biblioteca
 
-Archivos y conocimiento de la oficina activa: se suben o se vinculan carpetas externas, un «bibliotecario» (un `claude -p` sin agente) ficha cada documento, y los agentes lo leen por rol. Código: `Sources/Backend/Biblioteca.swift` (`BibliotecaRouter`, registrado en `Backend.init` con `registrarBiblioteca`) y `Extraccion.swift` y panel en `oficina/ui/biblioteca.js` (`App.Biblioteca.abrir()`: botón «Biblioteca», estantería de la sala de la biblioteca en el 3D, o arrastrar archivos sobre el panel o la vista 3D).
+Archivos y conocimiento de la oficina activa: se suben o se vinculan carpetas externas, un «bibliotecario» (un `claude -p` sin agente) ficha cada documento, y los agentes lo leen por rol. Código: `backend/src/biblioteca.ts` (`BibliotecaRouter`) y `extraccion.ts` y panel en `oficina/ui/biblioteca.js` (`App.Biblioteca.abrir()`: botón «Biblioteca», estantería de la sala de la biblioteca en el 3D, o arrastrar archivos sobre el panel o la vista 3D).
 
 **Carpetas** (dentro de la oficina): `archivos/compartido/` (todos), `archivos/<departamento>/`, `archivos/entregables/<agente>/` (lo que produce cada agente), `archivos/.texto/<slug>.md` (texto extraído), `archivos/.papelera/` (nada se borra), `conocimiento/archivos.md` (catálogo, una línea por documento; lo leen todos al empezar) y `conocimiento/fuentes/<slug>.md` (ficha). Las crean `Plantillas.crearEstructura` / `completarEstructura` al crear o abrir la oficina. La sección «Memoria de la oficina» de los agentes nuevos menciona el catálogo, las fichas y `archivos/entregables/<id>/` (los agentes ya contratados conservan su `.md`).
 
@@ -169,18 +120,18 @@ Archivos y conocimiento de la oficina activa: se suben o se vinculan carpetas ex
 
 **Reuniones.** `POST /api/reuniones` acepta `documentos:[slug]` (hasta 10, con ficha): su ficha (2500 car. c/u, 8000 en total) entra en el prompt de todos los turnos y la reunión devuelve `documentos`. 400 si un slug no existe o todavía no tiene ficha.
 
-**Abrir el original en la app.** El `Router` devuelve JSON, así que `original` entrega el archivo en base64 (hasta 8 MB) y el front arma un Blob y lo abre; en un `WKWebView` eso puede no abrir nada (no hay `WKDownloadDelegate`), por eso la ficha siempre muestra la ubicación. Para abrirlo de verdad hace falta una acción nativa `abrir` en `AppDelegate.userContentController` (`NSWorkspace.shared.open(URL(fileURLWithPath:))` con la `ruta` del archivo), que no está hecha.
+**Abrir el original en la app.** El router devuelve JSON, así que `original` entrega el archivo en base64 (hasta 8 MB) y el front arma un Blob y lo abre; por eso la ficha siempre muestra también la ubicación, para abrirlo con `abrir` desde la app.
 
 **Variables de entorno:** `HQ_BIBLIOTECA_MAX_MB`, `HQ_BIBLIOTECA_MAX_ARCHIVOS`, `HQ_BIBLIOTECA_MAX_TOTAL_MB`, `HQ_BIBLIOTECA_TIMEOUT` (ficha, 180 s), `HQ_BIBLIOTECA_IMAGEN_TIMEOUT` (120 s), `HQ_BIBLIOTECA_SIN_FTS=1` (fuerza la búsqueda con LIKE).
 
-## Abrir archivos y créditos (app nativa)
-- El front manda `window.webkit.messageHandlers.hq.postMessage({accion: 'abrir' | 'revelar', ruta})` (`App.nativo` en `oficina/ui/base.js`). `app/Sources/App/Abrir.swift` valida la ruta (enlaces simbólicos resueltos) contra la carpeta de la oficina activa y las carpetas vinculadas (las pide al backend) y la abre con `NSWorkspace`; nunca abre aplicaciones, scripts ni archivos ejecutables. `revelar` sin ruta abre la carpeta de la oficina (menú «Oficina», ⇧⌘O, y botón en la barra lateral).
+## Abrir archivos y créditos (app de escritorio)
+- El front manda `window.webkit.messageHandlers.hq.postMessage({accion: 'abrir' | 'revelar', ruta})` (`App.nativo` en `oficina/ui/base.js`). `desktop/src/main.ts` (`abrirRuta`, con `abrir.ts`) valida la ruta (enlaces simbólicos resueltos) contra la carpeta de la oficina activa y las carpetas vinculadas (las pide al backend) y la abre con su aplicación; nunca abre aplicaciones, scripts ni archivos ejecutables. `revelar` sin ruta abre la carpeta de la oficina (menú de la app, ⇧⌘O / Ctrl+Shift+O, y botón en la barra lateral).
 - «Acerca de Oficina» (menú de la app y enlace en la barra lateral): LDraw parts library (CC BY 4.0), three.js (MIT), Poppins (OFL) y aviso de que el proyecto no está afiliado a LEGO.
 
 - Al importar Próspera, si `~/Próspera` existe se vincula (`id: prospera`) para mario, don-armando, nicolas y sofia, y las rutas absolutas de sus `.md` apuntan a esa carpeta. Al abrir una oficina se reescanean sus carpetas vinculadas en segundo plano.
 
 ## Explorador de carpetas y de la oficina
-Para no escribir rutas a mano. Código: `Sources/Backend/Explorador.swift` (`ExploradorRouter`, registrado en `Backend.init` con `registrarExplorador`) y front en `oficina/ui/carpetas.js`.
+Para no escribir rutas a mano. Código: `backend/src/explorador.ts` (`ExploradorRouter`) y front en `oficina/ui/carpetas.js`.
 
 | Método | Ruta | Qué hace |
 |---|---|---|
@@ -191,6 +142,6 @@ Para no escribir rutas a mano. Código: `Sources/Backend/Explorador.swift` (`Exp
 
 **Seguridad.** `/api/fs/carpetas`: la ruta tiene que ser absoluta (400) y, ya con `realpath` (enlaces simbólicos resueltos), estar dentro de `$HOME` (403); los enlaces que salen de `$HOME` no se listan. `/api/oficina/archivo*`: ruta relativa a la oficina (403 con `..`, ruta absoluta, `\`, NUL, ocultos que no sean `.claude`, o enlaces simbólicos que salen de la carpeta; 404 si no existe; 409 sin oficina). Solo lectura; nunca se leen archivos fuera de la oficina.
 
-**Front.** `App.elegirCarpeta(titulo, {oficinas?, crear?}) → Promise<ruta|null>` (`oficina/ui/carpetas.js`): en la app nativa manda `{accion:'elegirCarpeta', titulo, inicio, crear}` al handler `hq` y abre un `NSOpenPanel` (`Abrir.swift`, `elegirCarpeta`); en el navegador abre un explorador propio sobre `/api/fs/carpetas` (accesos rápidos, «Nueva carpeta» con `crear`, insignia y prioridad para carpetas de oficina con `oficinas`). Se usa en «Abrir una oficina existente», «Crear mi oficina» («Cambiar…») y «Vincular carpeta». Sin Finder (navegador), «Ver archivos de la oficina» usa `/api/oficina/archivos` y `/api/oficina/archivo`.
+**Front.** `App.elegirCarpeta(titulo, {oficinas?, crear?}) → Promise<ruta|null>` (`oficina/ui/carpetas.js`): en la app nativa manda `{accion:'elegirCarpeta', titulo, inicio, crear}` al handler `hq` y abre el diálogo del sistema (`desktop/src/main.ts`); en el navegador abre un explorador propio sobre `/api/fs/carpetas` (accesos rápidos, «Nueva carpeta» con `crear`, insignia y prioridad para carpetas de oficina con `oficinas`). Se usa en «Abrir una oficina existente», «Crear mi oficina» («Cambiar…») y «Vincular carpeta». Sin Finder (navegador), «Ver archivos de la oficina» usa `/api/oficina/archivos` y `/api/oficina/archivo`.
 
 **Handler nativo con respuesta.** `AppDelegate` registra `hq` con `addScriptMessageHandler(_:contentWorld:name:)` (`WKScriptMessageHandlerWithReply`, macOS 11+): `postMessage` devuelve una Promise. Las acciones existentes (`abrir`, `revelar`, `acerca`, `open`, `login`, `spike`) siguen igual y contestan `nil`; `elegirCarpeta` contesta la ruta o `null` si se cancela (solo desde páginas `hq://`). El diálogo no se puede automatizar sin clicarlo: probarlo a mano (Crear/Abrir oficina → «Buscar…»).

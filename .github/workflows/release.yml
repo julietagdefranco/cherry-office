@@ -6,13 +6,15 @@
 #   Si no existe, la crea como borrador para completar las notas antes de publicarla.
 # - A mano (Actions → Release → Run workflow): arma los instaladores y los deja como artefactos del run, sin release.
 #
-# Mac: la app Swift (app/). Windows: la carcasa Electron (desktop/) con el backend TypeScript.
+# Las dos plataformas salen de la carcasa Electron (desktop/) con el backend TypeScript (backend/).
+# La versión sale de desktop/package.json.
 #
 # Actualizaciones automáticas: cada release lleva lo que leen las apps instaladas.
-# - Mac (Sparkle): Oficina-X-arm64.zip firmado con la clave EdDSA (secret SPARKLE_PRIVATE_KEY) y appcast.xml.
+# - Mac: Oficina-X-arm64.zip firmado con la clave EdDSA (secret SPARKLE_PRIVATE_KEY) y appcast.xml. Lo leen el
+#   actualizador propio de la app Electron (desktop/src/actualizaciones-mac.ts) y Sparkle en la 1.0 Swift, que así
+#   pasa sola a la app Electron.
 # - Windows (electron-updater): latest.yml y el .blockmap junto al .exe.
 # Las apps solo ven releases publicadas (no borradores): publicar la release es lo que la manda a todos.
-# La versión sale siempre de app/Resources/Info.plist (el job de Windows se la pone a desktop/package.json).
 name: Release
 
 on:
@@ -27,6 +29,13 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # descargas de Electron y de las herramientas de electron-builder (NSIS, 7zip): van a la caché
+  ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+  # sign_update: firma EdDSA del .zip de Mac (la misma herramienta y formato que usaba la app Swift)
+  SPARKLE_VERSION: "2.10.1"
+
 jobs:
   mac:
     name: macOS (arm64)
@@ -38,49 +47,69 @@ jobs:
       - name: Versión
         id: version
         run: |
-          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' app/Resources/Info.plist)"
+          VERSION="$(node -p "require('./desktop/package.json').version")"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
-            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de Info.plist ($VERSION)."
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de desktop/package.json ($VERSION)."
             exit 1
           fi
+          # CFBundleVersion entero y creciente (1.2.3 -> 10203): Sparkle en la 1.0 Swift (build 10) lo compara con el suyo
+          BUILD="$(node -p "const [a,b,c]=require('./desktop/package.json').version.split('-')[0].split('.').map(Number); a*10000+b*100+c")"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
 
-      # Compilaciones de Swift (debug de los tests y release de la app): con la caché solo se recompila lo que cambió.
-      - name: Caché de la compilación de Swift
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Caché de Electron
         uses: actions/cache@v4
         with:
-          path: app/.build
-          key: swift-${{ runner.os }}-${{ hashFiles('app/Package.swift', 'app/Package.resolved') }}-${{ hashFiles('app/Sources/**', 'app/Tests/**') }}
-          restore-keys: |
-            swift-${{ runner.os }}-${{ hashFiles('app/Package.swift', 'app/Package.resolved') }}-
+          path: .cache
+          key: electron-${{ runner.os }}-${{ hashFiles('desktop/package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
 
+      - name: Dependencias
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix desktop
+
+      - name: Tipos
+        run: |
+          (cd backend && npx tsc --noEmit)
+          (cd desktop && npx tsc -p .)
+
+      # En Windows y Linux los corre backend.yml en cada cambio; acá, en Mac, antes de publicar.
       - name: Tests del backend
-        run: app/Tests/run-tests.sh
+        working-directory: backend
+        run: npx vitest run
 
       - name: Compilar y empaquetar
-        run: app/make-dmg.sh --rebuild
+        working-directory: desktop
+        run: |
+          node scripts/build.mjs --recursos
+          npx electron-builder --mac --arm64 --publish never -c.buildVersion=${{ steps.version.outputs.build }}
 
-      - name: Renombrar instalador
+      - name: Instalador
         id: dmg
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          NAME="Oficina-$VERSION-arm64.dmg"
-          mv "app/build/Oficina $VERSION.dmg" "app/build/$NAME"
-          SHA="$(shasum -a 256 "app/build/$NAME" | cut -d' ' -f1)"
+          NAME="Oficina-${{ steps.version.outputs.version }}-arm64.dmg"
+          [ -f "desktop/release/$NAME" ] || { echo "::error::No se generó desktop/release/$NAME"; exit 1; }
+          codesign --verify --deep --strict desktop/release/mac-arm64/Oficina.app
+          SHA="$(shasum -a 256 "desktop/release/$NAME" | cut -d' ' -f1)"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          {
-            echo "### $NAME"
-            echo
-            echo "SHA-256: \`$SHA\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### $NAME"; echo; echo "SHA-256: \`$SHA\`"; } >> "$GITHUB_STEP_SUMMARY"
 
-      # Sparkle baja el .zip (no el .dmg) y lo verifica con la firma EdDSA que va en appcast.xml.
-      - name: Paquete de actualización (Sparkle)
-        id: sparkle
+      # El actualizador baja el .zip (no el .dmg) y lo verifica con la firma EdDSA que va en appcast.xml.
+      - name: Paquete de actualización
+        id: zip
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
           VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
@@ -93,16 +122,18 @@ jobs:
             echo "listo=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' app/build/Oficina.app/Contents/Info.plist)"
           ZIP="Oficina-$VERSION-arm64.zip"
-          (cd app/build && ditto -c -k --sequesterRsrc --keepParent Oficina.app "$ZIP")
+          (cd desktop/release/mac-arm64 && ditto -c -k --sequesterRsrc --keepParent Oficina.app "../$ZIP")
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          mkdir -p "$RUNNER_TEMP/sparkle" && tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
           KEY="$RUNNER_TEMP/sparkle.key"
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY"
-          FIRMA="$(app/.build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file "$KEY" "app/build/$ZIP")"
+          FIRMA="$("$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file "$KEY" "desktop/release/$ZIP")"
           rm -f "$KEY"
           [ -n "$FIRMA" ] || { echo "::error::sign_update no devolvió la firma."; exit 1; }
           FECHA="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
-          cat > app/build/appcast.xml <<EOF
+          cat > desktop/release/appcast.xml <<EOF
           <?xml version="1.0" encoding="utf-8"?>
           <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
             <channel>
@@ -119,7 +150,7 @@ jobs:
             </channel>
           </rss>
           EOF
-          xmllint --noout app/build/appcast.xml
+          xmllint --noout desktop/release/appcast.xml
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
           echo "listo=1" >> "$GITHUB_OUTPUT"
 
@@ -128,9 +159,9 @@ jobs:
         with:
           name: ${{ steps.dmg.outputs.name }}
           path: |
-            app/build/${{ steps.dmg.outputs.name }}
-            app/build/Oficina-*-arm64.zip
-            app/build/appcast.xml
+            desktop/release/${{ steps.dmg.outputs.name }}
+            desktop/release/Oficina-*-arm64.zip
+            desktop/release/appcast.xml
           retention-days: 14
 
       - name: Adjuntar a la release
@@ -139,16 +170,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
-          FILE: app/build/${{ steps.dmg.outputs.name }}
-          ZIP: app/build/${{ steps.sparkle.outputs.zip }}
-          SHA: ${{ steps.dmg.outputs.sha }}
+          FILE: desktop/release/${{ steps.dmg.outputs.name }}
+          ZIP: desktop/release/${{ steps.zip.outputs.zip }}
         run: |
-          # el job de Windows corre en paralelo: si la otra ya creó la release, solo se sube el archivo
+          # el job de Windows corre en paralelo: si el otro ya creó la release, solo se suben los archivos
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "Oficina $VERSION" \
               --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true
           fi
-          gh release upload "$TAG" "$FILE" "$ZIP" app/build/appcast.xml --clobber
+          gh release upload "$TAG" "$FILE" "$ZIP" desktop/release/appcast.xml --clobber
 
   windows:
     name: Windows (x64)
@@ -157,21 +187,16 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      # descargas de Electron y de las herramientas de electron-builder (NSIS, 7zip): van a la caché
-      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
     steps:
       - uses: actions/checkout@v4
 
       - name: Versión
         id: version
         run: |
-          VERSION="$(grep -A1 'CFBundleShortVersionString' app/Resources/Info.plist | grep -o '<string>[^<]*</string>' | head -1 | sed 's/<[^>]*>//g')"
-          [ -n "$VERSION" ] || { echo "::error::No pude leer la versión de Info.plist."; exit 1; }
+          VERSION="$(node -p "require('./desktop/package.json').version")"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
-            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de Info.plist ($VERSION)."
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de desktop/package.json ($VERSION)."
             exit 1
           fi
 
@@ -203,7 +228,6 @@ jobs:
       - name: Compilar y empaquetar
         working-directory: desktop
         run: |
-          npm pkg set version="${{ steps.version.outputs.version }}"
           node scripts/build.mjs --recursos
           npx electron-builder --win --x64 --publish never
 

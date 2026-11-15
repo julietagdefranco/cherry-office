@@ -1,15 +1,13 @@
-// Arnés de paridad: port de app/Tests/BackendTests/TestSupport.swift a caja negra por HTTP.
+// Arnés de los tests de la API: caja negra por HTTP (nació como port del TestSupport.swift del backend Swift, ya
+// retirado; por eso algunos comentarios de los tests nombran archivos .swift).
 //
 // Cada test arma un Sandbox (HOME, datos y oficinas en un temporal + el `claude` falso de fixtures/claude-fake.cjs)
-// y levanta su propio servidor de desarrollo (Swift u TS, según HQ_BACKEND) apuntando a ese sandbox.
+// y levanta su propio servidor de desarrollo del backend TS apuntando a ese sandbox.
 // Nunca toca ~/Próspera, ~/.claude ni los datos reales.
 //
-// Los nombres siguen a los de Swift para que portar un test sea mecánico:
-//   Swift: let b = try sb.backend(); let r = await llamar(b, "GET", "/api/estado")
-//   TS:    const b = await sb.backend(); const r = await llamar(b, 'GET', '/api/estado')
+//   const b = await sb.backend(); const r = await llamar(b, 'GET', '/api/estado')
 //
-// Diferencias con los tests Swift (in-process):
-// - No hay acceso a internals (b.store, b.runner, Programacion…): esos tests se reescriben como unit tests del port.
+// - No hay acceso a internals (store, runner, Programacion…): eso va en los unit tests (test/unit).
 // - `config` se pasa como el JSON de config.json (claves snake_case: timeout, agentes, escritura, herramientas…).
 // - `env` son variables del proceso del servidor (HQ_MAX_CLAUDE, HQ_BIBLIOTECA_*, …).
 // - El servidor dev exige Host/Origin/Content-Type: el cliente los manda siempre.
@@ -273,7 +271,7 @@ export class Backend {
       await dormir(50)
     }
     await this.cerrar()
-    throw new Error(`El servidor (${inject('servidor').nombre}) no arrancó en el puerto ${this.puerto}.\n${this.salida}`)
+    throw new Error(`El servidor no arrancó en el puerto ${this.puerto}.\n${this.salida}`)
   }
 
   /** Salida del servidor (stdout + stderr, últimos 20 KB): sirve para diagnosticar un test. */

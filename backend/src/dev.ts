@@ -16,7 +16,7 @@ const env = process.env
 const aqui = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(aqui, aqui.includes(`${path.sep}dist${path.sep}`) ? '../../..' : '../..')
 const ui = env.HQ_UI_DIR ? path.resolve(env.HQ_UI_DIR) : path.join(repo, 'oficina')
-const vendor = path.join(repo, 'app/Resources/vendor')
+const vendor = path.join(repo, 'oficina/vendor')
 const puerto = Number(env.PORT) > 0 ? Number(env.PORT) : 8765
 const home = env.HQ_HOME || os.homedir()
 

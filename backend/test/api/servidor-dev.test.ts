@@ -45,8 +45,8 @@ describe('Servidor de desarrollo (oficina-dev)', () => {
     const g = async (ruta: string) => { const r = await crudo(b, 'GET', ruta); return [r.status, r.texto] as const }
     expect(await g('/')).toEqual([200, '<html>'])
     expect(await g('/ui/app.js')).toEqual([200, 'x()'])
-    // vendor/: Swift armaba su propia carpeta de vendor; aquí es la real del repo (app/Resources/vendor)
-    const vendor = path.join(raizRepo, 'app/Resources/vendor/three.min.js')
+    // vendor/: Swift armaba su propia carpeta de vendor; aquí es la real del repo (oficina/vendor)
+    const vendor = path.join(raizRepo, 'oficina/vendor/three.min.js')
     const v = await crudo(b, 'GET', '/vendor/three.min.js')
     expect(v.status).toBe(200)
     expect(v.texto).toBe(leerTexto(vendor))

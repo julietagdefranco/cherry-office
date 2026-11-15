@@ -1,10 +1,17 @@
-// Actualizaciones automáticas (solo Windows, app empaquetada) con electron-updater.
-// Lee las releases publicadas de GitHub (los borradores no cuentan: publicar la release es lo que la manda a todos).
-// Baja la versión nueva en segundo plano y la instala al salir, o antes si el usuario elige «Reiniciar ahora».
-import { app, dialog, type BrowserWindow } from 'electron'
-import electronUpdater from 'electron-updater'
+// Actualizaciones automáticas de la app empaquetada.
+// - Windows: electron-updater (latest.yml de la release).
+// - Mac: actualizador propio (actualizaciones-mac.ts) sobre el appcast.xml firmado con EdDSA, porque electron-updater
+//   en Mac exige firma de Developer ID.
+// Las dos leen las releases publicadas de GitHub (los borradores no cuentan: publicar la release es lo que la manda a
+// todos), bajan la versión nueva en segundo plano y la instalan al salir, o antes si el usuario elige «Reiniciar ahora».
+// HQ_SIN_ACTUALIZACIONES=1 las apaga; HQ_ACTUALIZACIONES_FEED y HQ_ACTUALIZACIONES_CLAVE (solo Mac) sirven para probar
+// con un appcast y una clave propios.
+import { app, dialog, net, shell, type BrowserWindow } from 'electron'
+// import con nombre: el paquete se declara ESM (__esModule) sin `default`, así que con esbuild
+// `import electronUpdater from …` queda undefined y la app se cae al arrancar (le pasó a la 1.0.0 de Windows)
+import { autoUpdater } from 'electron-updater'
+import * as mac from './actualizaciones-mac.js'
 
-const { autoUpdater } = electronUpdater
 const CADA = 6 * 60 * 60 * 1000 // cada 6 horas (además de al abrir)
 
 export type EstadoActualizacion =
@@ -12,6 +19,8 @@ export type EstadoActualizacion =
   | { tipo: 'buscando' }
   | { tipo: 'bajando'; version: string; pct: number }
   | { tipo: 'lista'; version: string }
+  /** Mac: hay versión nueva pero no se puede instalar sola (corre desde el .dmg, sin permiso…): bajarla a mano. */
+  | { tipo: 'manual'; version: string; url: string; motivo: string }
 
 let estado: EstadoActualizacion = { tipo: 'nada' }
 let alCambiar: () => void = () => {}
@@ -20,7 +29,12 @@ let ventana: () => BrowserWindow | undefined = () => undefined
 let reiniciarAlSalir = false
 let manual = false
 
-export const disponible = () => process.platform === 'win32' && app.isPackaged
+const esMac = process.platform === 'darwin'
+/** Mac: la Oficina.app nueva ya descomprimida y revisada, lista para el cambio al salir. */
+let nuevaMac: string | undefined
+
+export const disponible = () =>
+  (process.platform === 'win32' || esMac) && app.isPackaged && process.env.HQ_SIN_ACTUALIZACIONES !== '1'
 export const estadoActual = () => estado
 
 function cambiar(e: EstadoActualizacion) {
@@ -32,6 +46,15 @@ export function iniciar(opciones: { ventana: () => BrowserWindow | undefined; al
   if (!disponible()) return
   ventana = opciones.ventana
   alCambiar = opciones.alCambiar
+  if (esMac) {
+    const b = mac.bundleActual(app.getPath('exe'))
+    if (b && !mac.impedimento(b)) mac.limpiar(b) // restos de una actualización anterior
+  } else iniciarWindows()
+  setTimeout(() => void buscar(false), 15_000)
+  setInterval(() => void buscar(false), CADA)
+}
+
+function iniciarWindows() {
   autoUpdater.autoDownload = true
   // el cierre lo maneja main.ts (apaga el backend y llama a instalarAlSalir): electron-updater no se entera de app.exit
   autoUpdater.autoInstallOnAppQuit = false
@@ -58,9 +81,6 @@ export function iniciar(opciones: { ventana: () => BrowserWindow | undefined; al
     if (manual) void avisar('No se pudo buscar actualizaciones', String(err?.message ?? err))
     manual = false
   })
-
-  setTimeout(() => void buscar(false), 15_000)
-  setInterval(() => void buscar(false), CADA)
 }
 
 /** `manual`: desde el menú; avisa también si no hay nada nuevo o si falla. */
@@ -70,16 +90,79 @@ export async function buscar(esManual: boolean) {
     return
   }
   if (estado.tipo === 'lista') return void preguntarReinicio(estado.version)
+  if (estado.tipo === 'manual' && esManual) return void ofrecerDescarga(estado)
   if (estado.tipo === 'bajando') {
     if (esManual) void avisar('Bajando la actualización', `Se está bajando la versión ${estado.version} (${estado.pct}%).`)
     return
   }
+  if (estado.tipo === 'buscando') return
+  if (esMac) return buscarMac(esManual)
   manual = esManual
   try {
     await autoUpdater.checkForUpdates()
   } catch {
     // ya lo informa el evento 'error'
   }
+}
+
+async function buscarMac(esManual: boolean) {
+  cambiar({ tipo: 'buscando' })
+  let version: string | undefined
+  try {
+    const feed = process.env.HQ_ACTUALIZACIONES_FEED || mac.FEED
+    const r = await net.fetch(feed, { cache: 'no-store' })
+    if (!r.ok) throw new Error(`No pude leer las actualizaciones (HTTP ${r.status}).`)
+    const entrada = mac.leerAppcast(await r.text())
+    if (!entrada) throw new Error('El aviso de actualizaciones no se pudo leer.')
+    if (mac.compararVersiones(entrada.version, app.getVersion()) <= 0) {
+      cambiar({ tipo: 'nada' })
+      if (esManual) void avisar('Oficina está al día', `Tenés la última versión (${app.getVersion()}).`)
+      return
+    }
+    version = entrada.version
+    const bundle = mac.bundleActual(app.getPath('exe'))
+    const motivo = mac.impedimento(bundle)
+    if (motivo) {
+      const e = { tipo: 'manual' as const, version, motivo, url: entrada.notas || 'https://github.com/julietagdefranco/cherry-office/releases/latest' }
+      cambiar(e)
+      if (esManual) void ofrecerDescarga(e)
+      return
+    }
+    cambiar({ tipo: 'bajando', version, pct: 0 })
+    let ultimo = 0
+    nuevaMac = await mac.preparar({
+      entrada, bundle: bundle!, clave: process.env.HQ_ACTUALIZACIONES_CLAVE || undefined,
+      bajar: (url) => net.fetch(url, { cache: 'no-store' }), // 120 MB: que no queden en la caché HTTP
+      progreso: (pct) => {
+        if (pct - ultimo < 5 && pct < 100) return // el menú se rearma en cada cambio: de a 5 %
+        ultimo = pct
+        cambiar({ tipo: 'bajando', version: version!, pct })
+      },
+    })
+    cambiar({ tipo: 'lista', version })
+    void preguntarReinicio(version)
+  } catch (err) {
+    nuevaMac = undefined
+    const b = mac.bundleActual(app.getPath('exe'))
+    if (version && b && !mac.impedimento(b)) mac.limpiar(b)
+    cambiar({ tipo: 'nada' })
+    if (esManual) void avisar(version ? 'No se pudo actualizar' : 'No se pudo buscar actualizaciones', String((err as Error)?.message ?? err))
+  }
+}
+
+async function ofrecerDescarga(e: Extract<EstadoActualizacion, { tipo: 'manual' }>) {
+  const w = ventana()
+  const opciones = {
+    type: 'info' as const,
+    title: 'Hay una versión nueva',
+    message: `Está la versión ${e.version} de Oficina.`,
+    detail: `No se puede instalar sola: ${e.motivo}`,
+    buttons: ['Bajarla', 'Más tarde'],
+    defaultId: 0,
+    cancelId: 1,
+  }
+  const r = w ? await dialog.showMessageBox(w, opciones) : await dialog.showMessageBox(opciones)
+  if (r.response === 0) void shell.openExternal(e.url)
 }
 
 async function preguntarReinicio(version: string) {
@@ -104,11 +187,20 @@ export function reiniciar() {
 }
 
 /**
- * Lo llama main.ts al final del cierre (con el backend ya apagado). Si hay una versión bajada, lanza el instalador
- * en silencio y devuelve true (electron-updater cierra la app); si no, devuelve false y main.ts sale como siempre.
+ * Lo llama main.ts al final del cierre (con el backend ya apagado). Windows: si hay una versión bajada, lanza el
+ * instalador en silencio y devuelve true (electron-updater cierra la app). Mac: deja corriendo el script que cambia la
+ * .app cuando el proceso termina y devuelve false. Si no hay nada, false y main.ts sale como siempre.
  */
 export function instalarAlSalir(): boolean {
   if (estado.tipo !== 'lista') return false
+  if (esMac) {
+    const bundle = mac.bundleActual(app.getPath('exe'))
+    if (!nuevaMac || !bundle) return false
+    try {
+      mac.instalarAlTerminar({ pid: process.pid, bundle, nueva: nuevaMac, reabrir: reiniciarAlSalir })
+    } catch {}
+    return false // main.ts sale enseguida; el script espera a que termine el proceso
+  }
   try {
     autoUpdater.quitAndInstall(true, reiniciarAlSalir)
     return true

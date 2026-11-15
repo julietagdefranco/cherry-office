@@ -17,7 +17,7 @@ export type OpcionesServidor = {
   router: APIHandler
   /** La carpeta `oficina/` (index.html, ui/, ldraw/). */
   raizUI: string
-  /** `app/Resources/vendor` (three.js, fuentes). */
+  /** `oficina/vendor` (three.js, fuentes). */
   raizVendor: string
   puerto: number
 }
