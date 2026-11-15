@@ -64,9 +64,23 @@ describe('Permisos en vivo', () => {
     expect((await f.post(`/api/permisos/${id}`, { decision: 'una_vez' })).status).toBe(404)
   })
 
-  test('chat: un comando compuesto solo se permite una vez («Siempre» da 400); si nadie responde, vence y se rechaza', async () => {
+  test('chat: un comando compuesto guarda una regla por parte con «Siempre»', async () => {
+    const f = await fix()
+    const chatA = chat(f.b, { agent: 'marce', message: 'PERMISO:cd /repo && npm test | tail -5', session: U.a })
+    expect(await esperar(async () => (await pendientes(f)).length === 1, 10)).toBe(true)
+    const p = (await pendientes(f))[0]!
+    const reglas = ['Bash(cd:*)', 'Bash(npm test:*)', 'Bash(tail:*)']
+    expect(p.reglas).toEqual(reglas)
+    const r = await f.post(`/api/permisos/${str(p.id)}`, { decision: 'siempre' })
+    expect(r.status).toBe(200)
+    expect((await chatA).status).toBe(200)
+    expect(str(respuestaMCP(f).behavior)).toBe('allow')
+    expect(agente(f)?.reglas).toEqual(reglas)
+  })
+
+  test('chat: lo que no se puede guardar solo se permite una vez («Siempre» da 400); si nadie responde, vence y se rechaza', async () => {
     const f = await fix({ HQ_PERMISO_TIMEOUT: '1' })
-    const chatA = chat(f.b, { agent: 'marce', message: 'PERMISO:git pull && make', session: U.a })
+    const chatA = chat(f.b, { agent: 'marce', message: 'PERMISO:echo $(whoami)', session: U.a })
     expect(await esperar(async () => (await pendientes(f)).length === 1, 10)).toBe(true)
     const p = (await pendientes(f))[0]!
     expect(p.reglas).toEqual([])

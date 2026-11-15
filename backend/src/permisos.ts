@@ -3,7 +3,7 @@
 // (HerramientasMCPAgente) y el perfil de coordinador.
 import fs from 'node:fs'
 import path from 'node:path'
-import { ClaudeRunner } from './claude-runner.js'
+import { ClaudeRunner, type TurnoConPermiso } from './claude-runner.js'
 import { Config } from './config.js'
 import { jsonCompacto } from './json-swift.js'
 import type { AgenteDef, AlcanceVinculo, Oficina } from './oficina.js'
@@ -279,4 +279,17 @@ export function entorno(ctx: ContextoOficina): Record<string, string> {
   if (ctx.permitidas.some((p) => p.startsWith('mcp__claude_ai_'))) e.MCP_CONNECTION_NONBLOCKING = 'false'
   if (puedePreguntar(ctx)) e.MCP_TOOL_TIMEOUT = esperaHerramientaMCP
   return e
+}
+
+/** Permiso en vivo para un turno de reunión (`turnoSoloLectura`): las herramientas de las reglas guardadas del agente +
+ *  las que puede pedir (Bash, Edit, Write), sus reglas en `--allowedTools`, y el servidor MCP con el token interactivo. */
+export function turnoConPermiso(p: { mcpUrl: string; token: string; reglas?: string[] }): TurnoConPermiso {
+  const herramientas: string[] = []
+  const sumar = (n: string) => { if (n !== '' && !herramientas.includes(n)) herramientas.push(n) }
+  for (const r of p.reglas ?? []) { const i = r.indexOf('('); if (i > 0) sumar(r.slice(0, i)) }
+  for (const n of herramientasPreguntables) sumar(n)
+  return {
+    herramientas, permitidas: [...(p.reglas ?? [])], herramientaPermiso, mcpConfig: configMCP(p.mcpUrl),
+    env: { [variableTokenMCP]: p.token, MCP_TOOL_TIMEOUT: esperaHerramientaMCP },
+  }
 }

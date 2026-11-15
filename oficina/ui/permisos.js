@@ -1,5 +1,5 @@
-/* Pedidos de permiso en vivo: cuando un agente, en un chat, quiere hacer algo que no tiene permitido (correr un comando,
-   escribir un archivo fuera de sus notas), Claude Code le pregunta a la oficina y el pedido llega con /api/actividad
+/* Pedidos de permiso en vivo: cuando un agente quiere hacer algo que no tiene permitido (correr un comando,
+   escribir un archivo fuera de sus notas) en un chat o en una reunión, Claude Code le pregunta a la oficina y el pedido llega con /api/actividad
    (`permisos`). Cada uno es una tarjeta arriba a la derecha de la maqueta: «Una vez», «Siempre» (guarda el permiso en el
    agente; se puede quitar en su pestaña Permisos) o «No». Si nadie responde a tiempo, el pedido vence y se rechaza. */
 window.App = window.App || {};
@@ -29,8 +29,8 @@ App.Permisos = (function () {
     var a = App.agente(p.agente) || { nombre: p.agente };
     var ocupado = !!enviando[p.id];
     var reglas = p.reglas || [];
-    function boton(sel, texto, decision, titulo) {
-      return h('button.btn.chico' + sel, { disabled: ocupado, title: titulo || '', onclick: function () { responder(p, decision); } }, texto);
+    function boton(sel, texto, decision, titulo, apagado) {
+      return h('button.btn.chico' + sel, { disabled: ocupado || !!apagado, title: titulo || '', onclick: function () { responder(p, decision); } }, texto);
     }
     return h('div.permiso',
       h('div.permiso-cab', App.agente(p.agente) ? App.retratoImg(a, 'retrato-mini', 48) : null,
@@ -39,9 +39,10 @@ App.Permisos = (function () {
       h('code.permiso-det', p.detalle),
       h('div.permiso-acciones',
         boton('.primario', 'Permitir una vez', 'una_vez'),
-        reglas.length ? boton('', 'Siempre', 'siempre', 'Guarda el permiso: ' + reglas.join(' · ')) : null,
+        reglas.length ? boton('', 'Permitir siempre', 'siempre', 'Guarda el permiso: ' + reglas.join(' · '))
+          : boton('', 'Permitir siempre', 'siempre', 'Esto no se puede guardar como permiso fijo: solo se puede permitir una vez.', true),
         boton('.fantasma', 'No', 'rechazar')),
-      reglas.length ? h('div.permiso-regla', 'Siempre guarda: ' + reglas.join(' · ')) : null);
+      h('div.permiso-regla', reglas.length ? 'Siempre guarda: ' + reglas.join(' · ') : 'Esto solo se puede permitir una vez.'));
   }
 
   function responder(p, decision) {

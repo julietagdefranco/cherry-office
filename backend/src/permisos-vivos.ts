@@ -6,7 +6,7 @@ import { sanear } from './consultas.js'
 import { jsonCompacto } from './json-swift.js'
 import type { IdentidadMCP } from './mcp-protocolo.js'
 import type { Obj } from './json.js'
-import { prefijo } from './validar.js'
+import { largo, prefijo } from './validar.js'
 
 /** Un pedido de permiso de un agente que espera la respuesta de la persona (claude `--permission-prompt-tool`). */
 export type PedidoPermiso = {
@@ -43,6 +43,8 @@ const conSubcomando = new Set(['git', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'swif
 export class PermisosVivos {
   static readonly maxDetalle = 2000
   static readonly maxPendientes = 20
+  /** Más partes que esto en un comando compuesto: se guarda el comando exacto. */
+  static readonly maxReglasPorPedido = 6
 
   /** Segundos que se espera a la persona (240 por defecto; `HQ_PERMISO_TIMEOUT` en el entorno lo cambia). */
   readonly timeout: number
@@ -129,28 +131,39 @@ export class PermisosVivos {
     return prefijo(sanear(t), PermisosVivos.maxDetalle)
   }
 
-  /** Reglas que guarda «Siempre». Bash: `Bash(<programa> [subcomando]:*)`, salvo comandos compuestos (`&&`, `|`, `;`,
-   *  redirecciones, sustituciones), que solo se permiten una vez. Edit/Write: la carpeta del archivo
-   *  (`Edit(//<carpeta>/**)` y `Write(//<carpeta>/**)`), solo con rutas absolutas de tipo Unix. El resto: ninguna. */
+  /** Reglas que guarda «Siempre». Bash: `Bash(<programa> [subcomando]:*)` por cada parte de un comando compuesto
+   *  (`&&`, `||`, `;`, `|`, `&`); si no se puede partir (sustituciones, subshells, comillas sin cerrar, variables al
+   *  principio), el comando exacto `Bash(<comando>)`. Edit/Write: la carpeta del archivo (`Edit(//<carpeta>/**)` y
+   *  `Write(//<carpeta>/**)`), o el archivo si está en la raíz; solo rutas absolutas de tipo Unix. El resto: ninguna. */
   static reglasSugeridas(herramienta: string, input: Obj): string[] {
     switch (herramienta) {
       case 'Bash': {
         if (typeof input.command !== 'string') return []
         const cmd = input.command.trim()
-        const raros = ['&&', '||', ';', '|', '`', '$(', '>', '<', '\n', '&', '*', '?', '(', ')', '\\', '"', "'"]
-        if (cmd === '' || raros.some((r) => cmd.includes(r))) return []
-        const palabras = cmd.split(' ').filter((x) => x !== '')
-        const prog = palabras[0]
-        if (prog === undefined || prog.includes('=')) return []
-        let pref = prog
-        if (conSubcomando.has(prog) && palabras.length > 1 && !palabras[1]!.startsWith('-')) pref += ' ' + palabras[1]
-        return [`Bash(${pref}:*)`]
+        if (cmd === '') return []
+        const partes = partirComando(cmd)
+        if (partes !== undefined) {
+          const out: string[] = []
+          for (const palabras of partes) {
+            const r = reglaParte(palabras)
+            if (r === undefined) { out.length = 0; break }
+            if (!out.includes(r)) out.push(r)
+          }
+          if (out.length > 0 && out.length <= PermisosVivos.maxReglasPorPedido) return out
+        }
+        // exacto: sin saltos de línea ni paréntesis (rompen la sintaxis de la regla)
+        if (/[\n\r()]/.test(cmd) || largo(cmd) > 280) return []
+        return [`Bash(${cmd})`]
       }
       case 'Edit': case 'Write': case 'MultiEdit': case 'NotebookEdit': {
         const p = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : undefined
-        if (p === undefined || !p.startsWith('/') || p.includes('..') || p.includes('\0') || p.includes('\n')) return []
+        if (p === undefined || !p.startsWith('/') || p.includes('..') || p.includes('\0') || p.includes('\n') || p.includes('\r') || /[()]/.test(p)) return []
         const dir = carpetaDe(p)
-        if (dir === '/' || dir === '') return []
+        if (dir === '') return []
+        if (dir === '/') {
+          const f = p.replace(/\/+$/, '')
+          return f === '' ? [] : [`Edit(/${f})`, `Write(/${f})`]
+        }
         const d = dir.endsWith('/') ? dir.slice(0, -1) : dir
         return [`Edit(/${d}/**)`, `Write(/${d}/**)`]
       }
@@ -175,4 +188,57 @@ function carpetaDe(p: string): string {
   if (s === '') return '/'
   const i = s.lastIndexOf('/')
   return i <= 0 ? '/' : s.slice(0, i)
+}
+
+/** Parte un comando de shell en sus comandos simples (por `&&`, `||`, `;`, `|`, `&` y saltos de línea fuera de comillas),
+ *  cada uno como lista de palabras sin comillas. undefined si tiene algo que no se puede leer con seguridad: sustituciones
+ *  (`` ` ``, `$(`, `<(`, `>(`), subshells o grupos (`(`, `)`, `{`, `}` sueltos) o comillas sin cerrar. Las redirecciones
+ *  quedan como palabras (no importan: la regla usa solo el programa y el subcomando). */
+export function partirComando(cmd: string): string[][] | undefined {
+  const partes: string[][] = []
+  let palabras: string[] = []
+  let w = ''
+  let hay = false // hay palabra en curso (aunque sea '')
+  let comillas: '' | "'" | '"' = ''
+  const cortarPalabra = () => { if (hay) palabras.push(w); w = ''; hay = false }
+  const cortarParte = () => { cortarPalabra(); if (palabras.length > 0) partes.push(palabras); palabras = [] }
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i]!
+    const sig = cmd[i + 1]
+    if (comillas === "'") { if (c === "'") comillas = ''; else w += c; continue }
+    if (comillas === '"') {
+      if (c === '"') { comillas = ''; continue }
+      if (c === '`' || (c === '$' && sig === '(')) return undefined
+      if (c === '\\' && sig !== undefined) { w += sig; i++; continue }
+      w += c; continue
+    }
+    if (c === "'" || c === '"') { comillas = c; hay = true; continue }
+    if (c === '\\') { if (sig === undefined || sig === '\n') return undefined; w += sig; hay = true; i++; continue }
+    if (c === '`' || (c === '$' && sig === '(') || ((c === '<' || c === '>') && sig === '(')) return undefined
+    if (c === '(' || c === ')') return undefined
+    if (c === ' ' || c === '\t') { cortarPalabra(); continue }
+    if (c === '\n' || c === ';') { cortarParte(); continue }
+    if (c === '|') { cortarParte(); if (sig === '|') i++; continue }
+    if (c === '&') {
+      if (sig === '&') { cortarParte(); i++; continue }
+      // `2>&1`, `&>`: redirección, no separador
+      if (w.endsWith('>') || sig === '>') { w += c; hay = true; continue }
+      cortarParte(); continue
+    }
+    w += c; hay = true
+  }
+  if (comillas !== '') return undefined
+  cortarParte()
+  return partes
+}
+
+/** Regla `Bash(<programa> [subcomando]:*)` de un comando simple, o undefined si el programa no es un nombre limpio
+ *  (variables al principio, comodines, `{`/`}`, redirecciones pegadas). */
+function reglaParte(palabras: string[]): string | undefined {
+  const prog = palabras[0]
+  if (prog === undefined || !/^[A-Za-z0-9_./+@-]+$/.test(prog) || prog.startsWith('-')) return undefined
+  let pref = prog
+  const sub = palabras[1]
+  if (conSubcomando.has(prog) && sub !== undefined && /^[A-Za-z0-9_.:@-]+$/.test(sub) && !sub.startsWith('-')) pref += ' ' + sub
+  return `Bash(${pref}:*)`
 }

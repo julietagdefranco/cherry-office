@@ -97,7 +97,8 @@ async function main() {
   if (m.includes('ISERR')) { salida('{"type":"result","result":"fallo raro","is_error":true}'); fin(); return 0 }
   if (m.includes('VACIO')) { salida('{"type":"result","result":"","is_error":false}'); fin(); return 0 }
 
-  if (kind !== '') {
+  // PERMISO: también en los turnos de reunión (va en el tema): se atiende abajo, como en el chat
+  if (kind !== '' && !(kind === 'turno' && m.includes('PERMISO:'))) {
     const propia = p(`resp.${kind}.${agent}.json`)
     if (agent !== '' && fs.existsSync(propia)) { process.stdout.write(fs.readFileSync(propia)); fin(); return 0 }
     if (fs.existsSync(p(`resp.${kind}.json`))) { process.stdout.write(fs.readFileSync(p(`resp.${kind}.json`))); fin(); return 0 }
