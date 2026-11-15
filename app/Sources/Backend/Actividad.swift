@@ -72,6 +72,9 @@ public final class ActividadRegistro: @unchecked Sendable {
         version += 1
     }
 
+    /// Sube la versión sin cambiar nada (p. ej. llegó o se fue un pedido de permiso): el front vuelve a leer todo.
+    public func tocar() { lock.lock(); version += 1; lock.unlock() }
+
     /// Reemplaza el texto de la tarea (cuando llega el resumen de Haiku).
     public func tarea(oficina: String, agente: String, token: String, texto: String) {
         let k = Self.clave(oficina, agente)

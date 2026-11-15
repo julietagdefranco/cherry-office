@@ -67,7 +67,7 @@ describe('tokens y herramientas compuestas', () => {
     const a = t.emitir({ oficina: '/o', agente: 'marce', sid: 's' })
     expect(/^[0-9a-f]{64}$/.test(a)).toBe(true)
     expect(t.emitir({ oficina: '/o', agente: 'marce', sid: 's' })).not.toBe(a)
-    expect(t.identidad(a)).toEqual({ oficina: '/o', agente: 'marce', sid: 's', perfil: 'agente' })
+    expect(t.identidad(a)).toEqual({ oficina: '/o', agente: 'marce', sid: 's', perfil: 'agente', interactivo: false })
     expect(t.activos).toBe(2)
     expect([t.tomarConsulta(a), t.tomarConsulta(a), t.tomarConsulta(a), t.tomarConsulta(a)]).toEqual([true, true, true, false])
     t.revocar(a)

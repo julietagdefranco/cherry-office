@@ -83,8 +83,22 @@ final class ConsultasMCP: @unchecked Sendable {
         set { lockServicios.lock(); serviciosValor = newValue; lockServicios.unlock() }
     }
 
-    init(store: Store, runner: ClaudeRunner, log: HQLog, tokens: MCPTokens, timeout: TimeInterval = 120) {
+    let permisos: PermisosVivos
+
+    init(store: Store, runner: ClaudeRunner, log: HQLog, tokens: MCPTokens, timeout: TimeInterval = 120,
+         permisos: PermisosVivos = PermisosVivos()) {
         self.store = store; self.runner = runner; self.log = log; self.tokens = tokens; self.timeout = timeout
+        self.permisos = permisos
+    }
+
+    /// `pedir_permiso` (lo llama claude por `--permission-prompt-tool`, no el agente): espera a la persona.
+    func pedirPermiso(token: String, _ ident: IdentidadMCP, _ args: [String: Any]) async -> MCPResultado {
+        let h = (args["tool_name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let input = args["input"] as? [String: Any] ?? [:]
+        guard !h.isEmpty else { return .ok(PermisosVivos.respuesta(.rechazar, input: input)) }
+        let d = await permisos.pedir(token: token, identidad: ident, herramienta: h, input: input)
+        log.info("permiso agente=\(ident.agente) herramienta=\(h) decision=\(d?.rawValue ?? "sin respuesta")")
+        return .ok(PermisosVivos.respuesta(d, input: input))
     }
 
     /// Compone las herramientas según el perfil del token: creador -> las del Creador; el resto -> hq + coordinador + acciones.
@@ -205,12 +219,22 @@ struct HerramientasHQ: MCPHerramientas {
                           "properties": ["colega": ["type": "string", "description": "id o nombre del colega (ver colegas)"],
                                          "pregunta": ["type": "string", "description": "la pregunta, con el contexto necesario"]],
                           "required": ["colega", "pregunta"]]]]
+        + (identidad.interactivo ? [Self.definicionPermiso] : [])
     }
+
+    static let nombrePermiso = "pedir_permiso"
+    static let definicionPermiso: [String: Any] = [
+        "name": nombrePermiso,
+        "description": "Uso interno de la oficina para pedirle permiso a la persona. No la llames vos: la usa Claude Code solo.",
+        "inputSchema": ["type": "object",
+                        "properties": ["tool_name": ["type": "string"], "input": ["type": "object"], "tool_use_id": ["type": "string"]],
+                        "required": ["tool_name", "input"]]]
 
     func llamar(_ nombre: String, argumentos: [String: Any]) async -> MCPResultado? {
         switch nombre {
         case "colegas": return consultas.colegas(identidad)
         case "consultar": return await consultas.consultar(token: token, identidad, argumentos)
+        case Self.nombrePermiso where identidad.interactivo: return await consultas.pedirPermiso(token: token, identidad, argumentos)
         default: return nil
         }
     }

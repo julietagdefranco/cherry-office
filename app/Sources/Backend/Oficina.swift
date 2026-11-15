@@ -65,11 +65,14 @@ public struct AgenteDef: Codable, Sendable, Equatable {
     public var conectores: [ConectorAsignado]?
     /// Hoy el único valor válido es `"coordinador"`.
     public var permisos: [String]?
+    /// Reglas de `--allowedTools` que la persona le dio con «Siempre» al responder un pedido de permiso
+    /// (`Bash(git pull:*)`, `Edit(//ruta/**)`, `Write(//ruta/**)`). Ver PermisosVivos.swift.
+    public var reglas: [String]?
     public init(id: String, nombre: String, rol: String, departamento: String, brief: String? = nil,
                 modelo: String? = nil, chips: [String]? = nil, avatar: Avatar? = nil, creado: String? = nil,
                 escritura: [String]? = nil, limites: LimitesAgente? = nil, conectores: [ConectorAsignado]? = nil,
-                permisos: [String]? = nil) {
-        self.limites = limites; self.conectores = conectores; self.permisos = permisos
+                permisos: [String]? = nil, reglas: [String]? = nil) {
+        self.limites = limites; self.conectores = conectores; self.permisos = permisos; self.reglas = reglas
         self.id = id; self.nombre = nombre; self.rol = rol; self.departamento = departamento; self.brief = brief
         self.modelo = modelo; self.chips = chips; self.avatar = avatar; self.creado = creado; self.escritura = escritura
     }
@@ -303,6 +306,7 @@ public enum Validar {
             if let l = a.limites { try ValidarAgenteExtra.limites(l) }
             if let c = a.conectores { try ValidarAgenteExtra.conectores(c) }
             if let p = a.permisos { try ValidarAgenteExtra.permisos(p) }
+            if let r = a.reglas { try ValidarAgenteExtra.reglas(r) }
         }
         var vins = Set<String>()
         for v in o.vinculos ?? [] {

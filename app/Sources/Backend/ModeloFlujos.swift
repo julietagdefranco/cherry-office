@@ -343,6 +343,32 @@ public enum ValidarAgenteExtra {
         }
     }
 
+    public static let maxReglas = 40
+    public static let maxLargoRegla = 300
+
+    /// Reglas guardadas con «Siempre»: `Bash(<algo>)`, `Edit(/<ruta absoluta>)` o `Write(/<ruta absoluta>)`, sin saltos de
+    /// línea ni caracteres de control. `Bash` solo (sin paréntesis) no vale: sería permitir cualquier comando.
+    public static func reglas(_ rs: [String]) throws {
+        guard rs.count <= maxReglas else { throw ErrorAPI(400, "Máximo \(maxReglas) permisos guardados por agente.") }
+        var vistas = Set<String>()
+        for r in rs {
+            guard reglaValida(r) else { throw ErrorAPI(400, "Permiso guardado inválido: «\(r.prefix(80))».") }
+            guard vistas.insert(r).inserted else { throw ErrorAPI(400, "Permiso guardado repetido: «\(r.prefix(80))».") }
+        }
+    }
+
+    static func reglaValida(_ r: String) -> Bool {
+        guard r.count <= maxLargoRegla, r.hasSuffix(")"),
+              !r.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else { return false }
+        for (pref, abs) in [("Bash(", false), ("Edit(", true), ("Write(", true)] where r.hasPrefix(pref) {
+            let dentro = r.dropFirst(pref.count).dropLast()
+            if dentro.trimmingCharacters(in: .whitespaces).isEmpty { return false }
+            if abs && (!dentro.hasPrefix("/") || dentro.contains("..")) { return false }
+            return true
+        }
+        return false
+    }
+
     public static func mision(_ m: String?) throws {
         if (m?.count ?? 0) > maxMision { throw ErrorAPI(400, "La misión es demasiado larga (máximo \(maxMision) caracteres).") }
     }

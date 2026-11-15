@@ -55,6 +55,7 @@ public enum Permisos {
         ctx.vedadas = vedadas
         ctx.herramientasMCP = HerramientasMCPAgente.lista(a.oficina, agente)
         ctx.perfilMCP = Coordinador.perfil(a.oficina, agente)
+        ctx.reglas = agente.reglas ?? []
         return ctx
     }
 
@@ -93,13 +94,26 @@ public enum Permisos {
         return String(decoding: d, as: UTF8.self)
     }
 
-    /// Herramientas de un agente de oficina: base + Edit,Write (si tiene alguna ruta) + las MCP si hay servidor.
+    /// Herramientas de un agente de oficina: base + Edit,Write (si tiene alguna ruta) + las de sus reglas guardadas
+    /// (Bash...) + Bash,Edit,Write si puede pedir permiso + las MCP si hay servidor.
     public static func herramientas(_ cfg: Config, oficina: ContextoOficina, agente: String) -> String {
         var h = baseOficina(cfg, oficina: oficina, agente: agente)
-        if !oficina.escritura.isEmpty { h += ",Edit,Write" }
+        var lista = h.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        func sumar(_ n: String) { if !lista.contains(n) { lista.append(n); h += "," + n } }
+        if !oficina.escritura.isEmpty { h += ",Edit,Write"; lista += ["Edit", "Write"] }
+        for r in oficina.reglas { if let i = r.firstIndex(of: "(") { sumar(String(r[..<i])) } }
+        if puedePreguntar(oficina) { for n in herramientasPreguntables { sumar(n) } }
         if oficina.mcpUrl != nil { h += "," + (oficina.herramientasMCP ?? herramientasMCP).joined(separator: ",") }
         return h
     }
+
+    /// Lo que un agente puede pedir en un chat (además de lo que ya tiene): comandos y escribir archivos.
+    public static let herramientasPreguntables = ["Bash", "Edit", "Write"]
+    /// Herramienta de `hq` que contesta los pedidos de permiso (`--permission-prompt-tool`).
+    public static let herramientaPermiso = "mcp__hq__pedir_permiso"
+
+    /// Pide permiso en vivo solo un chat con la persona presente y con el servidor MCP andando.
+    static func puedePreguntar(_ o: ContextoOficina) -> Bool { o.preguntar && o.mcpUrl != nil }
 
     /// Herramientas base: `herramientasBase` del contexto, o las del agente, o las generales.
     static func baseOficina(_ cfg: Config, oficina: ContextoOficina, agente: String) -> String {
@@ -112,7 +126,9 @@ public enum Permisos {
                                   sid: String, flag: String) -> [String] {
         var a = ["-p", "--agent", agente, flag, sid] + ClaudeRunner.formatoSalida
         a += ["--tools", herramientas(cfg, oficina: oficina, agente: agente)]
-        a += ["--permission-mode", "dontAsk"]
+        // con la persona presente: modo normal + la herramienta que le pregunta; si no, se rechaza solo lo no permitido
+        if puedePreguntar(oficina) { a += ["--permission-mode", "default", "--permission-prompt-tool", herramientaPermiso] }
+        else { a += ["--permission-mode", "dontAsk"] }
         if let url = oficina.mcpUrl { a += ["--mcp-config", configMCP(url: url)] }
         for d in oficina.dirsExtra { a += ["--add-dir", d] }
         a.append("--allowedTools")
@@ -120,16 +136,26 @@ public enum Permisos {
             a.append(h)
         }
         for p in oficina.escritura { for h in ["Edit", "Write"] { a.append(regla(h, ruta: p)) } }
+        a += oficina.reglas
         if oficina.mcpUrl != nil { a += oficina.herramientasMCP ?? herramientasMCP }
+        if puedePreguntar(oficina) { a.append(herramientaPermiso) }
         a += oficina.permitidas
         if !oficina.vedadas.isEmpty { a += ["--disallowedTools"] + oficina.vedadas }
         if let i = oficina.instrucciones, !i.isEmpty { a += ["--append-system-prompt", i] }
         return a + ["--", mensaje]
     }
 
-    /// Variables de entorno extra del hijo: con conectores de claude.ai asignados hay que esperar a que se conecten.
+    /// Milisegundos que claude espera una herramienta MCP cuando pide permiso en vivo: por defecto corta a los 60 s
+    /// («The operation timed out»), y la persona puede tardar más (docs/aprendizajes.md). 15 min, más que cualquier turno.
+    public static let esperaHerramientaMCP = "900000"
+
+    /// Variables de entorno extra del hijo: con conectores de claude.ai asignados hay que esperar a que se conecten; si
+    /// pide permiso en vivo, claude tiene que esperar a la persona más de 60 s.
     public static func entorno(_ ctx: ContextoOficina) -> [String: String] {
-        ctx.permitidas.contains { $0.hasPrefix("mcp__claude_ai_") } ? ["MCP_CONNECTION_NONBLOCKING": "false"] : [:]
+        var e: [String: String] = [:]
+        if ctx.permitidas.contains(where: { $0.hasPrefix("mcp__claude_ai_") }) { e["MCP_CONNECTION_NONBLOCKING"] = "false" }
+        if puedePreguntar(ctx) { e["MCP_TOOL_TIMEOUT"] = esperaHerramientaMCP }
+        return e
     }
 }
 
@@ -152,6 +178,10 @@ public struct ContextoOficina: Sendable, Equatable {
     public var vedadas: [String] = []
     /// Perfil del token del servidor MCP: agente | coordinador | creador.
     public var perfilMCP: String = "agente"
+    /// Reglas guardadas del agente (`AgenteDef.reglas`): van a `--allowedTools` en todas sus corridas.
+    public var reglas: [String] = []
+    /// Chat con la persona presente: lo no permitido se le pregunta (`--permission-prompt-tool`) en vez de rechazarse.
+    public var preguntar: Bool = false
     public init(carpeta: String, escritura: [String], dirsExtra: [String] = [], mcpUrl: String? = nil) {
         self.carpeta = carpeta; self.escritura = escritura; self.dirsExtra = dirsExtra; self.mcpUrl = mcpUrl
     }

@@ -589,15 +589,17 @@ describe('Agentes', () => {
     const l = f.sb.llamadas.at(-1)!
     expect(Sandbox.valor(l, '--agent')).toBe('marce')
     expect(Sandbox.valor(l, '--session-id')).toBe(U.a)
-    // + las herramientas del servidor MCP propio (Fase 4)
-    expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Skill,Edit,Write,mcp__hq__consultar,mcp__hq__colegas')
+    // + Bash (lo puede pedir en vivo) + las herramientas del servidor MCP propio (Fase 4)
+    expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Skill,Edit,Write,Bash,mcp__hq__consultar,mcp__hq__colegas')
     expect(l.slice(-2)).toEqual(['--', 'hola'])
     expect(l).not.toContain('--add-dir')
     const notas = ruta(f.carpeta, 'conocimiento/agentes/marce.md')
     const entreg = ruta(f.carpeta, 'archivos/entregables/marce') + '/**'
     expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', regla('Edit', notas), regla('Write', notas), regla('Edit', entreg), regla('Write', entreg),
-      'mcp__hq__consultar', 'mcp__hq__colegas', '--disallowedTools', 'mcp__claude_ai_*'])
-    expect(Sandbox.valor(l, '--permission-mode')).toBe('dontAsk')
+      'mcp__hq__consultar', 'mcp__hq__colegas', 'mcp__hq__pedir_permiso', '--disallowedTools', 'mcp__claude_ai_*'])
+    // con la persona presente, lo no permitido se le pregunta (no se rechaza solo)
+    expect(Sandbox.valor(l, '--permission-mode')).toBe('default')
+    expect(Sandbox.valor(l, '--permission-prompt-tool')).toBe('mcp__hq__pedir_permiso')
     expect(sinPrivate(f.sb.cwds.at(-1)!)).toBe(sinPrivate(f.carpeta))
     // la carpeta del agente se crea al chatear
     expect(f.existe('archivos/entregables/marce')).toBe(true)
@@ -609,7 +611,7 @@ describe('Agentes', () => {
     await chat(f.b, { agent: 'marce', session: U.a })
     const l = f.sb.llamadas.at(-1)!
     const notas = ruta(f.carpeta, 'conocimiento/agentes/marce.md')
-    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', regla('Edit', notas), regla('Write', notas), 'mcp__hq__consultar', 'mcp__hq__colegas', '--disallowedTools', 'mcp__claude_ai_*'])
+    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', regla('Edit', notas), regla('Write', notas), 'mcp__hq__consultar', 'mcp__hq__colegas', 'mcp__hq__pedir_permiso', '--disallowedTools', 'mcp__claude_ai_*'])
     expect(f.existe('archivos/entregables')).toBe(false)
   })
 

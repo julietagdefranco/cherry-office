@@ -624,15 +624,17 @@ struct AgentesTests {
         let l = try #require(f.sb.llamadas.last)
         #expect(Sandbox.valor(l, "--agent") == "marce")
         #expect(Sandbox.valor(l, "--session-id") == U.a)
-        // + las herramientas del servidor MCP propio (Fase 4)
-        #expect(Sandbox.valor(l, "--tools") == "Read,Glob,Grep,Skill,Edit,Write,mcp__hq__consultar,mcp__hq__colegas")
+        // + Bash (lo puede pedir en vivo) + las herramientas del servidor MCP propio (Fase 4)
+        #expect(Sandbox.valor(l, "--tools") == "Read,Glob,Grep,Skill,Edit,Write,Bash,mcp__hq__consultar,mcp__hq__colegas")
         #expect(l.suffix(2) == ["--", "hola"])
         #expect(!l.contains("--add-dir"))
         let notas = f.carpeta + "/conocimiento/agentes/marce.md"
         let entreg = f.carpeta + "/archivos/entregables/marce/**"
         #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "Skill", "Edit(/\(notas))", "Write(/\(notas))", "Edit(/\(entreg))", "Write(/\(entreg))",
-                                      "mcp__hq__consultar", "mcp__hq__colegas", "--disallowedTools", "mcp__claude_ai_*"])
-        #expect(Sandbox.valor(l, "--permission-mode") == "dontAsk")
+                                      "mcp__hq__consultar", "mcp__hq__colegas", "mcp__hq__pedir_permiso", "--disallowedTools", "mcp__claude_ai_*"])
+        // con la persona presente, lo no permitido se le pregunta (no se rechaza solo)
+        #expect(Sandbox.valor(l, "--permission-mode") == "default")
+        #expect(Sandbox.valor(l, "--permission-prompt-tool") == "mcp__hq__pedir_permiso")
         #expect(sinPrivate(try #require(f.sb.cwds.last)) == sinPrivate(f.carpeta))
         // la carpeta del agente se crea al chatear
         #expect(f.existe("archivos/entregables/marce"))
@@ -645,7 +647,7 @@ struct AgentesTests {
         _ = await chat(f.b, agent: "marce", session: U.a)
         let l = try #require(f.sb.llamadas.last)
         let notas = f.carpeta + "/conocimiento/agentes/marce.md"
-        #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "Skill", "Edit(/\(notas))", "Write(/\(notas))", "mcp__hq__consultar", "mcp__hq__colegas", "--disallowedTools", "mcp__claude_ai_*"])
+        #expect(Sandbox.reglas(l) == ["Read", "Glob", "Grep", "Skill", "Edit(/\(notas))", "Write(/\(notas))", "mcp__hq__consultar", "mcp__hq__colegas", "mcp__hq__pedir_permiso", "--disallowedTools", "mcp__claude_ai_*"])
         #expect(!f.existe("archivos/entregables"))
     }
 

@@ -150,14 +150,18 @@ public final class Router: APIHandler {
                 guard method == "GET" else { return no }
                 guard let act = await oficinas.activa() else {
                     return (200, ["agentes": [String: Any](), "version": 0, "avisos": [Any](), "entregasSinRevisar": 0,
-                                  "corridas": [Any](), "creadorVersion": 0])
+                                  "corridas": [Any](), "creadorVersion": 0, "permisos": [Any]()])
                 }
                 var r = runner.actividad.json(oficina: act.carpeta)
                 r["avisos"] = await store.avisosPendientes(oficina: act.carpeta).map(\.json)
                 r["entregasSinRevisar"] = await store.entregasSinRevisar(oficina: act.carpeta)
                 r["corridas"] = await servicios?.motor.resumenActividad(oficina: act.carpeta) ?? [[String: Any]]()
                 r["creadorVersion"] = VersionCreador.compartida.valor(act.carpeta)
+                r["permisos"] = (mcp?.permisos.pendientes(oficina: act.carpeta) ?? []).map(\.json)
                 return (200, r)
+            case ("permisos", 3):
+                guard method == "POST" else { return no }
+                return try await responderPermiso(partes[2], body)
             case ("avisos", 2):
                 guard method == "GET" else { return no }
                 let act = try await oficinas.requerirActiva()
@@ -420,6 +424,31 @@ public final class Router: APIHandler {
         }])
     }
 
+    /// `POST /api/permisos/<id>` `{decision: una_vez|siempre|rechazar}`: responde un pedido de permiso de un chat.
+    /// «siempre» guarda las reglas del pedido en el agente (oficina.json) antes de dejarlo pasar.
+    private func responderPermiso(_ id: String, _ body: Data?) async throws -> Resp {
+        let act = try await oficinas.requerirActiva()
+        let d = try objeto(body)
+        guard let txt = d["decision"] as? String, let dec = DecisionPermiso(rawValue: txt) else {
+            return (400, ["error": "«decision» tiene que ser una_vez, siempre o rechazar."])
+        }
+        guard let vivos = mcp?.permisos, let p = vivos.pedido(oficina: act.carpeta, id: id.lowercased()) else {
+            return (404, ["error": "Ese pedido de permiso ya no está (venció o el chat terminó)."])
+        }
+        var reglas: [String]?
+        if dec == .siempre {
+            guard !p.reglas.isEmpty else { return (400, ["error": "Esto solo se puede permitir una vez."]) }
+            reglas = try await oficinas.agregarReglas(p.agente, p.reglas)
+        }
+        guard vivos.responder(oficina: act.carpeta, id: p.id, decision: dec) != nil else {
+            return (404, ["error": "Ese pedido de permiso ya no está (venció o el chat terminó)."])
+        }
+        log.info("permiso agente=\(p.agente) herramienta=\(p.herramienta) respuesta=\(dec.rawValue)")
+        var r: [String: Any] = ["ok": true]
+        if let reglas { r["reglas"] = reglas }
+        return (200, r)
+    }
+
     private func historial(_ q: [String: String]) async throws -> Resp {
         let invalido: Resp = (400, ["error": "pedido inválido"])
         let act = try await oficinas.requerirActiva()
@@ -469,14 +498,17 @@ public final class Router: APIHandler {
         // arrancó, el chat sale igual, sin la herramienta.
         let mcpUrl = await mcp?.url()
         ctx.mcpUrl = mcpUrl
+        // la persona está en el chat: lo que el agente no tiene permitido se le pregunta (tarjeta en la oficina)
+        ctx.preguntar = true
         let ctxFinal = ctx
         let mcp = self.mcp
         let resultado: (Int, [String: String]) = await runner.conCarril(oficina: carpeta, agente: agente) {
             var envExtra: [String: String] = [:]
             if mcpUrl != nil, let mcp {
-                envExtra[Permisos.variableTokenMCP] = mcp.tokens.emitir(oficina: carpeta, agente: agente, sid: sid, perfil: ctxFinal.perfilMCP)
+                envExtra[Permisos.variableTokenMCP] = mcp.tokens.emitir(oficina: carpeta, agente: agente, sid: sid,
+                                                                        perfil: ctxFinal.perfilMCP, interactivo: true)
             }
-            defer { if let t = envExtra[Permisos.variableTokenMCP] { mcp?.tokens.revocar(t) } }
+            defer { if let t = envExtra[Permisos.variableTokenMCP] { mcp?.tokens.revocar(t); mcp?.permisos.cancelar(token: t) } }
             do {
                 try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
                 try await store.agregar(sid: sid, rol: "u", texto: msg)

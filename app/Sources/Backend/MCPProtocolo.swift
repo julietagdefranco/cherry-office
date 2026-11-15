@@ -73,6 +73,8 @@ struct IdentidadMCP: Sendable, Equatable {
     var sid: String
     /// agente | coordinador | creador: decide qué herramientas ofrece el servidor.
     var perfil: String = "agente"
+    /// Chat con la persona presente: el token ofrece `pedir_permiso` (`--permission-prompt-tool`).
+    var interactivo: Bool = false
 }
 
 /// Tokens por corrida: token (32 bytes aleatorios, hex) -> identidad y consultas que le quedan.
@@ -84,11 +86,11 @@ final class MCPTokens: @unchecked Sendable {
     private var tokens: [String: Entrada] = [:]
 
     func emitir(oficina: String, agente: String, sid: String, perfil: String = "agente",
-                consultas: Int = MCPTokens.consultasPorMensaje) -> String {
+                consultas: Int = MCPTokens.consultasPorMensaje, interactivo: Bool = false) -> String {
         var g = SystemRandomNumberGenerator()
         let t = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255, using: &g)) }.joined()
         lock.lock(); defer { lock.unlock() }
-        tokens[t] = Entrada(identidad: IdentidadMCP(oficina: oficina, agente: agente, sid: sid, perfil: perfil), restantes: consultas)
+        tokens[t] = Entrada(identidad: IdentidadMCP(oficina: oficina, agente: agente, sid: sid, perfil: perfil, interactivo: interactivo), restantes: consultas)
         return t
     }
 

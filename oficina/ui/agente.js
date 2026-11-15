@@ -257,12 +257,32 @@
       }).catch(function () { if (vigente()) { catalogo = { servidores: [] }; pintarConectores(); } });
     }
 
+    /* permisos que le diste con «Siempre» al responder un pedido (permisos.js): acá solo se quitan */
+    var reglas = (a.reglas || []).slice(), reglasTocadas = false, zonaReglas = h('div');
+    function textoRegla(r) {
+      var m = /^(Bash|Edit|Write)\((.*)\)$/.exec(r) || [];
+      if (m[1] === 'Bash') return 'Correr ' + m[2].replace(/:\*$/, '') + '…';
+      if (m[1] === 'Edit' || m[1] === 'Write') return (m[1] === 'Edit' ? 'Editar' : 'Crear') + ' archivos en ' + m[2].replace(/^\/\//, '/').replace(/\/\*\*$/, '');
+      return r;
+    }
+    function pintarReglas() {
+      App.vaciar(zonaReglas);
+      if (!reglas.length) { zonaReglas.appendChild(h('div.ayuda', 'Nada todavía. Cuando en un chat te pida permiso y elijas «Siempre», aparece acá.')); return; }
+      reglas.forEach(function (r, i) {
+        zonaReglas.appendChild(h('div.fila-ed', h('div', { style: { flex: 1, minWidth: 0 } }, h('div', textoRegla(r)), h('code.ayuda', { style: { wordBreak: 'break-all' } }, r)),
+          h('button.btn.fantasma.icono', { title: 'Quitar', onclick: function () { reglas.splice(i, 1); reglasTocadas = true; pintarReglas(); } }, App.icono('papelera'))));
+      });
+    }
+    pintarReglas();
+
     var checkCoord = h('input', { type: 'checkbox', checked: coord });
     var rutaEnt = h('div', 'archivos/entregables/' + id + '/');
     App.add(cont,
       h('div.det-sec', h('h4', 'Dónde puede escribir'),
         h('div.perm-rutas', h('div', 'conocimiento/agentes/' + id + '.md'), rutaEnt),
         h('div.ayuda', 'Solo ahí. El resto de la oficina lo puede leer pero no tocar.')),
+      h('div.det-sec', h('h4', 'Lo que le permitiste'), zonaReglas,
+        h('div.ayuda', 'En un chat, si quiere correr un comando o escribir fuera de sus notas, te pide permiso.')),
       h('div.det-sec', h('h4', 'Hace solo'), listaEditable(solo, 'Algo que puede hacer sin preguntarte'),
         h('div.ayuda', 'Lo que sale de la oficina siempre queda como propuesta: mandar un mail, crear un evento, publicar, gastar.')),
       h('div.det-sec', h('h4', 'Deja como propuesta'), listaEditable(proponer, 'Algo que te tiene que consultar antes'),
@@ -285,6 +305,7 @@
         /* conserva los demás permisos del agente: el check solo pone o saca «coordinador» */
         permisos: (a.permisos || []).filter(function (x) { return x !== 'coordinador'; }).concat(checkCoord.checked ? ['coordinador'] : [])
       };
+      if (reglasTocadas) cuerpoPatch.reglas = reglas;
       if (Object.keys(tocado).length && catalogo) cuerpoPatch.conectores = App.Ajustes.nuevosConectores(a, catalogo.servidores, tocado);
       guardar.disabled = true; err.textContent = '';
       api.patch('/api/agentes/' + encodeURIComponent(id), cuerpoPatch).then(function (r) {

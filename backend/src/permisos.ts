@@ -29,6 +29,10 @@ export type ContextoOficina = {
   vedadas: string[]
   /** Perfil del token del servidor MCP: agente | coordinador | creador. */
   perfilMCP: string
+  /** Reglas guardadas del agente (`AgenteDef.reglas`): van a `--allowedTools` en todas sus corridas. */
+  reglas?: string[]
+  /** Chat con la persona presente: lo no permitido se le pregunta (`--permission-prompt-tool`) en vez de rechazarse. */
+  preguntar?: boolean
 }
 
 /** Un servidor MCP de la cuenta (catálogo de conectores de claude.ai). */
@@ -38,6 +42,10 @@ export type ServidorConector = { nombre: string; prefijo: string; estado: string
 export const herramientasMCP = ['mcp__hq__consultar', 'mcp__hq__colegas']
 /** Variable de entorno con el token del servidor MCP (así no aparece en los argumentos del proceso). */
 export const variableTokenMCP = 'HQ_MCP_TOKEN'
+/** Lo que un agente puede pedir en un chat (además de lo que ya tiene): comandos y escribir archivos. */
+export const herramientasPreguntables = ['Bash', 'Edit', 'Write']
+/** Herramienta de `hq` que contesta los pedidos de permiso (`--permission-prompt-tool`). */
+export const herramientaPermiso = 'mcp__hq__pedir_permiso'
 
 export const esCoordinador = (a: AgenteDef) => a.permisos?.includes('coordinador') ?? false
 
@@ -178,6 +186,7 @@ export function contexto(a: OficinaActiva, agente: AgenteDef, { dirsExtra = [], 
     carpeta: a.carpeta, escritura: rutas, dirsExtra: [...dirsExtra, ...dirsVinculos(a.oficina, agente)],
     instrucciones: Instrucciones.para(a.oficina, agente), permitidas, vedadas,
     herramientasMCP: HerramientasMCPAgente.lista(a.oficina, agente), perfilMCP: Coordinador.perfil(a.oficina, agente),
+    reglas: agente.reglas ?? [], preguntar: false,
   }
 }
 
@@ -222,10 +231,18 @@ function baseOficina(cfg: Config, ctx: ContextoOficina, agente: string): string 
   return cfg.herramientasAgente[agente] || cfg.herramientas
 }
 
-/** `--tools` de un agente de oficina: base + Edit,Write (si tiene alguna ruta) + las MCP si hay servidor. */
+/** Pide permiso en vivo solo un chat con la persona presente y con el servidor MCP andando. */
+export const puedePreguntar = (ctx: ContextoOficina) => (ctx.preguntar ?? false) && ctx.mcpUrl !== undefined
+
+/** `--tools` de un agente de oficina: base + Edit,Write (si tiene alguna ruta) + las de sus reglas guardadas (Bash...)
+ *  + Bash,Edit,Write si puede pedir permiso + las MCP si hay servidor. */
 export function herramientasOficina(cfg: Config, ctx: ContextoOficina, agente: string): string {
   let h = baseOficina(cfg, ctx, agente)
-  if (ctx.escritura.length > 0) h += ',Edit,Write'
+  const lista = h.split(',').map((x) => x.trim())
+  const sumar = (n: string) => { if (!lista.includes(n)) { lista.push(n); h += ',' + n } }
+  if (ctx.escritura.length > 0) { h += ',Edit,Write'; lista.push('Edit', 'Write') }
+  for (const r of ctx.reglas ?? []) { const i = r.indexOf('('); if (i >= 0) sumar(r.slice(0, i)) }
+  if (puedePreguntar(ctx)) for (const n of herramientasPreguntables) sumar(n)
   if (ctx.mcpUrl !== undefined) h += ',' + (ctx.herramientasMCP ?? herramientasMCP).join(',')
   return h
 }
@@ -234,20 +251,32 @@ export function herramientasOficina(cfg: Config, ctx: ContextoOficina, agente: s
 export function argumentos(cfg: Config, ctx: ContextoOficina, p: { agente: string; mensaje: string; sid: string; flag: string }): string[] {
   const a = ['-p', '--agent', p.agente, p.flag, p.sid, ...ClaudeRunner.formatoSalida]
   a.push('--tools', herramientasOficina(cfg, ctx, p.agente))
-  a.push('--permission-mode', 'dontAsk')
+  // con la persona presente: modo normal + la herramienta que le pregunta; si no, se rechaza solo lo no permitido
+  if (puedePreguntar(ctx)) a.push('--permission-mode', 'default', '--permission-prompt-tool', herramientaPermiso)
+  else a.push('--permission-mode', 'dontAsk')
   if (ctx.mcpUrl !== undefined) a.push('--mcp-config', configMCP(ctx.mcpUrl))
   for (const d of ctx.dirsExtra) a.push('--add-dir', d)
   a.push('--allowedTools')
   for (const h of baseOficina(cfg, ctx, p.agente).split(',').map((x) => x.trim())) if (h !== '') a.push(h)
   for (const r of ctx.escritura) for (const h of ['Edit', 'Write']) a.push(regla(h, r))
+  a.push(...(ctx.reglas ?? []))
   if (ctx.mcpUrl !== undefined) a.push(...(ctx.herramientasMCP ?? herramientasMCP))
+  if (puedePreguntar(ctx)) a.push(herramientaPermiso)
   a.push(...ctx.permitidas)
   if (ctx.vedadas.length > 0) a.push('--disallowedTools', ...ctx.vedadas)
   if (ctx.instrucciones) a.push('--append-system-prompt', ctx.instrucciones)
   return [...a, '--', p.mensaje]
 }
 
-/** Variables extra del hijo: con conectores de claude.ai asignados hay que esperar a que se conecten. */
+/** Milisegundos que claude espera una herramienta MCP cuando pide permiso en vivo: por defecto corta a los 60 s
+ * («The operation timed out»), y la persona puede tardar más (docs/aprendizajes.md). 15 min, más que cualquier turno. */
+export const esperaHerramientaMCP = '900000'
+
+/** Variables extra del hijo: con conectores de claude.ai asignados hay que esperar a que se conecten; si pide permiso
+ * en vivo, claude tiene que esperar a la persona más de 60 s. */
 export function entorno(ctx: ContextoOficina): Record<string, string> {
-  return ctx.permitidas.some((p) => p.startsWith('mcp__claude_ai_')) ? { MCP_CONNECTION_NONBLOCKING: 'false' } : {}
+  const e: Record<string, string> = {}
+  if (ctx.permitidas.some((p) => p.startsWith('mcp__claude_ai_'))) e.MCP_CONNECTION_NONBLOCKING = 'false'
+  if (puedePreguntar(ctx)) e.MCP_TOOL_TIMEOUT = esperaHerramientaMCP
+  return e
 }

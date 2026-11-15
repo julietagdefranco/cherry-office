@@ -16,12 +16,13 @@ describe('Cableado de ejecución', () => {
   // interno (unit test del port): Permisos.argumentos sin mcpUrl/vedadas/instrucciones
   test.skip('sin mcpUrl no hay --mcp-config ni herramientas MCP; sin vedadas ni instrucciones no hay esas opciones', () => {})
 
-  test('un agente común: dontAsk y la veda de los conectores de claude.ai', async () => {
+  test('un agente común en un chat: pide permiso en vivo (modo default) y la veda de los conectores de claude.ai', async () => {
     const f = await fix()
     await chat(f.b, { agent: 'marce', message: 'hola', session: U.a })
     const l = f.sb.llamadas.at(-1)!
     expect(l).toBeDefined()
-    expect(Sandbox.valor(l, '--permission-mode')).toBe('dontAsk')
+    expect(Sandbox.valor(l, '--permission-mode')).toBe('default')
+    expect(Sandbox.valor(l, '--permission-prompt-tool')).toBe('mcp__hq__pedir_permiso')
     expect(Sandbox.valor(l, '--disallowedTools')).toBe('mcp__claude_ai_*')
     expect(l.includes('--append-system-prompt')).toBe(false)
   })
