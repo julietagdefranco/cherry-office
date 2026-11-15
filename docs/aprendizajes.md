@@ -76,3 +76,18 @@ Probado en una carpeta temporal (un agente `.claude/agents/*.md` con `model: hai
 - **NO VERIFICADO.** Que una acción aprobada corra con una herramienta real de actuar (por ejemplo `create_event`) y que, sin ser aprobada, el agente no la pueda usar en una corrida normal. Solo se probó con el claude falso (los tests miran los argumentos del comando: `--allowedTools` lleva solo esa herramienta en la corrida `accion:`). Con el claude real no se ejecutó ninguna herramienta que cree, mande, modifique o borre algo: esa prueba la hace la persona a mano, con una cuenta o un evento de prueba.
 - **Dato.** `system/init` de `stream-json` no trae el nombre del agente (no hay clave `agent`): para saber que `--agent` se aplicó hay que mirar el comportamiento, no el evento.
 - **Dato.** Con `claude -p` sin stdin redirigido, sale un aviso («no stdin data received in 3s») y espera 3 segundos antes de seguir. La app lanza el hijo con stdin cerrado; en pruebas a mano conviene `< /dev/null`.
+
+## Escritura de agentes: carpetas que terminan en punto (15/11/2026, claude 2.1.316, haiku)
+
+Apareció en Linux, con una oficina en `/home/…/Oficinas/Luis Inc./`: un paso de flujo no pudo escribir en
+`archivos/entregables/<id>/` ni en `conocimiento/agentes/<id>.md`. Se reprodujo en macOS con el comando de `Permisos.argumentos`.
+
+- **CONFIRMADO.** Si algún componente de la ruta termina en `.` (`Luis Inc.`, `LuisInc.`), `Write` se rechaza en `dontAsk` aunque
+  `--allowedTools` tenga la regla exacta. El `tool_result` dice «Permission to use Write has been denied because Claude Code is
+  running in don't ask mode». Con `Luis Inc` (sin el punto) y con espacios en el medio (`Mi Ofi`) anda.
+- **CONFIRMADO.** No se arregla escribiendo la regla de otra manera: fallan también `Edit(\.)` escapado, el comodín `Luis Inc?`,
+  la regla relativa al cwd (`archivos/entregables/<id>/**`) y `./archivos/…`. Con `--permission-mode bypassPermissions` el
+  archivo se crea, o sea que el problema es de permisos y no del sistema de archivos. Parece un chequeo de seguridad de Claude
+  Code sobre rutas raras (los puntos al final son un truco conocido de Windows) que fuerza a preguntar, y en `-p` no hay a quién.
+- **Para la app:** `Oficinas.carpetaLibre` saca los puntos y espacios del final del nombre de la carpeta (el nombre de la oficina
+  en `oficina.json` queda igual). Una oficina que ya existe con esa carpeta hay que renombrarla a mano y volver a abrirla.

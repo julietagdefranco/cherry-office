@@ -143,8 +143,15 @@ struct OficinasTests {
         #expect(str(raro.obj["carpeta"]) == sb.oficinasDir + "/A-B-C")
         let punto = await nueva(b, ["nombre": "..oculta"])
         #expect(str(punto.obj["carpeta"]) == sb.oficinasDir + "/oculta")
+        // sin punto ni espacio al final (Claude Code no aplica las reglas de escritura en esas rutas); el nombre queda igual
+        let inc = await nueva(b, ["nombre": "Luis Inc. . "])
+        #expect(str(inc.obj["carpeta"]) == sb.oficinasDir + "/Luis Inc")
+        #expect(dict(inc.obj["oficina"])["nombre"] as? String == "Luis Inc. .")
+        #expect(str((await nueva(b, ["nombre": "..."])).obj["carpeta"]) == sb.oficinasDir + "/Oficina")
+        let ultima = await nueva(b, ["nombre": "..oculta"])
+        #expect(str(ultima.obj["carpeta"]) == sb.oficinasDir + "/oculta 2")
         // la última creada es la activa
-        #expect((await llamar(b, "GET", "/api/oficinas")).obj["activa"] as? String == sb.oficinasDir + "/oculta")
+        #expect((await llamar(b, "GET", "/api/oficinas")).obj["activa"] as? String == sb.oficinasDir + "/oculta 2")
     }
 
     @Test("crear: carpeta explícita (absoluta, con ~ del HOME temporal), relativa -> 400, 409 si ya hay oficina.json")
