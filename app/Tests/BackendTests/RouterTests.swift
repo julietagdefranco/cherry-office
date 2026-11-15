@@ -280,6 +280,8 @@ struct RouterTests {
     @Test("chat: sin claude -> 500 'No encontré Claude Code' y no se guarda nada")
     func chatSinClaude() async throws {
         let sb = Sandbox()
+        // con una oficina abierta (como el test TS): sin ella el chat responde 409 antes de buscar claude
+        try sb.abrirOficinaDePrueba(ids: sb.config().agentes)
         let b = try Backend(config: sb.config(), dataDir: sb.datos, claudePath: nil, env: [:])
         guard b.runner.claudePath == nil else {
             Issue.record("omitido: hay un claude real localizable (\(b.runner.claudePath ?? "")); el caso sin claude no se pudo simular", severity: .warning)
