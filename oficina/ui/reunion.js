@@ -239,7 +239,7 @@
     if (r.estado === 'cerrada') {
       App.add(pie, h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' } },
         r.salidaRuta && App.nativo.hay ? h('button.btn', { onclick: function () { App.nativo.abrir(r.salidaRuta); } }, App.icono('abrir'), 'Abrir archivo de salida') : null,
-        r.actaRuta && App.nativo.hay ? h('button.btn', { onclick: function () { App.nativo.abrir(r.actaRuta); } }, App.icono('abrir'), 'Abrir acta') : null,
+        r.acta && (App.nativo.hay || App.esMarkdown(r.acta)) ? h('button.btn', { onclick: function () { if (App.esMarkdown(r.acta)) App.abrirMarkdownOficina(r.acta); else App.nativo.abrir(r.actaRuta); } }, App.icono('abrir'), 'Ver acta') : null,
         h('button.btn.primario', { onclick: function () { App.cerrarDerecho(); nueva(); } }, 'Nueva reunión')));
     } else {
       var txt = h('textarea.campo', { rows: 2, placeholder: 'Intervenir: sumá un dato o una pregunta para la próxima ronda', maxlength: 5000 });
