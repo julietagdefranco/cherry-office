@@ -27,6 +27,18 @@ const taskkill = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 
 
 // MARK: - errores
 
+/** Permiso en vivo para `turnoSoloLectura` (lo arma `Permisos.turnoConPermiso`). */
+export type TurnoConPermiso = {
+  /** Herramientas que se suman a Read/Glob/Grep en `--tools`. */
+  herramientas: string[]
+  /** Reglas que se suman a `--allowedTools` (las guardadas del agente). */
+  permitidas: string[]
+  herramientaPermiso: string
+  mcpConfig: string
+  /** Token del servidor MCP y espera larga de la herramienta. */
+  env: Record<string, string>
+}
+
 export type TipoErrorClaude = 'sin_claude' | 'sin_proyecto' | 'timeout' | 'no_ejecuta' | 'login' | 'claude' | 'cerrando'
 
 export const mensajeLogin = "Claude Code todavía no tiene la sesión iniciada. Usá «Iniciar sesión» en la app o corré 'claude auth login' en la Terminal."
@@ -281,15 +293,24 @@ export class ClaudeRunner {
     return this.resultado([...args, '--', prompt], { timeout: timeout ?? this.config.timeout, cwd, obs })
   }
 
-  /** Un turno de `agente` en una sesión nueva, solo con Read/Glob/Grep (reuniones, consultas). Sin carril. */
-  async turnoSoloLectura(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string }): Promise<string> {
+  /** Un turno de `agente` en una sesión nueva, solo con Read/Glob/Grep (reuniones, consultas). Sin carril.
+   *  Con `preguntar` (reuniones, con la persona mirando): además las herramientas de sus reglas guardadas y las que puede
+   *  pedir, en modo normal con `--permission-prompt-tool`, así lo que no tiene permitido se le pregunta a la persona. */
+  async turnoSoloLectura(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string; preguntar?: TurnoConPermiso }): Promise<string> {
     this.verificar(p.cwd)
+    const q = p.preguntar
+    const herramientas = ['Read', 'Glob', 'Grep']
+    for (const h of q?.herramientas ?? []) if (!herramientas.includes(h)) herramientas.push(h)
     const a = ['-p', '--agent', p.agente, '--session-id', randomUUID().toLowerCase(), ...ClaudeRunner.formatoSalida,
-      '--tools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk']
+      '--tools', herramientas.join(',')]
+    if (q) a.push('--permission-mode', 'default', '--permission-prompt-tool', q.herramientaPermiso, '--mcp-config', q.mcpConfig)
+    else a.push('--permission-mode', 'dontAsk')
     for (const d of [...this.config.oficinaDirsExtra, ...(p.dirsExtra ?? [])]) a.push('--add-dir', d)
-    a.push('--allowedTools', 'Read', 'Glob', 'Grep', '--disallowedTools', 'mcp__claude_ai_*')
+    a.push('--allowedTools', 'Read', 'Glob', 'Grep')
+    if (q) a.push(...q.permitidas, q.herramientaPermiso)
+    a.push('--disallowedTools', 'mcp__claude_ai_*')
     if (p.instrucciones) a.push('--append-system-prompt', p.instrucciones)
-    return this.resultado([...a, '--', p.prompt], { timeout: p.timeout ?? this.config.timeout, cwd: p.cwd, obs: p.obs })
+    return this.resultado([...a, '--', p.prompt], { timeout: p.timeout ?? this.config.timeout, cwd: p.cwd, obs: p.obs, envExtra: q?.env })
   }
 
   async resultado(args: string[], { timeout, cwd, obs, envExtra = {} }: { timeout: number; cwd?: string; obs?: Observador; envExtra?: Record<string, string> }): Promise<string> {

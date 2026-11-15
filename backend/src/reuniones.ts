@@ -14,7 +14,8 @@ import { ErrorAPI } from './errores.js'
 import { esObjeto, objeto, type Obj } from './json.js'
 import { escribirAtomico, OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
-import { dirsVinculos, Instrucciones } from './permisos.js'
+import { dirsVinculos, Instrucciones, turnoConPermiso } from './permisos.js'
+import type { TurnoConPermiso } from './claude-runner.js'
 import { anexarDecisiones } from './plantillas.js'
 import { Programador, programadorDe } from './programador.js'
 import { atrapar, no404, no405, type Query, type Resp, type SubRouter } from './router.js'
@@ -1138,11 +1139,25 @@ export class ReunionesRouter implements SubRouter {
     let texto: string
     let fallo = false
     const caja = new CajaCosto()
+    // la persona está mirando la reunión: lo que el agente no tiene permitido se le pregunta (como en el chat)
+    const mcp = this.s.mcp?.()
+    let token: string | undefined
+    let preguntar: TurnoConPermiso | undefined
+    let timeout = this.timeoutTurno
+    try {
+      const mcpUrl = mcp ? await mcp.url() : undefined
+      if (mcp && mcpUrl !== undefined) {
+        token = mcp.emitir({ oficina: carpeta, agente: ag.id, sid: randomUUID().toLowerCase(), perfil: 'agente', interactivo: true })
+        preguntar = turnoConPermiso({ mcpUrl, token, reglas: ag.reglas })
+        // la espera de la persona no tiene que comerse el turno
+        timeout += mcp.permisos?.timeout ?? 240
+      }
+    } catch {}
     try {
       const dirs = dirsVinculos(of, ag)
       texto = await runner.conCarrilDe(carpeta, ag.id, () => runner.actividad.seguir(
         { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.tema, extra: caja.observador() },
-        (obs) => runner.turnoSoloLectura({ agente: ag.id, prompt, cwd: carpeta, timeout: this.timeoutTurno, dirsExtra: dirs, obs, instrucciones: Instrucciones.para(of, ag) })))
+        (obs) => runner.turnoSoloLectura({ agente: ag.id, prompt, cwd: carpeta, timeout, dirsExtra: dirs, obs, instrucciones: Instrucciones.para(of, ag), preguntar })))
       texto = recortarEspacios(texto)
       if (texto === '') { texto = '(sin respuesta)'; fallo = true }
     } catch (e) {
@@ -1156,6 +1171,7 @@ export class ReunionesRouter implements SubRouter {
         fallo = true
       }
     } finally {
+      if (token !== undefined) { mcp?.revocar(token); mcp?.cancelarPermisos?.(token) }
       store.registrarCosto({ oficina: carpeta, agente: ag.id, origen: 'reunion', ref: id, costo: caja.valor })
     }
     try { this.db.turnoAgregar({ reunion: id, oficina: carpeta, ronda, agente: ag.id, texto, error: fallo }) } catch {}

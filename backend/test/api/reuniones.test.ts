@@ -166,7 +166,7 @@ describe('Reuniones', () => {
 
   // MARK: turnos
 
-  test('turnos: secuenciales, un turno por participante y ronda, claude solo con Read,Glob,Grep y cwd en la oficina', async () => {
+  test('turnos: secuenciales, un turno por participante y ronda, claude con Read,Glob,Grep (lo demás se pregunta) y cwd en la oficina', async () => {
     const f = await fix()
     const r = await nueva(f, 'plan de lanzamiento', ['marce', 'nico', 'betty'], { rondas: 2 })
     const id = str(r.obj.id)
@@ -189,10 +189,11 @@ describe('Reuniones', () => {
     const sids = new Set<string>()
     ll.forEach((l, i) => {
       expect(Sandbox.valor(l, '--agent')).toBe(orden[i])
-      expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep')
-      expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', '--disallowedTools', 'mcp__claude_ai_*'])
-      expect(!l.includes('Edit') && !l.includes('Write')).toBe(true)
-      expect(Sandbox.valor(l, '--permission-mode')).toBe('dontAsk')
+      // solo lectura permitida; Bash, Edit y Write visibles pero se le preguntan a la persona (pedir_permiso)
+      expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Bash,Edit,Write')
+      expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'mcp__hq__pedir_permiso', '--disallowedTools', 'mcp__claude_ai_*'])
+      expect(Sandbox.valor(l, '--permission-mode')).toBe('default')
+      expect(Sandbox.valor(l, '--permission-prompt-tool')).toBe('mcp__hq__pedir_permiso')
       expect(Sandbox.valor(l, '--output-format')).toBe('stream-json')
       expect(l.includes('--session-id') && !l.includes('--resume')).toBe(true)
       expect(l.includes('--add-dir')).toBe(false)
@@ -203,6 +204,30 @@ describe('Reuniones', () => {
     expect(f.sb.cwds.every((c) => sinPrivate(c) === sinPrivate(f.carpeta))).toBe(true)
     // los turnos no tocan el historial del chat 1 a 1
     expect(msgs(await historial(f.b, { agent: 'marce' }))).toEqual([])
+  })
+
+  test('permiso en vivo en la reunión: el turno pide permiso, la tarjeta aparece en /api/actividad y la respuesta destraba el turno', async () => {
+    const f = await fix([{ id: 'marce', depto: 'redes' }, { id: 'nico', depto: 'ads' }])
+    // las reglas guardadas del agente valen también en la reunión
+    expect((await f.patch('/api/agentes/marce', { reglas: ['Bash(git status:*)'] })).status).toBe(200)
+    const pendientes = async (): Promise<Obj[]> => lista((await f.get('/api/actividad')).obj.permisos)
+    // el claude falso, con PERMISO: en el prompt (va en el tema), llama a pedir_permiso y espera
+    const id = str((await nueva(f, 'PERMISO:ls', ['marce', 'nico'], { rondas: 1 })).obj.id)
+    for (const quien of ['marce', 'nico']) {
+      expect(await esperar(async () => (await pendientes()).length === 1, 10), quien).toBe(true)
+      const p = (await pendientes())[0]!
+      expect(str(p.agente)).toBe(quien)
+      expect(str(p.herramienta)).toBe('Bash')
+      const r = await f.post(`/api/permisos/${str(p.id)}`, { decision: quien === 'marce' ? 'una_vez' : 'rechazar' })
+      expect(r.status, str(r.obj.error)).toBe(200)
+    }
+    const fin = await aguardar(f, id)
+    expect(fin.estado).toBe('esperando')
+    expect(turnos(fin).map((t) => t.error)).toEqual([undefined, undefined])
+    expect(await pendientes()).toEqual([])
+    const l = llamadasTurno(f)[0]!
+    expect(Sandbox.reglas(l)).toContain('Bash(git status:*)')
+    expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Bash,Edit,Write')
   })
 
   test('prompt del turno: tema, participantes, memoria común, decisiones, transcripción por ronda y consigna', async () => {
@@ -458,7 +483,7 @@ describe('Reuniones', () => {
   })
 
   test('turno que pasa el timeout (HQ_REUNION_TURNO_TIMEOUT): error «Tardó demasiado» y sin procesos huérfanos', async () => {
-    const f = await fix([{ id: 'marce', depto: 'redes' }, { id: 'nico', depto: 'ads' }], { HQ_REUNION_TURNO_TIMEOUT: '0.7' })
+    const f = await fix([{ id: 'marce', depto: 'redes' }, { id: 'nico', depto: 'ads' }], { HQ_REUNION_TURNO_TIMEOUT: '0.7', HQ_PERMISO_TIMEOUT: '0' })
     f.sb.modo('marce', 'lento')
     const id = str((await nueva(f, 'plan', ['marce', 'nico'])).obj.id)
     const fin = await aguardar(f, id)
