@@ -62,7 +62,7 @@ export function createBackend({ config, claudePath, env = process.env }: Opcione
   router.nucleo.push(rutasOficinas({ config, oficinas, claude: infoClaude(runner), alAbrir: s.alAbrir }))
   router.nucleo.push(rutasChat({
     config, store, runner, oficinas, avisos, entregas, log,
-    mcp: () => s.mcp?.(), catalogo: () => s.catalogo?.(),
+    mcp: () => s.mcp?.(), permisosTareas: () => s.permisosTareas?.(), catalogo: () => s.catalogo?.(),
     corridas: (o) => s.corridas?.(o) ?? [], creadorVersion: (o) => s.creadorVersion?.(o) ?? 0,
   }))
 

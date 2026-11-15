@@ -792,7 +792,8 @@ export class ServicioDependencias {
       // la v1 todavía no se registró: si la corrida sigue andando, o recién terminó, se espera al próximo barrido
       const ej = lider.sid === '' ? undefined : prog.ejecuciones.porSid(lider.sid)
       const desde = Math.min(...listas.map((x) => x.creada))
-      if ((ej && ej.estado === 'corriendo') || ahora - desde <= ServicioDependencias.graciaV1) return
+      // «esperando_permiso»: la corrida está frenada pidiéndole un permiso a la persona, pero sigue viva
+      if ((ej && (ej.estado === 'corriendo' || ej.estado === 'esperando_permiso')) || ahora - desde <= ServicioDependencias.graciaV1) return
     }
 
     const tomadas = this.esperas.tomarGrupo(oficina, grupo)
@@ -945,6 +946,7 @@ export class ServicioDependencias {
       const ref = jefe.accion === 'encargar' ? (jefe.tarea ?? '') : `${Programador.prefijoEspera}${jefe.id}`
       const v1 = jefe.entregaParcial === undefined ? undefined : entregas.una(oficina, jefe.entregaParcial)
       const viva = !!prog && (prog.estaCorriendo(oficina, ref) || prog.estaRetomando(oficina, ref)
+        || prog.ejecuciones.ultima(oficina, ref)?.estado === 'esperando_permiso'
         || (v1 !== undefined && prog.estaRetomando(oficina, Programador.claveCambios(entregas.vigente(oficina, v1).id))))
       if (viva) continue
       const nueva = entregas.porRef(oficina, ref)

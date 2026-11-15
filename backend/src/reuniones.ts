@@ -14,7 +14,8 @@ import { ErrorAPI } from './errores.js'
 import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
 import { escribirAtomico, OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
-import { dirsVinculos, Instrucciones } from './permisos.js'
+import { dirsVinculos, Instrucciones, turnoConPermiso } from './permisos.js'
+import type { TurnoConPermiso } from './claude-runner.js'
 import { anexarDecisiones } from './plantillas.js'
 import { dependenciasDe } from './dependencias.js'
 import { flujoDesde, flujoJSON } from './modelo-flujos.js'
@@ -78,7 +79,13 @@ export type ReunionFila = {
   /** {"a":[ids],"b":[ids]} solo en red/blue. */
   bandos?: Record<string, string[]>
   salida?: string
+  /** JSON del último resumen pedido sin cerrar (`resumenParcialJSON`). */
+  resumenParcial?: string
 }
+
+/** Resumen de lo dicho hasta ahora, sin cerrar: no deja acta ni toca decisiones ni pendientes. */
+export type ResumenParcial = SintesisReunion & { abiertas: string[]; turnos: number; ts: number }
+export const resumenParcialJSON = (r: ResumenParcial): Obj => ({ ...sintesisJSON(r), abiertas: r.abiertas, turnos: r.turnos, ts: iso(r.ts) })
 
 export const patrones = ['debate', 'lider', 'mapreduce', 'redblue', 'revision'] as const
 export type PatronReunion = (typeof patrones)[number]
@@ -97,7 +104,7 @@ export type PasoTurno = { agente: string; fase: FaseTurno }
 
 // MARK: - SQLite (tablas `reuniones` y `turnos`, con clave de oficina)
 
-const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida'
+const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida,resumen_parcial'
 
 const opt = (v: SQLValor | undefined) => (v === null || v === undefined ? undefined : txt(v))
 
@@ -125,7 +132,7 @@ function filaReunion(r: Fila): ReunionFila {
   }
   if (r.cerrada !== null && r.cerrada !== undefined) f.cerrada = num(r.cerrada)
   f.sintesis = opt(r.sintesis); f.errorSintesis = opt(r.error_sintesis); f.acta = opt(r.acta); f.error = opt(r.error)
-  f.lider = opt(r.lider); f.bandos = bandos; f.salida = opt(r.salida)
+  f.lider = opt(r.lider); f.bandos = bandos; f.salida = opt(r.salida); f.resumenParcial = opt(r.resumen_parcial)
   for (const k of Object.keys(f) as (keyof ReunionFila)[]) if (f[k] === undefined) delete f[k]
   return f
 }
@@ -165,7 +172,7 @@ export class ReunionesDB {
     `)
     const cols = this.db.query('PRAGMA table_info(reuniones)').map((f) => txt(f.name))
     if (!cols.includes('documentos')) this.db.exec('ALTER TABLE reuniones ADD COLUMN documentos TEXT')
-    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT']]) {
+    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT'], ['resumen_parcial', 'TEXT']]) {
       if (!cols.includes(c!)) this.db.exec(`ALTER TABLE reuniones ADD COLUMN ${c} ${tipo}`)
     }
     this.prepararVista()
@@ -189,6 +196,8 @@ export class ReunionesDB {
 
   /** Ruta final del archivo de salida (puede diferir de la pedida si ya existía una con ese nombre). */
   salida(id: string, salida: string) { this.db.run('UPDATE reuniones SET salida=? WHERE id=?', [salida, id]) }
+
+  resumenParcial(id: string, json: string) { this.db.run('UPDATE reuniones SET resumen_parcial=? WHERE id=?', [json, id]) }
 
   una(id: string, oficina: string): ReunionFila | undefined {
     try {
@@ -355,6 +364,8 @@ const gente = (ps: AgenteDef[]) => ps.map((a) => `${a.nombre} (${a.rol})`).join(
 export function promptTurno(p: {
   oficina: Oficina; carpeta: string; tema: string; participantes: AgenteDef[]; quien: AgenteDef; turnos: TurnoReunion[]; ronda: number
   fichas?: string; patron?: PatronReunion; fase?: FaseTurno; lider?: AgenteDef; bandoA?: AgenteDef[]; bandoB?: AgenteDef[]
+  /** Turnos que había cuando este agente armó su prompt anterior en la reunión. */
+  leidos?: number
 }): string {
   const patron = p.patron ?? 'debate'
   const dicho = transcripcion(ReunionPatron.visibles(patron, p.turnos, p.ronda), p.oficina, maxTranscripcionTurno)
@@ -373,14 +384,29 @@ ${decisiones(p.carpeta)}${docs}
 
 Lo que se dijo hasta ahora (estamos en la ronda ${p.ronda}):
 ${dicho === '' ? '(todavía no habló nadie)' : dicho}
-
+${sinResponder(p.turnos, p.quien.id, p.oficina, p.leidos)}
 ${ReunionPatron.consigna(patron, p.fase ?? 'libre', p.quien, p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
+}
+
+/** Lo que escribió el usuario después del último turno de `quien`: tiene que responderlo o incorporarlo en su turno. */
+export function sinResponder(turnos: TurnoReunion[], quien: string, oficina: Oficina, leidos?: number): string {
+  // `leidos`: cuántos turnos había cuando armó su último prompt (lo que llegó mientras hablaba no lo vio)
+  let desde = 0
+  turnos.forEach((t, i) => { if (t.agente === quien && !t.error) desde = i + 1 })
+  if (leidos !== undefined) desde = Math.min(desde, leidos)
+  const msgs = turnos.slice(desde).filter((t) => t.agente === 'usuario').map((t) => `«${t.texto}»`)
+  if (msgs.length === 0) return ''
+  const n = nombreDe('usuario', oficina)
+  return `\nDesde tu último turno, ${n} escribió en la reunión:\n${msgs.join('\n')}\nRespondé o incorporá lo que dijo en tu intervención (sin dejar de lado el tema).\n`
 }
 
 export function promptSintesis(p: {
   oficina: Oficina; tema: string; participantes: AgenteDef[]; turnos: TurnoReunion[]
   patron?: PatronReunion; lider?: AgenteDef; bandoA?: AgenteDef[]; bandoB?: AgenteDef[]
+  /** La reunión sigue abierta: resumen de lo dicho hasta ahora para que la persona piense qué contestar. */
+  parcial?: boolean
 }): string {
+  if (p.parcial) return promptResumenParcial(p)
   return `Sos el secretario de actas de la oficina «${p.oficina.nombre}». Tema de la reunión: ${p.tema}
 Participantes: ${gente(p.participantes)}
 
@@ -390,6 +416,40 @@ ${transcripcion(p.turnos, p.oficina, maxTranscripcionActa, true)}
 Devolvé SOLO un objeto JSON estricto (sin texto antes ni después, sin bloques de código) con esta forma:
 {"resumen": "resumen de la reunión en 3-6 oraciones", "decisiones": ["decisión concreta confirmada por la conversación"], "pendientes": [{"quien": "nombre de quien se encarga", "que": "tarea concreta", "necesita_usuario": false, "depende_de": []}]}
 Incluí en "decisiones" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "pendientes" los próximos pasos con responsable. En "depende_de" poné los números (empezando en 1, en el orden de la lista) de otros pendientes que tienen que estar hechos antes de poder hacer este; si no depende de ninguno, lista vacía.${PendientesReunion.consignaSecretario(p.oficina.duenio)}${ReunionPatron.varianteSintesis(p.patron ?? 'debate', p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
+}
+
+function promptResumenParcial(p: {
+  oficina: Oficina; tema: string; participantes: AgenteDef[]; turnos: TurnoReunion[]
+  patron?: PatronReunion; lider?: AgenteDef; bandoA?: AgenteDef[]; bandoB?: AgenteDef[]
+}): string {
+  const n = nombreDe('usuario', p.oficina)
+  return `Sos el secretario de actas de la oficina «${p.oficina.nombre}». Tema de la reunión: ${p.tema}
+Participantes: ${gente(p.participantes)}
+
+La reunión TODAVÍA NO TERMINÓ. ${n} te pide un resumen de lo dicho hasta ahora para pensar qué contestar antes de seguir.
+
+Transcripción hasta el momento:
+${transcripcion(p.turnos, p.oficina, maxTranscripcionActa, true)}
+
+Devolvé SOLO un objeto JSON estricto (sin texto antes ni después, sin bloques de código) con esta forma:
+{"resumen": "en qué está la conversación, en 3-6 oraciones: posturas de cada uno, coincidencias y diferencias", "decisiones": ["lo que ya parece acordado"], "abiertas": ["pregunta o punto abierto que espera la opinión o la decisión de ${n}"], "pendientes": [{"quien": "nombre", "que": "próximo paso propuesto", "necesita_usuario": false}]}
+Sé fiel a la transcripción: no inventes acuerdos. «abiertas» es lo más importante: qué le preguntaron a ${n}, qué tiene que decidir y en qué no se ponen de acuerdo (puede ser una lista vacía).${ReunionPatron.varianteSintesis(p.patron ?? 'debate', p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
+}
+
+/** Como `parsearSintesis`, más «abiertas». */
+export function parsearResumenParcial(t: string): (SintesisReunion & { abiertas: string[] }) | undefined {
+  const a = t.indexOf('{')
+  const b = t.lastIndexOf('}')
+  let abiertas: string[] = []
+  if (a >= 0 && b > a) {
+    try {
+      const o = JSON.parse(t.slice(a, b + 1))
+      if (esObjeto(o) && Array.isArray(o.abiertas)) abiertas = o.abiertas.map((x) => (typeof x === 'string' ? recortarEspacios(x) : '')).filter((x) => x !== '')
+    } catch {}
+  }
+  const s = parsearSintesis(t)
+  if (!s) return abiertas.length > 0 ? { resumen: '', decisiones: [], pendientes: [], abiertas } : undefined
+  return { ...s, abiertas }
 }
 
 /** Extrae el objeto JSON de la respuesta (con o sin ```json) y lo normaliza. undefined si no hay forma de leerlo.
@@ -752,7 +812,12 @@ export class ReunionesRouter implements SubRouter {
   private readonly timeoutSintesis: number
   private readonly corriendo = new Map<string, Promise<void>>()
   private readonly hablando = new Map<string, string>()
+  /** Rondas que faltan después de la que está corriendo (un mensaje del usuario en la última suma una). */
+  private readonly restantes = new Map<string, number>()
+  /** `reunion:agente` → cuántos turnos había al armar su último prompt (para saber qué mensajes del usuario no vio). */
+  private readonly leidos = new Map<string, number>()
   private readonly cerrando = new Set<string>()
+  private readonly resumiendo = new Set<string>()
 
   constructor(private readonly s: Servicios) {
     this.db = new ReunionesDB(s.store.db)
@@ -807,6 +872,7 @@ export class ReunionesRouter implements SubRouter {
           case 'intervencion': return [200, this.intervenir(id, body)]
           case 'ronda': return [200, this.otraRonda(id)]
           case 'cerrar': return [200, await this.cerrar(id)]
+          case 'resumen': return [200, await this.resumir(id)]
           default: return no404
         }
       }
@@ -845,6 +911,8 @@ export class ReunionesRouter implements SubRouter {
     if (f.error !== undefined) o.error = f.error
     if (f.estado === 'cerrada' && f.salida !== undefined && fs.existsSync(path.join(f.oficina, f.salida))) o.salidaRuta = path.join(f.oficina, f.salida)
     if (f.documentos.length > 0) o.documentos = f.documentos
+    if (f.estado !== 'cerrada' && f.resumenParcial !== undefined) { try { o.resumenParcial = JSON.parse(f.resumenParcial) } catch {} }
+    if (this.resumiendo.has(f.id)) o.resumiendo = true
     return o
   }
 
@@ -950,6 +1018,13 @@ export class ReunionesRouter implements SubRouter {
     } catch {
       throw new ErrorAPI(500, 'No pude guardar tu intervención.')
     }
+    // Los agentes reaccionan: con rondas en curso lo incorporan los turnos que siguen; si ya es la última
+    // (alguien ya habló o está hablando sin verlo) se suma una ronda más; sin rondas en curso, arranca una.
+    if (this.corriendo.has(id)) {
+      if ((this.restantes.get(id) ?? 0) === 0) this.restantes.set(id, 1)
+    } else if (!this.cerrando.has(id)) {
+      this.arrancar(id, a, 1)
+    }
     return this.respuesta(id, a)
   }
 
@@ -973,6 +1048,42 @@ export class ReunionesRouter implements SubRouter {
     } finally {
       this.cerrando.delete(id)
     }
+  }
+
+  /** Resumen de lo dicho hasta ahora sin cerrar: no escribe acta ni toca decisiones, pendientes ni avisos.
+   *  Se puede pedir con una ronda en curso (resume los turnos que ya están). */
+  private async resumir(id: string): Promise<Obj> {
+    const a = this.s.oficinas.requerirActiva()
+    const f = this.fila(id, a)
+    if (f.estado === 'cerrada' || this.cerrando.has(id)) throw new ErrorAPI(409, 'La reunión ya está cerrada.')
+    if (this.resumiendo.has(id)) throw new ErrorAPI(409, 'Ya estoy armando un resumen de esta reunión.')
+    const turnos = this.db.turnosDe(id)
+    if (!turnos.some((t) => !t.error && t.agente !== 'usuario')) throw new ErrorAPI(409, 'Todavía no hay opiniones para resumir.')
+    const of = a.oficina
+    const parts = f.agentes.map((x) => agenteDe(of, x)).filter((x): x is AgenteDef => x !== undefined)
+    const patron: PatronReunion = esPatron(f.patron) ? f.patron : 'debate'
+    const { lider, bandoA, bandoB } = rolesDe(f, of)
+    this.resumiendo.add(id)
+    const caja = new CajaCosto()
+    try {
+      let t: string
+      try {
+        t = await this.s.runner.correrSinAgente(promptSintesis({ oficina: of, tema: f.tema, participantes: parts, turnos, patron, lider, bandoA, bandoB, parcial: true }),
+          { timeout: this.timeoutSintesis, cwd: a.carpeta, obs: caja.observador() })
+      } catch (e) {
+        throw new ErrorAPI(500, e instanceof ClaudeError ? e.mensaje : 'No pude armar el resumen.')
+      } finally {
+        this.s.store.registrarCosto({ oficina: a.carpeta, origen: 'sintesis', ref: id, costo: caja.valor })
+      }
+      const s = parsearResumenParcial(t)
+      if (!s) throw new ErrorAPI(500, 'El resumen no vino en el formato esperado.')
+      const r: ResumenParcial = { ...s, turnos: turnos.length, ts: Date.now() / 1000 }
+      // si mientras tanto se cerró, el acta manda: no se guarda
+      if (this.db.una(id, a.carpeta)?.estado !== 'cerrada') this.db.resumenParcial(id, JSON.stringify(resumenParcialJSON(r)))
+    } finally {
+      this.resumiendo.delete(id)
+    }
+    return this.respuesta(id, a)
   }
 
   private async cerrarReunion(id: string, a: OficinaActiva, f: ReunionFila): Promise<Obj> {
@@ -1090,7 +1201,9 @@ export class ReunionesRouter implements SubRouter {
     let abortada = false
     let ultimoError: string | undefined
     try {
-      for (let i = 0; i < cuantas; i++) {
+      this.restantes.set(id, cuantas)
+      while ((this.restantes.get(id) ?? 0) > 0) {
+        this.restantes.set(id, (this.restantes.get(id) ?? 1) - 1)
         const r = await this.correrRonda(id, carpeta)
         algunoOk = algunoOk || r.ok
         ultimoError = r.error ?? ultimoError
@@ -1105,6 +1218,7 @@ export class ReunionesRouter implements SubRouter {
     } finally {
       this.corriendo.delete(id)
       this.hablando.delete(id)
+      this.restantes.delete(id)
     }
   }
 
@@ -1159,18 +1273,35 @@ export class ReunionesRouter implements SubRouter {
     if (!ag) return { agente: paso.agente, texto: 'No encontré al agente.', fallo: true, abortada: false }
     const patron: PatronReunion = esPatron(f.patron) ? f.patron : 'debate'
     const { lider, bandoA, bandoB } = rolesDe(f, of)
+    const turnos = this.db.turnosDe(id)
+    const clave = `${id}:${ag.id}`
     const prompt = promptTurno({
-      oficina: of, carpeta, tema: f.tema, participantes, quien: ag, turnos: this.db.turnosDe(id), ronda, fichas: fichas(carpeta, f.documentos),
-      patron, fase: paso.fase, lider, bandoA, bandoB,
+      oficina: of, carpeta, tema: f.tema, participantes, quien: ag, turnos, ronda, fichas: fichas(carpeta, f.documentos),
+      patron, fase: paso.fase, lider, bandoA, bandoB, leidos: this.leidos.get(clave),
     })
+    this.leidos.set(clave, turnos.length)
     let texto: string
     let fallo = false
     const caja = new CajaCosto()
+    // la persona está mirando la reunión: lo que el agente no tiene permitido se le pregunta (como en el chat)
+    const mcp = this.s.mcp?.()
+    let token: string | undefined
+    let preguntar: TurnoConPermiso | undefined
+    let timeout = this.timeoutTurno
+    try {
+      const mcpUrl = mcp ? await mcp.url() : undefined
+      if (mcp && mcpUrl !== undefined) {
+        token = mcp.emitir({ oficina: carpeta, agente: ag.id, sid: randomUUID().toLowerCase(), perfil: 'agente', interactivo: true })
+        preguntar = turnoConPermiso({ mcpUrl, token, reglas: ag.reglas })
+        // la espera de la persona no tiene que comerse el turno
+        timeout += mcp.permisos?.timeout ?? 240
+      }
+    } catch {}
     try {
       const dirs = dirsVinculos(of, ag)
       texto = await runner.conCarrilDe(carpeta, ag.id, () => runner.actividad.seguir(
         { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.tema, extra: caja.observador() },
-        (obs) => runner.turnoSoloLectura({ agente: ag.id, prompt, cwd: carpeta, timeout: this.timeoutTurno, dirsExtra: dirs, obs, instrucciones: Instrucciones.para(of, ag) })))
+        (obs) => runner.turnoSoloLectura({ agente: ag.id, prompt, cwd: carpeta, timeout, dirsExtra: dirs, obs, instrucciones: Instrucciones.para(of, ag), preguntar })))
       texto = recortarEspacios(texto)
       if (texto === '') { texto = '(sin respuesta)'; fallo = true }
     } catch (e) {
@@ -1184,6 +1315,7 @@ export class ReunionesRouter implements SubRouter {
         fallo = true
       }
     } finally {
+      if (token !== undefined) { mcp?.revocar(token); mcp?.cancelarPermisos?.(token) }
       store.registrarCosto({ oficina: carpeta, agente: ag.id, origen: 'reunion', ref: id, costo: caja.valor })
     }
     try { this.db.turnoAgregar({ reunion: id, oficina: carpeta, ronda, agente: ag.id, texto, error: fallo }) } catch {}

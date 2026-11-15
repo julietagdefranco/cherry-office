@@ -27,6 +27,36 @@ const taskkill = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 
 
 // MARK: - errores
 
+/** Permiso en vivo para `turnoSoloLectura` (lo arma `Permisos.turnoConPermiso`). */
+export type TurnoConPermiso = {
+  /** Herramientas que se suman a Read/Glob/Grep en `--tools`. */
+  herramientas: string[]
+  /** Reglas que se suman a `--allowedTools` (las guardadas del agente). */
+  permitidas: string[]
+  herramientaPermiso: string
+  mcpConfig: string
+  /** Token del servidor MCP y espera larga de la herramienta. */
+  env: Record<string, string>
+}
+
+/** Algo que claude no hizo por falta de permiso (un elemento de `permission_denials`). */
+export type Denegacion = { herramienta: string; input: Obj }
+
+/** Parámetros de un mensaje de chat (`ejecutarChat`). */
+export type ParamsChat = { agente: string; mensaje: string; sid: string; activa: boolean; carpeta?: string; armar: ArmarArgumentos; obs?: Observador; envExtra?: Record<string, string> }
+
+/** `permission_denials` de la salida JSON de claude: `[{tool_name, tool_use_id, tool_input}]`. */
+export function denegaciones(json: Obj | undefined): Denegacion[] {
+  const l = json?.permission_denials
+  if (!Array.isArray(l)) return []
+  const out: Denegacion[] = []
+  for (const d of l) {
+    if (!esObjeto(d) || typeof d.tool_name !== 'string' || d.tool_name === '') continue
+    out.push({ herramienta: d.tool_name, input: esObjeto(d.tool_input) ? d.tool_input : {} })
+  }
+  return out
+}
+
 export type TipoErrorClaude = 'sin_claude' | 'sin_proyecto' | 'timeout' | 'no_ejecuta' | 'login' | 'claude' | 'cerrando'
 
 export const mensajeLogin = "Claude Code todavía no tiene la sesión iniciada. Usá «Iniciar sesión» en la app o corré 'claude auth login' en la Terminal."
@@ -281,15 +311,24 @@ export class ClaudeRunner {
     return this.resultado([...args, '--', prompt], { timeout: timeout ?? this.config.timeout, cwd, obs })
   }
 
-  /** Un turno de `agente` en una sesión nueva, solo con Read/Glob/Grep (reuniones, consultas). Sin carril. */
-  async turnoSoloLectura(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string }): Promise<string> {
+  /** Un turno de `agente` en una sesión nueva, solo con Read/Glob/Grep (reuniones, consultas). Sin carril.
+   *  Con `preguntar` (reuniones, con la persona mirando): además las herramientas de sus reglas guardadas y las que puede
+   *  pedir, en modo normal con `--permission-prompt-tool`, así lo que no tiene permitido se le pregunta a la persona. */
+  async turnoSoloLectura(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string; preguntar?: TurnoConPermiso }): Promise<string> {
     this.verificar(p.cwd)
+    const q = p.preguntar
+    const herramientas = ['Read', 'Glob', 'Grep']
+    for (const h of q?.herramientas ?? []) if (!herramientas.includes(h)) herramientas.push(h)
     const a = ['-p', '--agent', p.agente, '--session-id', randomUUID().toLowerCase(), ...ClaudeRunner.formatoSalida,
-      '--tools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk']
+      '--tools', herramientas.join(',')]
+    if (q) a.push('--permission-mode', 'default', '--permission-prompt-tool', q.herramientaPermiso, '--mcp-config', q.mcpConfig)
+    else a.push('--permission-mode', 'dontAsk')
     for (const d of [...this.config.oficinaDirsExtra, ...(p.dirsExtra ?? [])]) a.push('--add-dir', d)
-    a.push('--allowedTools', 'Read', 'Glob', 'Grep', '--disallowedTools', 'mcp__claude_ai_*')
+    a.push('--allowedTools', 'Read', 'Glob', 'Grep')
+    if (q) a.push(...q.permitidas, q.herramientaPermiso)
+    a.push('--disallowedTools', 'mcp__claude_ai_*')
     if (p.instrucciones) a.push('--append-system-prompt', p.instrucciones)
-    return this.resultado([...a, '--', p.prompt], { timeout: p.timeout ?? this.config.timeout, cwd: p.cwd, obs: p.obs })
+    return this.resultado([...a, '--', p.prompt], { timeout: p.timeout ?? this.config.timeout, cwd: p.cwd, obs: p.obs, envExtra: q?.env })
   }
 
   async resultado(args: string[], { timeout, cwd, obs, envExtra = {} }: { timeout: number; cwd?: string; obs?: Observador; envExtra?: Record<string, string> }): Promise<string> {
@@ -317,7 +356,12 @@ export class ClaudeRunner {
 
   /** Un mensaje de chat sin tomar el carril (el llamador ya lo tiene). Reintenta con la otra forma de sesión si
    *  claude dice que ya existe (o que no existe). */
-  async ejecutarChat(p: { agente: string; mensaje: string; sid: string; activa: boolean; carpeta?: string; armar: ArmarArgumentos; obs?: Observador; envExtra?: Record<string, string> }): Promise<string> {
+  async ejecutarChat(p: ParamsChat): Promise<string> {
+    return (await this.ejecutarChatDetalle(p)).texto
+  }
+
+  /** Como `ejecutarChat`, y además lo que claude rechazó por falta de permiso (`permission_denials` de la salida JSON). */
+  async ejecutarChatDetalle(p: ParamsChat): Promise<{ texto: string; denegados: Denegacion[] }> {
     this.verificar(p.carpeta)
     const flag = p.activa ? '--resume' : '--session-id'
     const correr = async (f: '--resume' | '--session-id') => {
@@ -333,9 +377,10 @@ export class ClaudeRunner {
       r = await correr('--session-id')
     }
     if (r.error !== undefined) throw ClaudeError.clasificar(r.error)
+    const denegados = denegaciones(r.json)
     const res = r.json?.result
-    if (typeof res === 'string' && res !== '') return res
-    return r.json === undefined ? r.res.stdout.trim() : ''
+    if (typeof res === 'string' && res !== '') return { texto: res, denegados }
+    return { texto: r.json === undefined ? r.res.stdout.trim() : '', denegados }
   }
 
   // MARK: auth

@@ -1,28 +1,49 @@
 // Tests internos de los permisos en vivo (port de la lógica pura de app/Tests/BackendTests/PermisosVivosTests.swift).
 import { describe, expect, test } from 'vitest'
-import { PermisosVivos } from '../../src/permisos-vivos.js'
+import { PermisosVivos, partirComando } from '../../src/permisos-vivos.js'
 import { ValidarAgenteExtra } from '../../src/oficina.js'
 
 const ident = { oficina: '/of', agente: 'marce', sid: '11111111-1111-4111-8111-111111111111', perfil: 'agente', interactivo: true }
 const esperar = async (c: () => boolean, ms = 2000) => { const fin = Date.now() + ms; while (Date.now() < fin && !c()) await new Promise((r) => setTimeout(r, 10)); return c() }
 
 describe('PermisosVivos (lógica pura)', () => {
-  test('reglas sugeridas: programa (y subcomando conocido) para Bash; carpeta del archivo para Edit/Write; nada para el resto', () => {
+  test('reglas sugeridas: programa (y subcomando conocido) por cada parte para Bash; carpeta del archivo para Edit/Write; nada para el resto', () => {
     const bash = (c: string) => PermisosVivos.reglasSugeridas('Bash', { command: c })
     expect(bash('git pull origin main')).toEqual(['Bash(git pull:*)'])
     expect(bash('  npm install  ')).toEqual(['Bash(npm install:*)'])
     expect(bash('git --version')).toEqual(['Bash(git:*)'])
     expect(bash('ls -la /tmp')).toEqual(['Bash(ls:*)'])
-    for (const c of ['git pull && rm -rf x', 'cat a | grep b', 'echo hola > x', 'ls; rm x', 'echo $(whoami)', 'rm *', 'FOO=1 make', '', "echo 'a b'"]) {
-      expect(bash(c), c).toEqual([])
-    }
+    // compuestos: una regla por parte, sin repetir
+    expect(bash('git pull && rm -rf x')).toEqual(['Bash(git pull:*)', 'Bash(rm:*)'])
+    expect(bash('cat a | grep b')).toEqual(['Bash(cat:*)', 'Bash(grep:*)'])
+    expect(bash('ls; ls -la')).toEqual(['Bash(ls:*)'])
+    expect(bash('cd /repo && npm test 2>&1 | tail -5')).toEqual(['Bash(cd:*)', 'Bash(npm test:*)', 'Bash(tail:*)'])
+    expect(bash('echo hola > x')).toEqual(['Bash(echo:*)'])
+    expect(bash('rm *')).toEqual(['Bash(rm:*)'])
+    expect(bash("git commit -m 'arreglo && listo'")).toEqual(['Bash(git commit:*)'])
+    expect(bash('echo "a; b" || true')).toEqual(['Bash(echo:*)', 'Bash(true:*)'])
+    // lo que no se puede partir: el comando exacto (si no tiene paréntesis ni saltos de línea)
+    expect(bash('FOO=1 make')).toEqual(['Bash(FOO=1 make)'])
+    expect(bash('echo `whoami`')).toEqual(['Bash(echo `whoami`)'])
+    expect(bash("echo 'sin cerrar")).toEqual(["Bash(echo 'sin cerrar)"])
+    for (const c of ['echo $(whoami)', '(cd x && ls)', '', 'ls\nrm $(a)']) expect(bash(c), c).toEqual([])
     expect(PermisosVivos.reglasSugeridas('Edit', { file_path: '/Users/ana/repo/src/a.ts' })).toEqual(['Edit(//Users/ana/repo/src/**)', 'Write(//Users/ana/repo/src/**)'])
     expect(PermisosVivos.reglasSugeridas('Write', { file_path: '/tmp/x.md' })).toEqual(['Edit(//tmp/**)', 'Write(//tmp/**)'])
+    expect(PermisosVivos.reglasSugeridas('Write', { file_path: '/raiz.md' })).toEqual(['Edit(//raiz.md)', 'Write(//raiz.md)'])
     expect(PermisosVivos.reglasSugeridas('Write', { file_path: 'relativo/x.md' })).toEqual([])
     expect(PermisosVivos.reglasSugeridas('Write', { file_path: '/a/../b.md' })).toEqual([])
-    expect(PermisosVivos.reglasSugeridas('Write', { file_path: '/raiz.md' })).toEqual([])
     expect(PermisosVivos.reglasSugeridas('WebFetch', { url: 'https://x.com' })).toEqual([])
+    // todo lo sugerido pasa la validación de reglas guardadas
+    for (const c of ['git pull && rm -rf x', 'FOO=1 make', 'echo `whoami`', 'cd /repo && npm test 2>&1 | tail -5']) ValidarAgenteExtra.reglas(bash(c))
     expect(ValidarAgenteExtra.reglaValida('Bash(git pull:*)') && ValidarAgenteExtra.reglaValida('Edit(//tmp/**)')).toBe(true)
+  })
+
+  test('partirComando: separadores fuera de comillas; undefined con sustituciones o subshells', () => {
+    expect(partirComando('a b && c | d; e & f')).toEqual([['a', 'b'], ['c'], ['d'], ['e'], ['f']])
+    expect(partirComando('echo "x && y" \'z|w\'')).toEqual([['echo', 'x && y', 'z|w']])
+    expect(partirComando('make 2>&1 >/dev/null')).toEqual([['make', '2>&1', '>/dev/null']])
+    expect(partirComando('echo ""')).toEqual([['echo', '']])
+    for (const c of ['echo $(a)', 'echo "$(a)"', 'echo `a`', '(ls)', 'diff <(a) b', "echo 'x"]) expect(partirComando(c), c).toBeUndefined()
   })
 
   test('detalle: el comando, la ruta o la URL; si no, el input como JSON; saneado y recortado', () => {

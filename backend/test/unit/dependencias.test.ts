@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest'
 import { dependenciasDe, esperaJSON, esperasVencidas, herramientasDependencias, vencimiento } from '../../src/dependencias.js'
 import { mcpDe } from '../../src/consultas.js'
 import { Parte } from '../../src/parte.js'
+import { programadorDe } from '../../src/programador.js'
 import type { MCPHerramientas } from '../../src/mcp-protocolo.js'
 import { Sandbox, U, esperar } from '../support/sandbox.js'
 import { arrancar, llamar, oficina } from '../support/en-proceso.js'
@@ -634,6 +635,15 @@ describe('barrido', () => {
     await q.dep.barrer()
     expect(q.dep.esperas.una(q.carpeta, y.id)!.estado).toBe('lista')
     expect(q.dep.pedidos.uno(q.carpeta, ped.id)!.estado).toBe('entregado')
+  })
+
+  test('reconciliación: una relanzada cuya corrida está frenada pidiendo un permiso no se da por perdida', async () => {
+    const p = await preparar()
+    const x = mk(p, { estado: 'relanzada' })
+    const ej = programadorDe(p.s)!.ejecuciones.nueva({ oficina: p.carpeta, tarea: `espera:${x.id}`, agente: 'marce', programada: Date.now() / 1000, inicio: Date.now() / 1000, sid: 's-permiso', manual: false })
+    programadorDe(p.s)!.ejecuciones.esperando(ej, '', 0)
+    await p.dep.barrer(new Date(Date.now() + 200_000))
+    expect(p.dep.esperas.una(p.carpeta, x.id)!.estado).toBe('relanzada')
   })
 
   test('un pedido cuya ejecución terminó en error (la app se cerró) pasa a fallido; la espera sigue esperando', async () => {

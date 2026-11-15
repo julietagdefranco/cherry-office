@@ -719,12 +719,14 @@
   "capucha-murcielago": {
    "nombre": "Capucha de murciélago",
    "parte": "55704",
-   "disfraz": true
+   "disfraz": true,
+   "ojos": true
   },
   "capucha-orejas": {
    "nombre": "Capucha de orejas rectas",
    "parte": "10113",
-   "disfraz": true
+   "disfraz": true,
+   "ojos": true
   },
   "capucha-gata": {
    "nombre": "Capucha de gata",

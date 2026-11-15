@@ -7,7 +7,7 @@ App.Avisos = (function () {
   var h = function () { return App.h.apply(null, arguments); };
   var lista = [], indice = 0, banner = null, firma = '';
   /* los de tipo espera (entre agentes) también se calculan en el servidor: «visto» solo los apaga como aviso */
-  var TITULO = { respuesta: ' te respondió', error: ' no pudo responder', tarea: ' terminó una tarea' };
+  var TITULO = { respuesta: ' te respondió', error: ' no pudo responder', tarea: ' terminó una tarea', permiso: ' necesita tu permiso' };
 
   function nombre(a) { var ag = a.agente && App.agente(a.agente); return ag ? ag.nombre : ''; }
   function titulo(a) {

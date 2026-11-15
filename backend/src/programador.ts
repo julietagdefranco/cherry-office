@@ -12,6 +12,11 @@ import { esObjeto, objeto, type Obj } from './json.js'
 import type { AgenteDef } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
 import { argumentos, contexto, entorno, variableTokenMCP } from './permisos.js'
+import {
+  PermisosTareasDB, mensajeContinuar, pedidoTareaJSON, pedidosDe, reglasUnaVez, type EsperaPermiso, type PedidoTarea,
+} from './permisos-tareas.js'
+import type { DecisionPermiso } from './permisos-vivos.js'
+import type { Denegacion } from './claude-runner.js'
 import type { ProgramadorEntregas } from './rutas-entregas.js'
 import { atrapar, no404, no405, type Query, type Resp, type SubRouter } from './router.js'
 import { registrarModulo, type Servicios } from './servicios.js'
@@ -33,7 +38,7 @@ export type Ejecucion = {
   programada: number
   inicio: number
   fin?: number
-  /** corriendo | ok | error */
+  /** corriendo | esperando_permiso | ok | error */
   estado: string
   /** Sesión de chat donde quedó el pedido y la respuesta. */
   sid: string
@@ -107,6 +112,15 @@ export class Ejecuciones {
     this.db.run('UPDATE ejecuciones SET estado=?, fin=?, resultado=?, error=?, costo=? WHERE id=?',
       [estado, Date.now() / 1000, prefijo(resultado, maxResultado), error ?? null, costo ?? null, id])
   }
+
+  /** La corrida se frenó esperando permisos: guarda lo que respondió hasta ahora y el costo acumulado. */
+  esperando(id: number, resultado: string, costo: number) {
+    this.db.run("UPDATE ejecuciones SET estado='esperando_permiso', fin=NULL, resultado=?, error=NULL, costo=? WHERE id=?",
+      [prefijo(resultado, maxResultado), costo, id])
+  }
+
+  /** Retoma una corrida que esperaba permisos. */
+  reanudar(id: number) { this.db.run("UPDATE ejecuciones SET estado='corriendo' WHERE id=?", [id]) }
 
   una(id: number): Ejecucion | undefined {
     try {
@@ -205,6 +219,8 @@ export class Programador implements ProgramadorEntregas {
   static readonly prefijoEspera = 'espera:'
 
   readonly ejecuciones: Ejecuciones
+  /** Pedidos de permiso de las corridas que esperan a la persona (permisos-tareas.ts). */
+  readonly permisos: PermisosTareasDB
   readonly sistema: string
   private reloj: () => Date
   private readonly intervalo: number
@@ -223,6 +239,7 @@ export class Programador implements ProgramadorEntregas {
   /** `env.HQ_PROGRAMADOR === '0'` deja el bucle apagado (los tests llaman a `revisar()` a mano). */
   constructor(private readonly s: Servicios, op: OpcionesProgramador = {}) {
     this.ejecuciones = new Ejecuciones(s.store.db)
+    this.permisos = new PermisosTareasDB(s.store.db)
     this.reloj = op.reloj ?? (() => new Date())
     this.sistema = op.sistema ?? zonaDelSistema()
     this.automatico = s.env.HQ_PROGRAMADOR !== '0'
@@ -292,6 +309,11 @@ export class Programador implements ProgramadorEntregas {
     if (this.preparado) return
     try {
       this.ejecuciones.preparar()
+      this.permisos.preparar()
+      // esperas de ejecuciones que ya no esperan (la app se cerró mientras retomaban)
+      for (const f of this.s.store.db.query("SELECT ejecucion FROM esperas_permiso WHERE ejecucion NOT IN (SELECT id FROM ejecuciones WHERE estado='esperando_permiso')")) {
+        this.permisos.borrar(num(f.ejecucion))
+      }
       this.preparado = true
     } catch {
       this.s.log.error('tareas: no pude preparar la tabla de ejecuciones')
@@ -516,6 +538,9 @@ export class Programador implements ProgramadorEntregas {
     if (this.cerrado) throw new ErrorAPI(409, 'La app se está cerrando.')
     const clave = Programador.clave(act.carpeta, t.id)
     if (this.reservadas.has(clave)) throw new ErrorAPI(409, 'Esa tarea ya se está corriendo.')
+    if (this.preparado && this.ejecuciones.ultima(act.carpeta, t.id)?.estado === 'esperando_permiso') {
+      throw new ErrorAPI(409, 'Esa tarea está esperando tu permiso para seguir.')
+    }
     this.reservadas.add(clave)
     const sid = randomUUID().toLowerCase()
     const inicio = Date.now() / 1000
@@ -549,46 +574,68 @@ export class Programador implements ProgramadorEntregas {
   /** Lo mismo que el chat: carril del agente, permisos de la oficina, actividad (origen «tarea») y costo (origen «tarea»,
    *  ref = id de la tarea), en una sesión nueva donde quedan el pedido y la respuesta como un chat más. */
   private async correr(ej: Ejecucion, act: OficinaActiva, t: TareaProgramada, def: AgenteDef, actuar: string[]) {
+    await this.vuelta(ej, act, t, def, actuar, { mensaje: mensajeTarea(t), activa: false, reglasExtra: [] })
+  }
+
+  /** Una vuelta de una corrida: la primera (la consigna, en una sesión nueva) o la que retoma la conversación después de
+   *  que la persona respondió los permisos (`previo`). Si el agente quiso hacer algo que no tiene permitido (Bash, Edit,
+   *  Write), la ejecución queda «esperando_permiso» con los pedidos guardados y sin entrega; si no, termina como siempre. */
+  private async vuelta(ej: Ejecucion, act: OficinaActiva, t: TareaProgramada, def: AgenteDef, actuar: string[],
+    v: { mensaje: string; activa: boolean; reglasExtra: string[]; previo?: EsperaPermiso }) {
     const { store, runner, config, entregas } = this.s
     const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, actuar, catalogo: this.s.catalogo?.() })
+    ctx.anotarRechazos = true
+    for (const r of v.reglasExtra) if (!(ctx.reglas ?? []).includes(r)) ctx.reglas = [...(ctx.reglas ?? []), r]
     // MCP también fuera del chat: token con el perfil del agente, que vive lo que dura la corrida
     const mcp = this.s.mcp?.()
     const mcpUrl = mcp ? await mcp.url() : undefined
     if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
     const origen = Programador.origenEntrega(ej.tarea)
-    const carpeta = act.carpeta, agente = def.id, sid = ej.sid, consigna = mensajeTarea(t), nombre = t.nombre
+    const carpeta = act.carpeta, agente = def.id, sid = ej.sid, nombre = t.nombre
     const caja = new CajaCosto()
     const escritos = new CajaArchivos()
-    const r = await runner.conCarrilDe(carpeta, agente, async (): Promise<{ texto: string; error?: string }> => {
+    const r = await runner.conCarrilDe(carpeta, agente, async (): Promise<{ texto: string; error?: string; denegados: Denegacion[] }> => {
       const envExtra: Record<string, string> = { ...entorno(ctx) }
       if (mcpUrl !== undefined && mcp) envExtra[variableTokenMCP] = mcp.emitir({ oficina: carpeta, agente, sid, perfil: ctx.perfilMCP })
       try {
         store.asegurarSesion(sid, agente, carpeta)
-        store.agregar(sid, 'u', consigna)
-        const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen, tarea: nombre, extra: caja.observador(escritos.observador()) },
-          (obs) => runner.ejecutarChat({ agente, mensaje: consigna, sid, activa: false, carpeta, obs, envExtra, armar: (p) => argumentos(config, ctx, p) }))
+        store.agregar(sid, 'u', v.mensaje)
+        const res = await runner.actividad.seguir({ oficina: carpeta, agente, origen, tarea: nombre, extra: caja.observador(escritos.observador()) },
+          (obs) => runner.ejecutarChatDetalle({ agente, mensaje: v.mensaje, sid, activa: v.activa, carpeta, obs, envExtra, armar: (p) => argumentos(config, ctx, p) }))
         store.marcarActiva(sid)
-        const guardado = texto === '' ? '(sin respuesta)' : texto
+        const guardado = res.texto === '' ? '(sin respuesta)' : res.texto
         store.agregar(sid, 'a', guardado)
-        return { texto: guardado }
+        return { texto: guardado, denegados: res.denegados }
       } catch (e) {
         const m = e instanceof ClaudeError ? e.mensaje : 'No pude guardar la conversación.'
         try { store.agregar(sid, 'a', 'No pude responder: ' + m, true) } catch {}
-        return { texto: '', error: m }
+        return { texto: '', error: m, denegados: [] }
       } finally {
         const tok = envExtra[variableTokenMCP]
         if (tok !== undefined) mcp?.revocar(tok)
       }
     })
     store.registrarCosto({ oficina: carpeta, agente, origen, ref: ej.tarea, costo: caja.valor })
+    const costo = v.previo === undefined ? caja.valor : v.previo.costo + (caja.valor ?? 0)
+    const archivos = [...(v.previo?.archivos ?? [])]
+    for (const a of escritos.valor) if (!archivos.includes(a)) archivos.push(a)
+
+    if (r.error === undefined) {
+      const pedidos = pedidosDe(r.denegados, { ejecucion: ej.id, oficina: carpeta, agente })
+      if (pedidos.length > 0) {
+        this.esperarPermisos({ ejecucion: ej.id, oficina: carpeta, tarea: t, actuar, archivos, costo: costo ?? 0, texto: r.texto }, pedidos, def)
+        return
+      }
+    }
+    if (v.previo) { try { this.permisos.borrar(ej.id) } catch {} }
     try {
-      this.ejecuciones.terminar(ej.id, r.error === undefined ? 'ok' : 'error', r.texto, r.error, caja.valor)
+      this.ejecuciones.terminar(ej.id, r.error === undefined ? 'ok' : 'error', r.texto, r.error, costo)
     } catch {}
     this.s.log.info(`tarea ${ej.tarea} agente=${agente} estado=${r.error === undefined ? 'ok' : 'error'}`)
     if (r.error === undefined) {
       const entrega = entregas.registrar({
         oficina: carpeta, agente, nombre: def.nombre, origen, ref: ej.tarea, titulo: nombre, texto: r.texto, sid,
-        archivos: ArchivosEntrega.relativos(escritos.valor, carpeta), costo: caja.valor,
+        archivos: ArchivosEntrega.relativos(archivos, carpeta), costo,
       })
       this.marcarHecha(carpeta, t)
       const fin = this.ejecuciones.una(ej.id)
@@ -596,6 +643,103 @@ export class Programador implements ProgramadorEntregas {
     }
     const fin = this.ejecuciones.una(ej.id)
     if (fin) for (const g of this.ganchosTerminar) await this.llamar(() => g(fin))
+  }
+
+  // MARK: permisos pendientes de las corridas (permisos-tareas.ts)
+
+  /** Frena la ejecución: guarda los pedidos, la deja «esperando_permiso» y avisa a la persona. */
+  private esperarPermisos(e: EsperaPermiso, pedidos: PedidoTarea[], def: AgenteDef) {
+    try {
+      this.permisos.guardar(e, pedidos)
+      this.ejecuciones.esperando(e.ejecucion, e.texto, e.costo)
+    } catch {
+      this.s.log.error(`tarea ejecucion=${e.ejecucion}: no pude guardar los pedidos de permiso`)
+      try { this.ejecuciones.terminar(e.ejecucion, 'error', e.texto, 'No pude guardar los pedidos de permiso.', e.costo) } catch {}
+      return
+    }
+    this.s.log.info(`tarea ejecucion=${e.ejecucion} agente=${def.id} estado=esperando_permiso pedidos=${pedidos.length}`)
+    this.s.runner.actividad.tocar()
+    const n = pedidos.length
+    const texto = `«${e.tarea.nombre}» necesita tu permiso para seguir (${n === 1 ? '1 pedido' : `${n} pedidos`}).`
+    const av = this.s.avisos.crear({ oficina: e.oficina, tipo: 'permiso', agente: def.id, texto, ref: String(e.ejecucion) })
+    if (av) this.s.avisos.emitir(av, def.nombre)
+  }
+
+  /** Pedidos de permiso sin responder de las corridas de una oficina (JSON de la tarjeta). */
+  pendientesPermiso(oficina: string): Obj[] {
+    if (!this.preparado) return []
+    try {
+      const nombres = new Map(this.permisos.esperas(oficina).map((e) => [e.ejecucion, e.tarea.nombre]))
+      return this.permisos.pendientes(oficina).map((p) => pedidoTareaJSON(p, nombres.get(p.ejecucion) ?? nombreCorrida('')))
+    } catch {
+      return []
+    }
+  }
+
+  /** La persona respondió un pedido de una corrida. undefined si no existe (o ya se respondió). «Siempre» guarda las
+   *  reglas en el agente. Cuando ya respondió todos los de esa ejecución, la tarea retoma en segundo plano. */
+  responderPermiso(oficina: string, id: string, decision: DecisionPermiso): { reglas?: string[]; retoma?: boolean } | undefined {
+    if (!this.preparado) return undefined
+    const p = this.permisos.pedido(oficina, id)
+    if (!p || p.decision !== undefined) return undefined
+    let reglas: string[] | undefined
+    if (decision === 'siempre') {
+      if (p.reglas.length === 0) throw new ErrorAPI(400, 'Esto solo se puede permitir una vez.')
+      reglas = this.s.oficinas.agregarReglas(p.agente, p.reglas)
+    }
+    this.permisos.decidir(p.id, decision)
+    this.s.log.info(`permiso tarea ejecucion=${p.ejecucion} agente=${p.agente} herramienta=${p.herramienta} respuesta=${decision}`)
+    this.s.runner.actividad.tocar()
+    let retoma = false
+    if (this.permisos.pedidosDe(p.ejecucion).every((x) => x.decision !== undefined)) {
+      try { retoma = this.continuar(p.ejecucion) } catch (e) { this.s.log.error(`tarea ejecucion=${p.ejecucion}: no pude retomar: ${e instanceof Error ? e.message : e}`) }
+    }
+    const r: { reglas?: string[]; retoma?: boolean } = {}
+    if (reglas) r.reglas = reglas
+    if (retoma) r.retoma = true
+    return r
+  }
+
+  /** Retoma las ejecuciones de `oficina` que ya tienen todos sus pedidos respondidos (se respondieron con otra oficina
+   *  abierta, o la app se cerró antes de retomar). */
+  retomarRespondidas(oficina: string) {
+    if (!this.preparado) return
+    try {
+      for (const e of this.permisos.esperas(oficina)) {
+        const ps = this.permisos.pedidosDe(e.ejecucion)
+        if (ps.length > 0 && ps.every((p) => p.decision !== undefined)) this.continuar(e.ejecucion)
+      }
+    } catch {}
+  }
+
+  /** Retoma una ejecución que esperaba permisos: la misma conversación, con lo permitido «una vez» sumado a sus reglas solo
+   *  para esta vuelta (lo de «Siempre» ya quedó en el agente). Si la oficina no es la abierta, sigue esperando. */
+  private continuar(ejecucion: number): boolean {
+    if (this.cerrado) return false
+    const e = this.permisos.espera(ejecucion)
+    const ej = this.ejecuciones.una(ejecucion)
+    if (!e || !ej || ej.estado !== 'esperando_permiso') return false
+    const act = this.s.oficinas.activa()
+    if (!act || act.carpeta !== e.oficina) return false
+    const def = act.oficina.agentes.find((a) => a.id === ej.agente)
+    if (!def) {
+      this.permisos.borrar(ejecucion)
+      this.ejecuciones.terminar(ejecucion, 'error', e.texto, 'El agente ya no está en la oficina.', e.costo)
+      return false
+    }
+    const pedidos = this.permisos.pedidosDe(ejecucion)
+    const extra: string[] = []
+    for (const p of pedidos) if (p.decision === 'una_vez') for (const r of reglasUnaVez(p)) if (!extra.includes(r)) extra.push(r)
+    const clave = Programador.clave(act.carpeta, `permiso:${ejecucion}`)
+    if (this.reservadas.has(clave)) return false
+    this.reservadas.add(clave)
+    this.ejecuciones.reanudar(ejecucion)
+    const corriendo: Ejecucion = { ...ej, estado: 'corriendo' }
+    const mensaje = mensajeContinuar(pedidos, act.oficina.duenio)
+    this.corridas.set(ejecucion, this.vuelta(corriendo, act, e.tarea, def, e.actuar, { mensaje, activa: true, reglasExtra: extra, previo: e })
+      .catch((err) => { this.s.log.error(`tarea ${ej.tarea}: ${err instanceof Error ? err.message : err}`) })
+      .finally(() => this.termino(ejecucion, clave)))
+    return true
   }
 }
 
@@ -966,6 +1110,10 @@ export function instalar(s: Servicios) {
   const prog = new Programador(s)
   prog.preparar()
   s.huecos.programador = prog
+  s.permisosTareas = () => ({
+    pendientes: (o) => prog.pendientesPermiso(o),
+    responder: (o, id, d) => prog.responderPermiso(o, id, d),
+  })
   s.router.tareas = new TareasRouter(s, prog)
   s.validaciones.push((o) => ValidarTareas.validar(o))
 
@@ -980,7 +1128,8 @@ export function instalar(s: Servicios) {
     if (av) s.avisos.emitir(av, of?.agentes.find((a) => a.id === e.agente)?.nombre ?? e.agente)
   })
 
-  s.alArrancar.push(() => prog.iniciar())
+  s.alAbrir.push(async (a) => { prog.retomarRespondidas(a.carpeta) })
+  s.alArrancar.push(() => { prog.iniciar(); const a = s.oficinas.activa(); if (a) prog.retomarRespondidas(a.carpeta) })
   // Swift: programador.detener → mcp.cerrar → runner.shutdown → programador.esperar
   s.alCerrar.unshift(() => prog.detener())
   s.despuesDeProcesos.push(() => prog.esperar())

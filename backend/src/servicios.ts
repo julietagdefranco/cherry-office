@@ -14,7 +14,7 @@ import type { Oficina } from './oficina.js'
 import type { OficinaActiva, Oficinas } from './oficinas.js'
 import type { ServidorConector } from './permisos.js'
 import type { Router } from './router.js'
-import type { MCPChat } from './rutas-chat.js'
+import type { MCPChat, PermisosTareasChat } from './rutas-chat.js'
 import type { Store } from './store.js'
 
 export interface Servicios {
@@ -41,6 +41,8 @@ export interface Servicios {
   readonly validaciones: ((o: Oficina) => void)[]
   /** Servidor MCP para el chat (lo pone el módulo de consultas). */
   mcp?: () => MCPChat | undefined
+  /** Pedidos de permiso de las tareas que esperan (lo pone el módulo de tareas). */
+  permisosTareas?: () => PermisosTareasChat | undefined
   /** Catálogo de conectores de la cuenta (lo pone el módulo de gobierno). */
   catalogo?: () => ServidorConector[] | undefined
   /** Resumen de corridas de flujos para /api/actividad. */

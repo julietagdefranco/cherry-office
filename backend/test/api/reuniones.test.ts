@@ -166,7 +166,7 @@ describe('Reuniones', () => {
 
   // MARK: turnos
 
-  test('turnos: secuenciales, un turno por participante y ronda, claude solo con Read,Glob,Grep y cwd en la oficina', async () => {
+  test('turnos: secuenciales, un turno por participante y ronda, claude con Read,Glob,Grep (lo demás se pregunta) y cwd en la oficina', async () => {
     const f = await fix()
     const r = await nueva(f, 'plan de lanzamiento', ['marce', 'nico', 'betty'], { rondas: 2 })
     const id = str(r.obj.id)
@@ -189,10 +189,11 @@ describe('Reuniones', () => {
     const sids = new Set<string>()
     ll.forEach((l, i) => {
       expect(Sandbox.valor(l, '--agent')).toBe(orden[i])
-      expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep')
-      expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', '--disallowedTools', 'mcp__claude_ai_*'])
-      expect(!l.includes('Edit') && !l.includes('Write')).toBe(true)
-      expect(Sandbox.valor(l, '--permission-mode')).toBe('dontAsk')
+      // solo lectura permitida; Bash, Edit y Write visibles pero se le preguntan a la persona (pedir_permiso)
+      expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Bash,Edit,Write')
+      expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'mcp__hq__pedir_permiso', '--disallowedTools', 'mcp__claude_ai_*'])
+      expect(Sandbox.valor(l, '--permission-mode')).toBe('default')
+      expect(Sandbox.valor(l, '--permission-prompt-tool')).toBe('mcp__hq__pedir_permiso')
       expect(Sandbox.valor(l, '--output-format')).toBe('stream-json')
       expect(l.includes('--session-id') && !l.includes('--resume')).toBe(true)
       expect(l.includes('--add-dir')).toBe(false)
@@ -203,6 +204,30 @@ describe('Reuniones', () => {
     expect(f.sb.cwds.every((c) => sinPrivate(c) === sinPrivate(f.carpeta))).toBe(true)
     // los turnos no tocan el historial del chat 1 a 1
     expect(msgs(await historial(f.b, { agent: 'marce' }))).toEqual([])
+  })
+
+  test('permiso en vivo en la reunión: el turno pide permiso, la tarjeta aparece en /api/actividad y la respuesta destraba el turno', async () => {
+    const f = await fix([{ id: 'marce', depto: 'redes' }, { id: 'nico', depto: 'ads' }])
+    // las reglas guardadas del agente valen también en la reunión
+    expect((await f.patch('/api/agentes/marce', { reglas: ['Bash(git status:*)'] })).status).toBe(200)
+    const pendientes = async (): Promise<Obj[]> => lista((await f.get('/api/actividad')).obj.permisos)
+    // el claude falso, con PERMISO: en el prompt (va en el tema), llama a pedir_permiso y espera
+    const id = str((await nueva(f, 'PERMISO:ls', ['marce', 'nico'], { rondas: 1 })).obj.id)
+    for (const quien of ['marce', 'nico']) {
+      expect(await esperar(async () => (await pendientes()).length === 1, 10), quien).toBe(true)
+      const p = (await pendientes())[0]!
+      expect(str(p.agente)).toBe(quien)
+      expect(str(p.herramienta)).toBe('Bash')
+      const r = await f.post(`/api/permisos/${str(p.id)}`, { decision: quien === 'marce' ? 'una_vez' : 'rechazar' })
+      expect(r.status, str(r.obj.error)).toBe(200)
+    }
+    const fin = await aguardar(f, id)
+    expect(fin.estado).toBe('esperando')
+    expect(turnos(fin).map((t) => t.error)).toEqual([undefined, undefined])
+    expect(await pendientes()).toEqual([])
+    const l = llamadasTurno(f)[0]!
+    expect(Sandbox.reglas(l)).toContain('Bash(git status:*)')
+    expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Bash,Edit,Write')
   })
 
   test('prompt del turno: tema, participantes, memoria común, decisiones, transcripción por ronda y consigna', async () => {
@@ -284,7 +309,7 @@ describe('Reuniones', () => {
 
   // MARK: intervenir
 
-  test('intervención en medio de la ronda: queda como turno «usuario» y la leen los turnos que siguen', async () => {
+  test('mensaje en medio de la última ronda: queda como turno «usuario», lo leen los turnos que siguen y se suma una ronda', async () => {
     const f = await fix()
     f.sb.modo('nico', 'puerta')
     const id = str((await nueva(f, 'campaña de anuncios pagos', ['marce', 'nico', 'betty'])).obj.id)
@@ -299,21 +324,42 @@ describe('Reuniones', () => {
     expect(r.obj.estado).toBe('en_curso')
     f.sb.abrirPuerta()
     const fin = await aguardar(f, id)
-    expect(turnos(fin).map((x) => str(x.agente))).toEqual(['usuario', 'nico', 'marce', 'betty'])
+    // nico ya estaba hablando cuando llegó el mensaje: como era la última ronda, se suma otra
+    expect(turnos(fin).map((x) => str(x.agente))).toEqual(['usuario', 'nico', 'marce', 'betty', 'nico', 'marce', 'betty'])
+    expect(turnos(fin).map((x) => x.ronda)).toEqual([0, 1, 1, 1, 2, 2, 2])
     const p = promptsTurno(f)
+    const aviso = 'Desde tu último turno, Ana (dueño de la oficina) escribió en la reunión:\n«quiero ver números concretos»'
     expect(p[0]!.includes('quiero ver números')).toBe(false)                      // nico ya estaba hablando
     expect(p[1]!.includes('Ana (dueño de la oficina): quiero ver números concretos')).toBe(true)
-    expect(p[2]!.includes('Ana (dueño de la oficina): quiero ver números concretos')).toBe(true)
+    expect(p[1]!.includes(aviso)).toBe(true)
+    expect(p[2]!.includes(aviso)).toBe(true)
+    expect(p[3]!.includes(aviso)).toBe(true)                                      // nico: no lo había visto
+    expect(p[4]!.includes(aviso)).toBe(false)                                     // marce y betty ya lo respondieron
+    expect(p[5]!.includes(aviso)).toBe(false)
   })
 
-  test('intervención entre rondas: lleva la última ronda vista, y la siguiente ronda la lee', async () => {
+  test('mensaje con rondas pendientes: lo incorporan las rondas que ya estaban y no se suma ninguna', async () => {
+    const f = await fix()
+    f.sb.modo('nico', 'puerta')
+    const id = str((await nueva(f, 'campaña de anuncios pagos', ['marce', 'nico'], { rondas: 2 })).obj.id)
+    expect(await esperar(() => f.sb.eventos.includes('S nico'))).toBe(true)
+    expect((await f.post(`/api/reuniones/${id}/intervencion`, { texto: 'pensemos en TikTok' })).status).toBe(200)
+    f.sb.abrirPuerta()
+    const fin = await aguardar(f, id)
+    expect(turnos(fin).filter((x) => str(x.agente) !== 'usuario').map((x) => x.ronda)).toEqual([1, 1, 2, 2])
+    const p = promptsTurno(f)
+    expect(p[1]!.includes('«pensemos en TikTok»')).toBe(true)
+    expect(p[2]!.includes('«pensemos en TikTok»')).toBe(true)                    // nico, en la ronda 2
+  })
+
+  test('mensaje entre rondas: lleva la última ronda vista y arranca una ronda que lo lee', async () => {
     const f = await fix([{ id: 'marce', depto: 'redes' }])
     const id = str((await nueva(f, 'tema', ['marce'])).obj.id)
     await aguardar(f, id)
     const r = await f.post(`/api/reuniones/${id}/intervencion`, { texto: 'ahora más corto' })
     expect(turnos(r.obj).at(-1)?.ronda).toBe(1)
     expect(turnos(r.obj).at(-1)?.agente).toBe('usuario')
-    expect((await f.post(`/api/reuniones/${id}/ronda`)).status).toBe(200)
+    expect(r.obj.estado).toBe('en_curso')
     const fin = await aguardar(f, id)
     expect(turnos(fin).map((t) => str(t.agente))).toEqual(['marce', 'usuario', 'marce'])
     expect(turnos(fin).map((t) => t.ronda)).toEqual([1, 1, 2])
@@ -334,6 +380,7 @@ describe('Reuniones', () => {
     expect((await inter({ texto: 3 })).status).toBe(400)
     expect((await inter({ texto: 't'.repeat(5001) })).status).toBe(400)
     expect((await inter({ texto: 't'.repeat(5000) })).status).toBe(200)
+    await aguardar(f, id)                                                         // el mensaje arrancó una ronda
     expect((await f.post(`/api/reuniones/${U.a}/intervencion`, { texto: 'x' })).status).toBe(404)
     expect((await f.post('/api/reuniones/no-es-uuid/intervencion', { texto: 'x' })).status).toBe(404)
     expect((await f.post(`/api/reuniones/${id}/otra-cosa`)).status).toBe(404)
@@ -436,7 +483,7 @@ describe('Reuniones', () => {
   })
 
   test('turno que pasa el timeout (HQ_REUNION_TURNO_TIMEOUT): error «Tardó demasiado» y sin procesos huérfanos', async () => {
-    const f = await fix([{ id: 'marce', depto: 'redes' }, { id: 'nico', depto: 'ads' }], { HQ_REUNION_TURNO_TIMEOUT: '0.7' })
+    const f = await fix([{ id: 'marce', depto: 'redes' }, { id: 'nico', depto: 'ads' }], { HQ_REUNION_TURNO_TIMEOUT: '0.7', HQ_PERMISO_TIMEOUT: '0' })
     f.sb.modo('marce', 'lento')
     const id = str((await nueva(f, 'plan', ['marce', 'nico'])).obj.id)
     const fin = await aguardar(f, id)
@@ -506,6 +553,58 @@ describe('Reuniones', () => {
     expect(dict(g.sintesis)).toEqual(s)
     expect(g.acta).toBe(rel)
     expect(lista((await f.get('/api/reuniones')).obj.reuniones)[0]?.estado).toBe('cerrada')
+  })
+
+  // MARK: resumen sin cerrar
+
+  test('resumen: arma un resumen parcial sin cerrar (sin acta, sin decisiones.md, sin avisos) y la reunión sigue', async () => {
+    const f = await fix()
+    const previas = f.leer('conocimiento/decisiones.md')
+    const id = str((await nueva(f, 'plan', ['marce', 'nico'])).obj.id)
+    await aguardar(f, id)
+    f.sb.responder('acta', '{"resumen": "Marce quiere reels, Nico anuncios.", "decisiones": ["Lanzar en diciembre"], "abiertas": ["¿Cuánto presupuesto hay?", " "], "pendientes": [{"quien": "Nico", "que": "Cotizar"}]}')
+    const r = await f.post(`/api/reuniones/${id}/resumen`)
+    expect(r.status, JSON.stringify(r.obj)).toBe(200)
+    expect(r.obj.estado).toBe('esperando')
+    expect(r.obj.sintesis).toBeUndefined()
+    expect(r.obj.acta).toBeUndefined()
+    const rp = dict(r.obj.resumenParcial)
+    expect(rp.resumen).toBe('Marce quiere reels, Nico anuncios.')
+    expect(rp.decisiones).toEqual(['Lanzar en diciembre'])
+    expect(rp.abiertas).toEqual(['¿Cuánto presupuesto hay?'])
+    expect(lista(rp.pendientes).map((x) => str(x.que))).toEqual(['Cotizar'])
+    expect(rp.turnos).toBe(2)
+    expect(str(rp.ts).endsWith('Z')).toBe(true)
+    expect(f.leer('conocimiento/decisiones.md')).toBe(previas)
+    expect(fs.existsSync(ruta(f.carpeta, 'reuniones')) ? fs.readdirSync(ruta(f.carpeta, 'reuniones')).filter((x) => x.endsWith('.md')) : []).toEqual([])
+    const p = llamadasConPrompt(f, 'secretario de actas')[0]!.at(-1)!
+    expect(p.includes('TODAVÍA NO TERMINÓ')).toBe(true)
+    // queda guardado y la reunión se puede seguir y cerrar normalmente
+    expect(dict((await ver(f, id)).resumenParcial).resumen).toBe('Marce quiere reels, Nico anuncios.')
+    expect((await f.post(`/api/reuniones/${id}/intervencion`, { texto: 'Hay 100 mil' })).status).toBe(200)
+    await aguardar(f, id)
+    f.sb.modo('acta', null)
+    fs.rmSync(`${f.sb.binDir}/resp.acta.json`, { force: true })
+    const c = await f.post(`/api/reuniones/${id}/cerrar`)
+    expect(c.status).toBe(200)
+    expect(c.obj.resumenParcial).toBeUndefined()
+    expect(dict(c.obj.sintesis).resumen).toBe('Se acordó avanzar con el plan.')
+    // cerrada: 409
+    expect((await f.post(`/api/reuniones/${id}/resumen`)).status).toBe(409)
+  })
+
+  test('resumen: falla del secretario -> error y la reunión no cambia; sin opiniones -> 409', async () => {
+    const f = await fix([{ id: 'marce', depto: 'redes' }])
+    const id = str((await nueva(f, 'tema', ['marce'])).obj.id)
+    await aguardar(f, id)
+    f.sb.modo('acta', 'nojson')
+    const r = await f.post(`/api/reuniones/${id}/resumen`)
+    expect(r.status).toBe(500)
+    expect(r.obj.error).toBe('El resumen no vino en el formato esperado.')
+    const g = await ver(f, id)
+    expect(g.estado).toBe('esperando')
+    expect(g.resumenParcial).toBeUndefined()
+    expect((await llamar(f.b, 'GET', `/api/reuniones/${id}/resumen`)).status).toBe(405)
   })
 
   test('cerrar: dos veces 409; actas del mismo día y tema con -2; tema sin letras -> «reunion»', async () => {
