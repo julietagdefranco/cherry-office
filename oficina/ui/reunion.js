@@ -1,10 +1,11 @@
-/* Reuniones: los agentes van a la sala, opinan por rondas desde su rol, podés intervenir y al cerrar queda un acta. */
+/* Reuniones: los agentes van a la sala, opinan por rondas desde su rol, les escribís como en un chat y al cerrar queda un acta. */
 (function () {
   'use strict';
   var h = App.h, api = App.api;
   var E = App.E;
   var visto = null;         // id de la reunión que muestra el panel
   var reloj = null, vigilando = null, cerrando = false;
+  var borrador = {};        // lo que estás escribiendo, por reunión (el panel se repinta mientras hablan)
 
   /* patrones de reunión: misma lista y mismos ids que el backend (ReunionPatrones.swift / hq_reuniones.py) */
   var PATRONES = [
@@ -209,7 +210,7 @@
     var viejo = der.querySelector('.der-cuerpo');
     if (viejo) scrollAbajo = viejo.scrollTop + viejo.clientHeight >= viejo.scrollHeight - 30;
     var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
-    var est = r.estado === 'cerrada' ? 'Cerrada' : r.estado === 'en_curso' ? 'En curso' : 'Esperando que intervengas o cierres';
+    var est = r.estado === 'cerrada' ? 'Cerrada' : r.estado === 'en_curso' ? 'En curso' : 'Esperando: escribí algo, pedí otra ronda o cerrá';
     App.add(App.vaciar(der), 
       h('div.der-cab', h('div.retrato', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', borderRadius: '12px' } }, App.icono('reunion')),
         h('div.der-tit', h('h2', { title: r.tema }, r.tema), h('div.sub', est + ' · ' + patronDe(r.patron).nombre + ' · ' + r.agentes.map(nombre).join(', '))),
@@ -242,18 +243,34 @@
         r.acta && (App.nativo.hay || App.esMarkdown(r.acta)) ? h('button.btn', { onclick: function () { if (App.esMarkdown(r.acta)) App.abrirMarkdownOficina(r.acta); else App.nativo.abrir(r.actaRuta); } }, App.icono('abrir'), 'Ver acta') : null,
         h('button.btn.primario', { onclick: function () { App.cerrarDerecho(); nueva(); } }, 'Nueva reunión')));
     } else {
-      var txt = h('textarea.campo', { rows: 2, placeholder: 'Intervenir: sumá un dato o una pregunta para la próxima ronda', maxlength: 5000 });
+      /* chat: lo que escribís lo toman los turnos que siguen; si no queda ninguna ronda, arranca (o se suma) una más */
+      var enfocado = document.activeElement && document.activeElement.classList.contains('reunion-txt');
+      var txt = h('textarea.campo.reunion-txt', { rows: 1, maxlength: 5000,
+        placeholder: r.estado === 'en_curso' ? 'Escribile a la reunión: lo van a tener en cuenta en lo que sigue…' : 'Escribile a la reunión: responden en una ronda más…' });
+      txt.value = borrador[r.id] || '';
+      var mandar = h('button.btn.primario.icono', { title: 'Enviar (Enter)', disabled: cerrando, onclick: enviar }, App.icono('enviar'));
+      function alto() { txt.style.height = 'auto'; txt.style.height = Math.min(160, txt.scrollHeight + 2) + 'px'; }
+      txt.addEventListener('input', function () { borrador[r.id] = txt.value; alto(); });
+      txt.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); enviar(); } });
+      function enviar() {
+        var v = txt.value.trim(); if (!v || cerrando || mandar.disabled) { txt.focus(); return; }
+        mandar.disabled = true;
+        api.post('/api/reuniones/' + r.id + '/intervencion', { texto: v }).then(function (d) {
+          borrador[r.id] = ''; E.reunion = d; sincronizar(); pintarPanel(d);
+          if (d.estado === 'en_curso' && vigilando !== d.id) vigilar(d.id);
+          var nt = App.dom.derecho.querySelector('.reunion-txt'); if (nt) nt.focus();
+        }).catch(function (e) { mandar.disabled = false; App.fallo(e); });
+      }
       var ocupado = r.estado === 'en_curso' || cerrando;
-      App.add(pie, txt, h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' } },
-        h('button.btn', { disabled: cerrando, onclick: function () {
-          var v = txt.value.trim(); if (!v) { txt.focus(); return; }
-          api.post('/api/reuniones/' + r.id + '/intervencion', { texto: v }).then(function (d) { E.reunion = d; pintarPanel(d); }).catch(App.fallo);
-        } }, 'Intervenir'),
+      App.add(pie, h('div.redactar', txt, mandar), h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px', alignItems: 'center' } },
+        h('span.ayuda', { style: { margin: 0 } }, 'Enter para enviar · Mayús+Enter para otra línea'),
         h('span', { style: { flex: 1 } }),
         h('button.btn', { disabled: ocupado, onclick: function () {
           api.post('/api/reuniones/' + r.id + '/ronda').then(function (d) { E.reunion = d; sincronizar(); pintarPanel(d); vigilar(d.id); }).catch(App.fallo);
         } }, 'Otra ronda'),
         h('button.btn.primario', { disabled: ocupado, onclick: function () { cerrar(r); } }, cerrando ? [h('span.giro'), 'Armando el acta…'] : 'Cerrar y resumir')));
+      if (txt.value) setTimeout(alto, 0);
+      if (enfocado) setTimeout(function () { txt.focus(); txt.setSelectionRange(txt.value.length, txt.value.length); }, 0);
     }
     if (scrollAbajo) cuerpo.scrollTop = cuerpo.scrollHeight;
   }

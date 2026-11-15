@@ -284,7 +284,7 @@ describe('Reuniones', () => {
 
   // MARK: intervenir
 
-  test('intervención en medio de la ronda: queda como turno «usuario» y la leen los turnos que siguen', async () => {
+  test('mensaje en medio de la última ronda: queda como turno «usuario», lo leen los turnos que siguen y se suma una ronda', async () => {
     const f = await fix()
     f.sb.modo('nico', 'puerta')
     const id = str((await nueva(f, 'campaña de anuncios pagos', ['marce', 'nico', 'betty'])).obj.id)
@@ -299,21 +299,42 @@ describe('Reuniones', () => {
     expect(r.obj.estado).toBe('en_curso')
     f.sb.abrirPuerta()
     const fin = await aguardar(f, id)
-    expect(turnos(fin).map((x) => str(x.agente))).toEqual(['usuario', 'nico', 'marce', 'betty'])
+    // nico ya estaba hablando cuando llegó el mensaje: como era la última ronda, se suma otra
+    expect(turnos(fin).map((x) => str(x.agente))).toEqual(['usuario', 'nico', 'marce', 'betty', 'nico', 'marce', 'betty'])
+    expect(turnos(fin).map((x) => x.ronda)).toEqual([0, 1, 1, 1, 2, 2, 2])
     const p = promptsTurno(f)
+    const aviso = 'Desde tu último turno, Ana (dueño de la oficina) escribió en la reunión:\n«quiero ver números concretos»'
     expect(p[0]!.includes('quiero ver números')).toBe(false)                      // nico ya estaba hablando
     expect(p[1]!.includes('Ana (dueño de la oficina): quiero ver números concretos')).toBe(true)
-    expect(p[2]!.includes('Ana (dueño de la oficina): quiero ver números concretos')).toBe(true)
+    expect(p[1]!.includes(aviso)).toBe(true)
+    expect(p[2]!.includes(aviso)).toBe(true)
+    expect(p[3]!.includes(aviso)).toBe(true)                                      // nico: no lo había visto
+    expect(p[4]!.includes(aviso)).toBe(false)                                     // marce y betty ya lo respondieron
+    expect(p[5]!.includes(aviso)).toBe(false)
   })
 
-  test('intervención entre rondas: lleva la última ronda vista, y la siguiente ronda la lee', async () => {
+  test('mensaje con rondas pendientes: lo incorporan las rondas que ya estaban y no se suma ninguna', async () => {
+    const f = await fix()
+    f.sb.modo('nico', 'puerta')
+    const id = str((await nueva(f, 'campaña de anuncios pagos', ['marce', 'nico'], { rondas: 2 })).obj.id)
+    expect(await esperar(() => f.sb.eventos.includes('S nico'))).toBe(true)
+    expect((await f.post(`/api/reuniones/${id}/intervencion`, { texto: 'pensemos en TikTok' })).status).toBe(200)
+    f.sb.abrirPuerta()
+    const fin = await aguardar(f, id)
+    expect(turnos(fin).filter((x) => str(x.agente) !== 'usuario').map((x) => x.ronda)).toEqual([1, 1, 2, 2])
+    const p = promptsTurno(f)
+    expect(p[1]!.includes('«pensemos en TikTok»')).toBe(true)
+    expect(p[2]!.includes('«pensemos en TikTok»')).toBe(true)                    // nico, en la ronda 2
+  })
+
+  test('mensaje entre rondas: lleva la última ronda vista y arranca una ronda que lo lee', async () => {
     const f = await fix([{ id: 'marce', depto: 'redes' }])
     const id = str((await nueva(f, 'tema', ['marce'])).obj.id)
     await aguardar(f, id)
     const r = await f.post(`/api/reuniones/${id}/intervencion`, { texto: 'ahora más corto' })
     expect(turnos(r.obj).at(-1)?.ronda).toBe(1)
     expect(turnos(r.obj).at(-1)?.agente).toBe('usuario')
-    expect((await f.post(`/api/reuniones/${id}/ronda`)).status).toBe(200)
+    expect(r.obj.estado).toBe('en_curso')
     const fin = await aguardar(f, id)
     expect(turnos(fin).map((t) => str(t.agente))).toEqual(['marce', 'usuario', 'marce'])
     expect(turnos(fin).map((t) => t.ronda)).toEqual([1, 1, 2])
@@ -334,6 +355,7 @@ describe('Reuniones', () => {
     expect((await inter({ texto: 3 })).status).toBe(400)
     expect((await inter({ texto: 't'.repeat(5001) })).status).toBe(400)
     expect((await inter({ texto: 't'.repeat(5000) })).status).toBe(200)
+    await aguardar(f, id)                                                         // el mensaje arrancó una ronda
     expect((await f.post(`/api/reuniones/${U.a}/intervencion`, { texto: 'x' })).status).toBe(404)
     expect((await f.post('/api/reuniones/no-es-uuid/intervencion', { texto: 'x' })).status).toBe(404)
     expect((await f.post(`/api/reuniones/${id}/otra-cosa`)).status).toBe(404)
