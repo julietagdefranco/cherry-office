@@ -19,6 +19,12 @@ echo "==> Armando $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/oficina"
 cp "$BIN" "$APP/Contents/MacOS/$EXE"
+# Sparkle (actualizaciones): el framework va en Contents/Frameworks y el ejecutable lo busca ahí.
+SPARKLE="$(dirname "$BIN")/Sparkle.framework"
+[ -d "$SPARKLE" ] || { echo "No encuentro $SPARKLE" >&2; exit 1; }
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE" "$APP/Contents/Frameworks/Sparkle.framework"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$EXE"
 cp "$APP_DIR/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 # oficina/ es la única fuente del front; se excluye lo que es solo del modo desarrollo o datos locales.

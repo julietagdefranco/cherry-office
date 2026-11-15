@@ -13,9 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var notificador: Notificador?
     /// Ícono de la barra de menú: mantiene la app (y las tareas programadas) a la vista con la ventana cerrada.
     private var barraMenu: BarraMenu?
+    /// Sparkle: busca versiones nuevas al abrir y cada día (nil fuera de una Oficina.app empaquetada).
+    private(set) var actualizador: Actualizador?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         runtime = Runtime.make()
+        actualizador = Actualizador()
         NSApp.mainMenu = MainMenu.build(delegate: self)
         buildWindow()
         notificador = Notificador(webView: webView) { [weak self] in self?.mostrarVentana() }
