@@ -580,6 +580,9 @@ public actor Oficinas {
             (u == "/" || u == ":" || u == "\\" || u.value < 32) ? "-" : Character(u)
         }.map(String.init).joined().trimmingCharacters(in: .whitespacesAndNewlines)
         while limpio.hasPrefix(".") { limpio.removeFirst() }
+        // Sin punto ni espacio al final («Luis Inc.» -> «Luis Inc»): con una carpeta así en la ruta, Claude Code nunca
+        // aplica las reglas `Edit(//…)`/`Write(//…)` y en `dontAsk` rechaza toda escritura (docs/aprendizajes.md).
+        while let u = limpio.last, u == "." || u.isWhitespace { limpio.removeLast() }
         if limpio.isEmpty { limpio = "Oficina" }
         let fm = FileManager.default
         var cand = (base as NSString).appendingPathComponent(limpio)

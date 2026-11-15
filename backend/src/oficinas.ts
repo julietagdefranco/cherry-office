@@ -262,6 +262,9 @@ export class Oficinas {
       return ch === '/' || ch === ':' || ch === '\\' || u < 32 ? '-' : ch
     }).join('').trim()
     limpio = limpio.replace(/^\.+/, '')
+    // Sin punto ni espacio al final («Luis Inc.» -> «Luis Inc»): con una carpeta así en la ruta, Claude Code nunca
+    // aplica las reglas `Edit(//…)`/`Write(//…)` y en `dontAsk` rechaza toda escritura (docs/aprendizajes.md).
+    limpio = limpio.replace(/[.\s]+$/u, '')
     if (limpio === '') limpio = 'Oficina'
     let cand = path.join(base, limpio)
     for (let n = 2; fs.existsSync(cand); n++) cand = path.join(base, `${limpio} ${n}`)

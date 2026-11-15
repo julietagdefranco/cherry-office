@@ -142,6 +142,7 @@ App.Entregables = (function () {
   }
 
   function abrirArchivo(rel) {
+    if (App.esMarkdown(rel)) { App.abrirMarkdownOficina(rel); return; }
     if (App.nativo.hay && App.E.carpeta) { App.nativo.abrir(App.E.carpeta.replace(/\/$/, '') + '/' + rel); return; }
     api().get('/api/oficina/archivo', { ruta: rel }).then(App.abrirContenido).catch(App.fallo);
   }

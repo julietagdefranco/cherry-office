@@ -1585,6 +1585,14 @@ App.Oficina3D = (function () {
     orb.tx = (plano.x0 + plano.x1) / 2; orb.tz = (plano.z0 + plano.z1) / 2 + 1;
     var fov = cam.fov * Math.PI / 180, aspecto = cam.aspect || 1.5;
     var dh = (w * 0.56) / Math.tan(fov / 2) / aspecto, dv = (d * 0.5 + 4) / Math.tan(fov / 2);
+    /* pantalla vertical (celular): se gira la vista para que el edificio, que es apaisado, quede en diagonal y llene
+       más la pantalla; se encuadra con lo que ocupa girado y se deja recortar un poco a los costados */
+    if (aspecto < 0.85) {
+      if (reset) orb.az = 1.0;
+      var s = Math.abs(Math.sin(orb.az)), c = Math.abs(Math.cos(orb.az));
+      dh = ((w * c + d * s) * 0.42) / Math.tan(fov / 2) / aspecto;
+      dv = ((w * s + d * c) * 0.5 + 4) / Math.tan(fov / 2);
+    }
     var dd = Math.max(dh, dv, 24);
     orb.minD = Math.max(10, dd * 0.22); orb.maxD = dd * 2.2;
     if (reset || orb.d > orb.maxD || orb.d < orb.minD) orb.d = dd;

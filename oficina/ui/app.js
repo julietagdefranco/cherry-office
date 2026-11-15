@@ -244,19 +244,23 @@
       dom.carga = h('div.carga3d', h('span.giro'), 'Armando la oficina…');
       dom.avisoReu = h('div.aviso-reunion.oculto');
       dom.derecho = h('aside.derecho');
-      dom.app = h('div.app',
-        h('aside.lateral', dom.marca, dom.equipo, h('nav.nav',
+      /* en el celular la barra lateral es un cajón: se abre con el botón de menú y se cierra al elegir algo */
+      function cajon(abrir) { dom.app.classList.toggle('lateral-abierta', abrir); }
+      dom.lateral = h('aside.lateral', { onclick: function (ev) { if (ev.target.closest('.persona, .nav-item')) cajon(false); } }, dom.marca, dom.equipo, h('nav.nav',
           h('button.nav-item', { onclick: function () { App.Parte.abrir(); } }, App.icono('parte'), 'Parte del día', dom.navParte),
           h('button.nav-item', { onclick: function () { App.Flujos.abrir(); } }, App.icono('flujo'), 'Flujos', dom.navFlu),
           h('button.nav-item', { onclick: function () { App.Reunion.abrir(); } }, App.icono('reunion'), 'Reuniones', dom.navReu),
           h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib),
           h('button.nav-item', { onclick: function () { App.Yo.irAlDespacho(); App.Entregables.abrir(); } }, App.icono('bandeja'), 'Tu bandeja', dom.navEnt),
-          h('button.nav-item', { onclick: function () { App.Deptos.abrir(); } }, App.icono('capas'), 'Departamentos'))),
+          h('button.nav-item', { onclick: function () { App.Deptos.abrir(); } }, App.icono('capas'), 'Departamentos')));
+      dom.app = h('div.app', dom.lateral,
+        h('div.velo-lateral', { onclick: function () { cajon(false); } }),
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu,
+          h('button.btn.icono.boton-menu', { title: 'Equipo y secciones', onclick: function () { cajon(true); } }, App.icono('menu')),
           h('div.herramientas',
-            h('button.btn', { onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), 'Llamar a reunión'),
-            h('button.btn', { onclick: function () { App.Creador.abrir(); } }, App.icono('chispa'), 'Armar con el Creador'),
-            h('button.btn.primario', { onclick: function () { App.Contratar.abrir(); } }, App.icono('mas'), 'Contratar')),
+            h('button.btn', { title: 'Llamar a reunión', onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), h('span.btn-txt', 'Llamar a reunión')),
+            h('button.btn', { title: 'Armar con el Creador', onclick: function () { App.Creador.abrir(); } }, App.icono('chispa'), h('span.btn-txt', 'Armar con el Creador')),
+            h('button.btn.primario', { title: 'Contratar', onclick: function () { App.Contratar.abrir(); } }, App.icono('mas'), h('span.btn-txt', 'Contratar'))),
           h('div.pista', App.Paleta ? App.Paleta.BASE : 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte'),
           dom.derecho));
       App.vaciar(raiz).appendChild(dom.app);

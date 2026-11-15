@@ -100,6 +100,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
   var ICONOS = {
     mas: 'M12 5v14M5 12h14',
     cerrar: 'M6 6l12 12M18 6L6 18',
+    menu: 'M4 7h16M4 12h16M4 17h16',
     personas: 'M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M20 19v-1.5a3.5 3.5 0 0 0-2.5-3.35M15.5 4.2a3 3 0 0 1 0 5.6',
     reunion: 'M4 6h16v9H8l-4 4zM8 10h8',
     libro: 'M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3',
@@ -269,38 +270,143 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
   App.tam = function (b) { return b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(1) + ' MB'; };
   App.debounce = function (fn, ms) { var t; return function () { var a = arguments, s = this; clearTimeout(t); t = setTimeout(function () { fn.apply(s, a); }, ms); }; };
 
-  /* Markdown mínimo y seguro: se escapa todo y después se aplican pocas marcas. Sin enlaces ni HTML crudo. */
-  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  /* Markdown seguro: se escapa todo y después se aplican las marcas. Sin HTML crudo; los enlaces solo http(s) y mailto
+     (los abre el navegador del sistema). Soporta títulos, párrafos, listas anidadas y de tareas, citas, tablas,
+     código, separadores, negrita, cursiva, tachado y enlaces. */
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function enlace(u, texto) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + texto + '</a>'; }
   function enLinea(s) {
+    var guardado = [];
+    function guardar(html) { guardado.push(html); return '\u0000' + (guardado.length - 1) + '\u0000'; }
+    s = String(s).replace(/\u0000/g, '')
+      .replace(/`([^`\n]{1,500})`/g, function (_, c) { return guardar('<code>' + esc(c) + '</code>'); })
+      .replace(/!?\[([^\]\n]{1,300})\]\(\s*<?((?:https?:\/\/|mailto:)[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/g, function (_, t, u) { return guardar('<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">') + t + guardar('</a>'); })
+      .replace(/<((?:https?:\/\/|mailto:)[^\s<>]+)>/g, function (_, u) { return guardar(enlace(u, esc(u))); })
+      .replace(/(^|[\s(])(https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"*_])/g, function (_, a, u) { return a + guardar(enlace(u, esc(u))); });
     return esc(s)
-      .replace(/`([^`\n]{1,200})`/g, '<code>$1</code>')
-      .replace(/\*\*([^*\n]{1,300})\*\*/g, '<b>$1</b>')
-      .replace(/(^|[\s(])\*([^*\n]{1,200})\*(?=[\s).,;:!?]|$)/g, '$1<i>$2</i>');
+      .replace(/\*\*(?=\S)([^\n]{1,300}?\S)\*\*/g, '<b>$1</b>')
+      .replace(/(^|[^\w])__(?=\S)([^\n]{1,300}?\S)__(?!\w)/g, '$1<b>$2</b>')
+      .replace(/~~(?=\S)([^~\n]{1,300}?\S)~~/g, '<s>$1</s>')
+      .replace(/(^|[^\w*])\*(?=[^\s*])([^*\n]{0,200}?[^\s*])?\*(?![\w*])/g, function (m, a, t, i) { return t === undefined ? m : a + '<i>' + t + '</i>'; })
+      .replace(/(^|[^\w])_(?=\S)([^_\n]{1,200}?\S)?_(?!\w)/g, function (m, a, t) { return t === undefined ? m : a + '<i>' + t + '</i>'; })
+      .replace(/\u0000(\d+)\u0000/g, function (_, n) { return guardado[+n]; });
   }
+  function celdas(l) {
+    l = l.trim().replace(/^\|/, '').replace(/\|$/, '');
+    return l.replace(/\\\|/g, '\u0001').split('|').map(function (c) { return c.trim().replace(/\u0001/g, '|'); });
+  }
+  var RE_SEP_TABLA = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
+  var RE_ITEM = /^(\s*)([-*+•]|\d{1,9}[.)])\s+(.*)$/;
   App.markdown = function (texto) {
-    var lineas = String(texto || '').split('\n'), out = [], lista = null, pre = null, parrafo = [];
+    var lineas = String(texto || '').replace(/\r\n?/g, '\n').split('\n'), out = [], parrafo = [], listas = [];
     function cerrarP() { if (parrafo.length) { out.push('<p>' + parrafo.map(enLinea).join('<br>') + '</p>'); parrafo = []; } }
-    function cerrarL() { if (lista) { out.push('</' + lista + '>'); lista = null; } }
+    function cerrarL(hasta) {
+      hasta = hasta || 0;
+      while (listas.length > hasta) out.push('</li></' + listas.pop().tipo + '>');
+    }
+    function cerrarTodo() { cerrarP(); cerrarL(); }
+    function item(m) {
+      var ind = m[1].replace(/\t/g, '    ').length, tipo = /\d/.test(m[2]) ? 'ol' : 'ul', cont = m[3];
+      while (listas.length && ind < listas[listas.length - 1].ind) cerrarL(listas.length - 1);
+      var tope = listas[listas.length - 1];
+      if (tope && ind === tope.ind && tope.tipo !== tipo) { cerrarL(listas.length - 1); tope = listas[listas.length - 1]; }
+      if (!tope || ind > tope.ind) {
+        var ini = tipo === 'ol' ? parseInt(m[2], 10) : 1;
+        out.push('<' + tipo + (ini !== 1 ? ' start="' + ini + '"' : '') + '>');
+        listas.push({ tipo: tipo, ind: ind });
+      } else out.push('</li>');
+      var t = /^\[([ xX])\]\s+(.*)$/.exec(cont);
+      if (t) out.push('<li class="tarea"><input type="checkbox" disabled' + (t[1] !== ' ' ? ' checked' : '') + '> ' + enLinea(t[2]));
+      else out.push('<li>' + enLinea(cont));
+    }
     for (var i = 0; i < lineas.length; i++) {
-      var l = lineas[i];
-      if (pre !== null) { if (/^```/.test(l)) { out.push('<pre>' + esc(pre.join('\n')) + '</pre>'); pre = null; } else pre.push(l); continue; }
-      if (/^```/.test(l)) { cerrarP(); cerrarL(); pre = []; continue; }
-      var m;
-      if ((m = /^\s*[-*•]\s+(.*)$/.exec(l))) { cerrarP(); if (lista !== 'ul') { cerrarL(); out.push('<ul>'); lista = 'ul'; } out.push('<li>' + enLinea(m[1]) + '</li>'); continue; }
-      if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(l))) { cerrarP(); if (lista !== 'ol') { cerrarL(); out.push('<ol>'); lista = 'ol'; } out.push('<li>' + enLinea(m[1]) + '</li>'); continue; }
-      if ((m = /^#{1,6}\s+(.*)$/.exec(l))) { cerrarP(); cerrarL(); out.push('<h4>' + enLinea(m[1]) + '</h4>'); continue; }
-      if (!l.trim()) { cerrarP(); cerrarL(); continue; }
+      var l = lineas[i], m;
+      if ((m = /^\s*(```+|~~~+)/.exec(l))) {
+        cerrarTodo();
+        var cerca = m[1], cod = [];
+        for (i++; i < lineas.length && lineas[i].trim().indexOf(cerca) !== 0; i++) cod.push(lineas[i]);
+        out.push('<pre><code>' + esc(cod.join('\n')) + '</code></pre>');
+        continue;
+      }
+      if (!l.trim()) { cerrarP(); if (listas.length && !(i + 1 < lineas.length && (RE_ITEM.test(lineas[i + 1]) || /^\s{2,}\S/.test(lineas[i + 1])))) cerrarL(); continue; }
+      if ((m = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(l))) { cerrarTodo(); var n = Math.min(m[1].length + 1, 5); out.push('<h' + n + '>' + enLinea(m[2]) + '</h' + n + '>'); continue; }
+      if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(l)) { cerrarTodo(); out.push('<hr>'); continue; }
+      if (/^\s{0,3}>/.test(l)) {
+        cerrarTodo();
+        var cita = [];
+        for (; i < lineas.length && /^\s{0,3}>/.test(lineas[i]); i++) cita.push(lineas[i].replace(/^\s{0,3}>\s?/, ''));
+        i--;
+        out.push('<blockquote>' + App.markdown(cita.join('\n')) + '</blockquote>');
+        continue;
+      }
+      if (l.indexOf('|') >= 0 && i + 1 < lineas.length && RE_SEP_TABLA.test(lineas[i + 1]) && lineas[i + 1].indexOf('-') >= 0) {
+        cerrarTodo();
+        var cab = celdas(l), alin = celdas(lineas[i + 1]).map(function (c) { return /^:-+:$/.test(c) ? 'center' : /-:$/.test(c) ? 'right' : ''; });
+        function fila(cs, tag) {
+          return '<tr>' + cab.map(function (_, k) { var a = alin[k] ? ' style="text-align:' + alin[k] + '"' : ''; return '<' + tag + a + '>' + enLinea(cs[k] || '') + '</' + tag + '>'; }).join('') + '</tr>';
+        }
+        var filas = [];
+        for (i += 2; i < lineas.length && lineas[i].trim() && lineas[i].indexOf('|') >= 0; i++) filas.push(fila(celdas(lineas[i]), 'td'));
+        i--;
+        out.push('<div class="md-tabla"><table><thead>' + fila(cab, 'th') + '</thead><tbody>' + filas.join('') + '</tbody></table></div>');
+        continue;
+      }
+      if ((m = RE_ITEM.exec(l))) { cerrarP(); item(m); continue; }
+      if (listas.length && /^\s+\S/.test(l)) { out.push('<br>' + enLinea(l.trim())); continue; }
       cerrarL(); parrafo.push(l);
     }
-    if (pre !== null) out.push('<pre>' + esc(pre.join('\n')) + '</pre>');
-    cerrarP(); cerrarL();
+    cerrarTodo();
     return out.join('');
   };
-  App.htmlSeguro = function (el, html) { el.innerHTML = html; return el; };   // solo con salida de App.markdown
+  App.htmlSeguro = function (el, html) { el.innerHTML = html; el.classList.add('md'); return el; };   // solo con salida de App.markdown
 
-  /* abre un {nombre, mime, base64, ruta} devuelto por el backend */
+  /* visor de documentos dentro de la app: markdown formateado (con opción de ver el texto) o texto plano */
+  App.esMarkdown = function (nombre) { return /\.(md|markdown|mdown|mkd)$/i.test(nombre || ''); };
+  App.verDocumento = function (op) {
+    var md = op.markdown !== false && App.esMarkdown(op.nombre), crudo = !md;
+    var hj = App.hoja({ titulo: op.titulo || op.nombre || 'Documento', ancho: 820, alto: '86vh' });
+    hj.el.classList.add('hoja-doc');
+    var vista = h('div.md-doc');
+    function pintar() {
+      App.vaciar(vista);
+      if (crudo) { vista.classList.remove('md'); vista.appendChild(h('pre.md-crudo', op.texto || '')); }
+      else App.htmlSeguro(vista, App.markdown(op.texto || ''));
+      if (op.truncado) vista.appendChild(h('div.ayuda', { style: { marginTop: '12px' } }, 'El archivo es largo: se muestra solo el principio.'));
+      if (alternar) alternar.textContent = crudo ? 'Ver formateado' : 'Ver texto';
+    }
+    var alternar = md ? h('button.btn.izq', { onclick: function () { crudo = !crudo; pintar(); hj.cuerpo.scrollTop = 0; } }) : null;
+    hj.cuerpo.appendChild(vista);
+    App.add(hj.pie, alternar,
+      h('button.btn', { onclick: function () {
+        (navigator.clipboard ? navigator.clipboard.writeText(op.texto || '') : Promise.reject()).then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
+      } }, 'Copiar'),
+      App.nativo.hay && op.ruta ? h('button.btn', { onclick: function () { App.nativo.abrir(op.ruta); } }, App.icono('abrir'), 'Abrir con otra app') : null,
+      h('button.btn.primario', { onclick: hj.cerrar }, 'Cerrar'));
+    pintar();
+    return hj;
+  };
+  function textoDe(c) {
+    if (typeof c.texto === 'string') return c.texto;
+    if (!c.base64) return null;
+    try {
+      var bin = atob(c.base64), arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return new TextDecoder('utf-8').decode(arr);
+    } catch (e) { return null; }
+  }
+  /* abre un .md de la oficina (ruta relativa) en el visor */
+  App.abrirMarkdownOficina = function (rel) {
+    return App.api.get('/api/oficina/archivo', { ruta: rel }).then(App.abrirContenido).catch(App.fallo);
+  };
+
+  /* abre un {nombre, mime, base64 | texto, ruta} devuelto por el backend */
   App.abrirContenido = function (c) {
+    if (App.esMarkdown(c.nombre)) {
+      var t = textoDe(c);
+      if (t !== null) { App.verDocumento({ nombre: c.nombre, texto: t, ruta: c.ruta, truncado: c.truncado }); return; }
+    }
     if (App.nativo.hay && c.ruta) { App.nativo.abrir(c.ruta); return; }
+    if (typeof c.texto === 'string') { App.verDocumento({ nombre: c.nombre, texto: c.texto, ruta: c.ruta, truncado: c.truncado, markdown: false }); return; }
     if (!c.base64) { App.aviso('El archivo es muy grande para abrirlo desde el navegador. Está en: ' + (c.ruta || ''), true); return; }
     var bin = atob(c.base64), arr = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
