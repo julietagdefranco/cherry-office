@@ -2,7 +2,19 @@
    Principios: se dibuja cuando algo cambia (cámara, caminatas, resaltado) y, para la vida de fondo (autos, tecleo), a ~30 cps; todos los ladrillos, baldosas y
    studs van en mallas instanciadas (pocas llamadas de dibujo); el picking usa cajas, no la malla de las figuras. */
 window.App = window.App || {};
-App.Oficina3D = (function () {
+App.Oficina3D = !window.THREE ? (function () {
+  /* three.js no cargó (vendor/three.min.js no llegó al navegador): sin 3D, pero el resto de la oficina funciona igual. */
+  var nada = function () {};
+  console.error('Oficina 3D: no se cargó vendor/three.min.js; la oficina sigue sin la vista 3D.');
+  return {
+    sinMotor: true,
+    iniciar: function () { return false; },
+    construir: function () { return Promise.resolve(); },
+    alElegirAgente: nada, alElegirLugar: nada, alPasar: nada, elegir: nada, ocupado: nada, reunion: nada, finReunion: nada,
+    encuadrar: nada, actividad: nada, faros: nada, enfocar: nada, enfocarAgente: nada, enfocarLugar: nada, muro: nada,
+    pieza: nada, pedir: nada, _estado: function () { return null; }
+  };
+})() : (function () {
   'use strict';
   var T = window.THREE, P = App.Piezas;
   var PLACA = 0.4, LADRILLO = 1.2, STUD_H = 0.18;
