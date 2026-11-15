@@ -66,6 +66,20 @@ La versión sale de `CFBundleShortVersionString` en `app/Resources/Info.plist`; 
 `.github/workflows/release.yml` corre los tests, arma el `.dmg` y el `.exe` y los adjunta a la release de esa etiqueta.
 Si la release no existe, la crea como borrador para completar las notas.
 
+### Actualizaciones automáticas
+Las apps instaladas se actualizan solas desde las releases **publicadas** (los borradores no cuentan): publicar la
+release es lo que la manda a todos. Las dos buscan al abrir y cada 6 horas, y tienen «Buscar actualizaciones…» en el
+menú (Mac: menú Oficina; Windows: Ayuda).
+- **Mac (Sparkle 2):** lee `appcast.xml` de la última release, baja `Oficina-<versión>-arm64.zip` y verifica la firma
+  EdDSA contra `SUPublicEDKey` de `Info.plist`. Esa firma reemplaza al Developer ID que la app no tiene. Compara
+  `CFBundleVersion`, así que **hay que subirlo en cada release** (además de `CFBundleShortVersionString`).
+- **Windows (electron-updater):** lee `latest.yml` de la última release, baja el `.exe` en segundo plano (solo lo que
+  cambió, con el `.blockmap`) y lo instala al salir o con «Reiniciar ahora».
+- El workflow necesita el secret **`SPARKLE_PRIVATE_KEY`** (la clave privada EdDSA). Sin él, una etiqueta falla en vez
+  de sacar una release que las Mac no pueden recibir. Si se pierde la clave, las Mac instaladas no aceptan más
+  actualizaciones y hay que reinstalar a mano: guardala también en un gestor de contraseñas.
+- La primera versión con actualizador hay que instalarla a mano una vez; de ahí en adelante, ya no.
+
 ## El equipo de Próspera
 El repo nació como el equipo de agentes de Próspera (Betty, Don Armando, Marce, Doña Catalina, Patricia, Doña Sofía,
 Mario y Nicolás Mora). Siguen en `agentes/`, con su contexto en `contexto/`.

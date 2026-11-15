@@ -18,6 +18,7 @@ enum MainMenu {
         let acerca = NSMenuItem(title: "Acerca de Oficina", action: #selector(AppDelegate.mostrarAcerca(_:)), keyEquivalent: "")
         acerca.target = delegate
         app.addItem(acerca)
+        if let buscar = delegate.actualizador?.itemDeMenu() { app.addItem(buscar) }
         app.addItem(.separator())
         add(app, "Ocultar Oficina", #selector(NSApplication.hide(_:)), "h")
         add(app, "Ocultar otros", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option])

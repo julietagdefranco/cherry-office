@@ -7,6 +7,11 @@
 # - A mano (Actions → Release → Run workflow): arma los instaladores y los deja como artefactos del run, sin release.
 #
 # Mac: la app Swift (app/). Windows: la carcasa Electron (desktop/) con el backend TypeScript.
+#
+# Actualizaciones automáticas: cada release lleva lo que leen las apps instaladas.
+# - Mac (Sparkle): Oficina-X-arm64.zip firmado con la clave EdDSA (secret SPARKLE_PRIVATE_KEY) y appcast.xml.
+# - Windows (electron-updater): latest.yml y el .blockmap junto al .exe.
+# Las apps solo ven releases publicadas (no borradores): publicar la release es lo que la manda a todos.
 # La versión sale siempre de app/Resources/Info.plist (el job de Windows se la pone a desktop/package.json).
 name: Release
 
@@ -70,11 +75,62 @@ jobs:
             echo "SHA-256: \`$SHA\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Sparkle baja el .zip (no el .dmg) y lo verifica con la firma EdDSA que va en appcast.xml.
+      - name: Paquete de actualización (Sparkle)
+        id: sparkle
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "::error::Falta el secret SPARKLE_PRIVATE_KEY: sin él la release no le llega a las Mac por actualización automática."
+              exit 1
+            fi
+            echo "::warning::Sin SPARKLE_PRIVATE_KEY: no se arma el paquete de actualización."
+            echo "listo=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' app/build/Oficina.app/Contents/Info.plist)"
+          ZIP="Oficina-$VERSION-arm64.zip"
+          (cd app/build && ditto -c -k --sequesterRsrc --keepParent Oficina.app "$ZIP")
+          KEY="$RUNNER_TEMP/sparkle.key"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY"
+          FIRMA="$(app/.build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file "$KEY" "app/build/$ZIP")"
+          rm -f "$KEY"
+          [ -n "$FIRMA" ] || { echo "::error::sign_update no devolvió la firma."; exit 1; }
+          FECHA="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+          cat > app/build/appcast.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Oficina</title>
+              <item>
+                <title>Oficina $VERSION</title>
+                <pubDate>$FECHA</pubDate>
+                <sparkle:version>$BUILD</sparkle:version>
+                <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+                <sparkle:fullReleaseNotesLink>https://github.com/$REPO/releases/tag/$TAG</sparkle:fullReleaseNotesLink>
+                <enclosure url="https://github.com/$REPO/releases/download/$TAG/$ZIP" type="application/octet-stream" $FIRMA/>
+              </item>
+            </channel>
+          </rss>
+          EOF
+          xmllint --noout app/build/appcast.xml
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "listo=1" >> "$GITHUB_OUTPUT"
+
       - name: Guardar como artefacto
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.dmg.outputs.name }}
-          path: app/build/${{ steps.dmg.outputs.name }}
+          path: |
+            app/build/${{ steps.dmg.outputs.name }}
+            app/build/Oficina-*-arm64.zip
+            app/build/appcast.xml
           retention-days: 14
 
       - name: Adjuntar a la release
@@ -84,6 +140,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
           FILE: app/build/${{ steps.dmg.outputs.name }}
+          ZIP: app/build/${{ steps.sparkle.outputs.zip }}
           SHA: ${{ steps.dmg.outputs.sha }}
         run: |
           # el job de Windows corre en paralelo: si la otra ya creó la release, solo se sube el archivo
@@ -91,7 +148,7 @@ jobs:
             gh release create "$TAG" --draft --title "Oficina $VERSION" \
               --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true
           fi
-          gh release upload "$TAG" "$FILE" --clobber
+          gh release upload "$TAG" "$FILE" "$ZIP" app/build/appcast.xml --clobber
 
   windows:
     name: Windows (x64)
@@ -154,7 +211,9 @@ jobs:
         id: exe
         run: |
           NAME="Oficina-Setup-${{ steps.version.outputs.version }}.exe"
-          [ -f "desktop/release/$NAME" ] || { echo "::error::No se generó desktop/release/$NAME"; exit 1; }
+          for f in "$NAME" "$NAME.blockmap" latest.yml; do
+            [ -f "desktop/release/$f" ] || { echo "::error::No se generó desktop/release/$f"; exit 1; }
+          done
           SHA="$(sha256sum "desktop/release/$NAME" | cut -d' ' -f1)"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           { echo "### $NAME"; echo; echo "SHA-256: \`$SHA\`"; } >> "$GITHUB_STEP_SUMMARY"
@@ -163,7 +222,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.exe.outputs.name }}
-          path: desktop/release/${{ steps.exe.outputs.name }}
+          path: |
+            desktop/release/${{ steps.exe.outputs.name }}
+            desktop/release/${{ steps.exe.outputs.name }}.blockmap
+            desktop/release/latest.yml
           retention-days: 14
 
       - name: Adjuntar a la release
@@ -178,4 +240,5 @@ jobs:
             gh release create "$TAG" --draft --title "Oficina $VERSION" \
               --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true
           fi
-          gh release upload "$TAG" "$FILE" --clobber
+          # latest.yml y el .blockmap: los lee electron-updater en las apps instaladas
+          gh release upload "$TAG" "$FILE" "$FILE.blockmap" desktop/release/latest.yml --clobber

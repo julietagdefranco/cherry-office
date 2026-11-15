@@ -16,5 +16,10 @@
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+    <!-- Sparkle: actualizaciones automáticas desde la última release publicada de GitHub (ver app/README.md). -->
+    <key>SUFeedURL</key><string>https://github.com/julietagdefranco/cherry-office/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>3lXavZJQZAaLrys0ULu1XQD/vj8CLcyxe4NP+QAWsx8=</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>21600</integer>
 </dict>
 </plist>

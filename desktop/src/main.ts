@@ -14,6 +14,7 @@ import {
 import { createBackend, type Backend } from '../../backend/src/backend.js'
 import { Config } from '../../backend/src/config.js'
 import { ejecutable, resolver } from './abrir.js'
+import * as actualizaciones from './actualizaciones.js'
 import { archivo, mime, raices } from './estaticos.js'
 import onboardingHTML from './onboarding.html'
 
@@ -38,6 +39,7 @@ let backend: Backend
 let ventana: BrowserWindow | undefined
 let bandeja: Tray | undefined
 let saliendo = false
+let refrescarBandeja: (() => Promise<void>) | undefined
 
 // MARK: - arranque
 
@@ -76,6 +78,7 @@ async function arrancar() {
   armarMenu()
   armarBandeja()
   await crearVentana()
+  actualizaciones.iniciar({ ventana: () => ventana, alCambiar: () => { armarMenu(); void refrescarBandeja?.() } })
 
   app.on('activate', () => mostrar()) // clic en el Dock
   app.on('window-all-closed', () => { /* la app sigue viva en la bandeja / el Dock */ })
@@ -83,7 +86,11 @@ async function arrancar() {
     if (saliendo) return
     e.preventDefault()
     saliendo = true
-    void backend.shutdown().finally(() => app.exit(0))
+    void backend.shutdown().finally(() => {
+      // con una actualización bajada, electron-updater lanza el instalador y cierra la app; por las dudas, salida forzada
+      if (actualizaciones.instalarAlSalir()) setTimeout(() => app.exit(0), 5_000)
+      else app.exit(0)
+    })
   })
 }
 
@@ -308,6 +315,16 @@ function icono(tam?: number): Electron.NativeImage {
   return tam && !img.isEmpty() ? img.resize({ width: tam, height: tam }) : img
 }
 
+/** «Buscar actualizaciones…» o «Reiniciar para actualizar a X» (solo en la app instalada de Windows). */
+function itemActualizacion(): MenuItemConstructorOptions[] {
+  if (!actualizaciones.disponible()) return []
+  const e = actualizaciones.estadoActual()
+  if (e.tipo === 'lista') return [{ label: `Reiniciar para actualizar a ${e.version}`, click: () => actualizaciones.reiniciar() }]
+  if (e.tipo === 'bajando') return [{ label: `Bajando la versión ${e.version}…`, enabled: false }]
+  if (e.tipo === 'buscando') return [{ label: 'Buscando actualizaciones…', enabled: false }]
+  return [{ label: 'Buscar actualizaciones…', click: () => void actualizaciones.buscar(true) }]
+}
+
 function armarMenu() {
   const revelar: MenuItemConstructorOptions = {
     label: 'Abrir carpeta de la oficina', accelerator: 'CmdOrCtrl+Shift+O',
@@ -316,7 +333,7 @@ function armarMenu() {
   const plantilla: MenuItemConstructorOptions[] = esMac
     ? [
         { label: 'Oficina', submenu: [
-          { label: 'Acerca de Oficina', click: acercaDe }, { type: 'separator' }, revelar, { type: 'separator' },
+          { label: 'Acerca de Oficina', click: acercaDe }, ...itemActualizacion(), { type: 'separator' }, revelar, { type: 'separator' },
           { role: 'hide', label: 'Ocultar Oficina' }, { role: 'hideOthers', label: 'Ocultar otros' }, { role: 'unhide', label: 'Mostrar todo' },
           { type: 'separator' }, { role: 'quit', label: 'Salir de Oficina' },
         ] },
@@ -336,7 +353,7 @@ function armarMenu() {
           { role: 'cut', label: 'Cortar' }, { role: 'copy', label: 'Copiar' }, { role: 'paste', label: 'Pegar' }, { role: 'selectAll', label: 'Seleccionar todo' },
         ] },
         { label: 'Ver', submenu: [{ role: 'togglefullscreen', label: 'Pantalla completa' }, ...devTools()] },
-        { label: 'Ayuda', submenu: [{ label: 'Acerca de Oficina', click: acercaDe }] },
+        { label: 'Ayuda', submenu: [...itemActualizacion(), { label: 'Acerca de Oficina', click: acercaDe }] },
       ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(plantilla))
 }
@@ -354,6 +371,7 @@ function armarBandeja() {
   if (esWindows) bandeja.on('click', () => mostrar())
   // el menú se arma al abrirlo, con las entregas y las próximas tareas al día
   const actualizar = async () => bandeja?.setContextMenu(await menuBandeja())
+  refrescarBandeja = actualizar
   void actualizar()
   setInterval(() => void actualizar(), 60_000)
   backend.avisos.on('aviso', () => void actualizar())
@@ -382,8 +400,10 @@ async function menuBandeja(): Promise<Menu> {
       ? proximas.map((t) => ({ label: `${cuando(new Date(t.proxima!))} · ${nombre(t.agente)}: ${t.nombre ?? ''}`, enabled: false }))
       : [{ label: 'Sin tareas programadas', enabled: false }],
   })
+  const act = itemActualizacion()
   items.push(
     { type: 'separator' },
+    ...(act.length && actualizaciones.estadoActual().tipo === 'lista' ? act : []),
     { label: 'Abrir al iniciar sesión', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
       click: (it) => app.setLoginItemSettings({ openAtLogin: it.checked }) },
     { label: 'Salir de Oficina', click: () => app.quit() },
