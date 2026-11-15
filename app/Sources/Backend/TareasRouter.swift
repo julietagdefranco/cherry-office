@@ -98,9 +98,27 @@ public struct TareasRouter: SubRouter {
 
     private func objeto(_ body: Data?) throws -> [String: Any] {
         guard let body, !body.isEmpty else { throw ErrorAPI(400, "pedido inválido") }
-        if body.count > TareasRouter.maxBody { throw ErrorAPI(413, "pedido demasiado grande") }
-        guard let d = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else { throw ErrorAPI(400, "pedido inválido") }
+        // con archivos adjuntos (base64) el cuerpo puede ser más grande
+        if body.count > Adjuntos.maxBody { throw ErrorAPI(413, "pedido demasiado grande") }
+        let cuerpo = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        if body.count > TareasRouter.maxBody, cuerpo?["archivos"] == nil { throw ErrorAPI(413, "pedido demasiado grande") }
+        guard let d = cuerpo else { throw ErrorAPI(400, "pedido inválido") }
         return d
+    }
+
+    /// «quitarArchivos»: rutas de adjuntos que la tarea deja de llevar (los archivos quedan en la carpeta).
+    private static func quitar(_ v: Any?) throws -> [String] {
+        guard let v, !(v is NSNull) else { return [] }
+        guard let a = v as? [String] else { throw ErrorAPI(400, "«quitarArchivos» tiene que ser una lista de rutas.") }
+        return a
+    }
+
+    /// Guarda los adjuntos nuevos de una tarea del agente (que tiene que existir en la oficina activa).
+    private func guardarAdjuntos(_ archivos: [(nombre: String, datos: Data)], agente: String) async throws -> [String] {
+        guard !archivos.isEmpty else { return [] }
+        let a = try await oficinas.requerirActiva()
+        guard a.oficina.agente(agente) != nil else { throw ErrorAPI(404, "No existe ese agente.") }
+        return try Adjuntos.guardar(a, origen: "tareas/\(agente)", archivos)
     }
 
     private static func dias(_ v: Any?) throws -> [Int] {
@@ -190,6 +208,7 @@ public struct TareasRouter: SubRouter {
         let origen = try TareasRouter.origen(d["origen"])
         let pedidoId = try Validar.texto(d["id"], "id", max: 41, obligatorio: false)
         if let pedidoId, !Slug.valido(pedidoId) { throw ErrorAPI(400, "Id de tarea inválido (usá minúsculas, números y guiones).") }
+        let adjuntos = try await guardarAdjuntos(try Adjuntos.leer(d["archivos"]), agente: agente)
         let ahora = Programacion.iso(reloj())
         let (t, a) = try await oficinas.modificar { o -> TareaProgramada in
             guard o.agente(agente) != nil else { throw ErrorAPI(404, "No existe ese agente.") }
@@ -199,7 +218,8 @@ public struct TareasRouter: SubRouter {
             if let p = pedidoId, usados.contains(p) { throw ErrorAPI(409, "Ya hay una tarea con ese id.") }
             let id = pedidoId ?? Slug.unico(nombre, usados: usados, respaldo: "tarea")
             let t = TareaProgramada(id: id, agente: agente, nombre: nombre, consigna: consigna, dias: dias, hora: hora, zona: zona,
-                                    activa: activa, creada: ahora, desde: ahora, origen: origen, fecha: fecha)
+                                    activa: activa, creada: ahora, desde: ahora, origen: origen, fecha: fecha,
+                                    archivos: adjuntos.isEmpty ? nil : adjuntos)
             ts.append(t)
             o.tareas = ts
             return t
@@ -222,11 +242,28 @@ public struct TareasRouter: SubRouter {
         let tipo = try TareasRouter.tipo(d["tipo"])
         if d["fecha"] != nil, d["dias"] != nil { throw ErrorAPI(400, "Elegí días (si se repite) o una fecha (si es una sola vez), no las dos cosas.") }
         let fecha = d["fecha"] == nil ? nil : try TareasRouter.fecha(d["fecha"])
+        let quitar = try TareasRouter.quitar(d["quitarArchivos"])
+        let nuevos = try Adjuntos.leer(d["archivos"])
+        var adjuntos: [String] = []
+        if !nuevos.isEmpty {
+            let a0 = try await oficinas.requerirActiva()
+            let t0 = try buscar(id, a0)
+            let quedan = (t0.archivos ?? []).filter { !quitar.contains($0) }.count
+            guard quedan + nuevos.count <= Adjuntos.maxArchivos else {
+                throw ErrorAPI(400, "Una tarea puede llevar hasta \(Adjuntos.maxArchivos) archivos.")
+            }
+            adjuntos = try await guardarAdjuntos(nuevos, agente: t0.agente)
+        }
         let ahora = Programacion.iso(reloj())
         let (t, a) = try await oficinas.modificar { o -> TareaProgramada in
             guard let i = o.tareas?.firstIndex(where: { $0.id == id }) else { throw ErrorAPI(404, "No existe esa tarea.") }
             var t = o.tareas![i]
             var cambioHorario = false
+            if !quitar.isEmpty || !adjuntos.isEmpty {
+                let lista = (t.archivos ?? []).filter { !quitar.contains($0) } + adjuntos
+                guard lista.count <= Adjuntos.maxArchivos else { throw ErrorAPI(400, "Una tarea puede llevar hasta \(Adjuntos.maxArchivos) archivos.") }
+                t.archivos = lista.isEmpty ? nil : lista
+            }
             if let nombre { t.nombre = nombre }
             if let consigna { t.consigna = consigna }
             // pasar de un tipo al otro

@@ -443,11 +443,17 @@ public final class Router: APIHandler {
         let invalido: Resp = (400, ["error": "pedido inválido"])
         let act = try await oficinas.requerirActiva()
         guard let body else { return invalido }
-        if body.count > Router.maxBody { return (413, ["error": "pedido demasiado grande"]) }
-        guard let d = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
-              let agente = d["agent"] as? String, let m = d["message"] as? String, let sidRaw = d["session"] as? String
+        // con archivos adjuntos el cuerpo puede ser grande (base64); sin ellos, el tope de siempre
+        if body.count > Adjuntos.maxBody { return (413, ["error": "pedido demasiado grande"]) }
+        let cuerpo = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        if body.count > Router.maxBody, cuerpo?["archivos"] == nil { return (413, ["error": "pedido demasiado grande"]) }
+        guard let d = cuerpo, let agente = d["agent"] as? String, let m = d["message"] as? String, let sidRaw = d["session"] as? String
         else { return invalido }
-        let msg = m.trimmingCharacters(in: .whitespacesAndNewlines)
+        let adjuntos: [(nombre: String, datos: Data)]
+        do { adjuntos = try Adjuntos.leer(d["archivos"]) } catch let e as ErrorAPI { return (e.status, ["error": e.mensaje]) }
+        let escrito = m.trimmingCharacters(in: .whitespacesAndNewlines)
+        // solo archivos, sin texto: se los pasa igual
+        let msg = escrito.isEmpty && !adjuntos.isEmpty ? "Te paso estos archivos." : escrito
         guard let def = act.oficina.agente(agente), !msg.isEmpty, msg.count <= Router.maxMensaje, Router.uuidValido(sidRaw) else { return invalido }
         let sid = sidRaw.lowercased()
 
@@ -458,6 +464,10 @@ public final class Router: APIHandler {
 
         if let dueno = await store.agenteDe(sid), dueno != agente { return invalido }
         if let of = await store.oficinaDe(sid), of != act.carpeta { return invalido }
+        // los adjuntos se guardan en la oficina y el agente recibe sus rutas al final del mensaje
+        let mensaje: String
+        do { mensaje = msg + Adjuntos.texto(try Adjuntos.guardar(act, origen: "chat/\(agente)", adjuntos)) }
+        catch let e as ErrorAPI { return (e.status, ["error": e.mensaje]) }
         let t0 = Date()
         let store = self.store, runner = self.runner
         var ctx = Permisos.contexto(act, agente: def, dirsExtra: config.oficinaDirsExtra)
@@ -479,13 +489,13 @@ public final class Router: APIHandler {
             defer { if let t = envExtra[Permisos.variableTokenMCP] { mcp?.tokens.revocar(t) } }
             do {
                 try await store.asegurarSesion(sid, agente: agente, oficina: carpeta)
-                try await store.agregar(sid: sid, rol: "u", texto: msg)
+                try await store.agregar(sid: sid, rol: "u", texto: mensaje)
                 let activa = await store.estaActiva(sid)
                 let texto = try await runner.actividad.seguir(oficina: carpeta, agente: agente, origen: "chat", tarea: msg,
                                                               extra: caja.observador(escritos.observador())) { obs, token in
                     let resumen = runner.resumirTarea(msg, oficina: carpeta, agente: agente, token: token, store: store)
                     defer { resumen?.cancel() }
-                    return try await runner.ejecutarChat(agente: agente, mensaje: msg, sid: sid, activa: activa, oficina: ctxFinal, obs: obs,
+                    return try await runner.ejecutarChat(agente: agente, mensaje: mensaje, sid: sid, activa: activa, oficina: ctxFinal, obs: obs,
                                                          envExtra: envExtra)
                 }
                 try await store.marcarActiva(sid)

@@ -161,7 +161,11 @@ App.Flujos = (function () {
     var meta = h('div.entrega-meta', insigniaCorrida(c.estado),
       c.estado === 'en_curso' ? h('span.insignia', 'Paso ' + (c.paso + 1) + ' de ' + c.total) : null);
     App.add(cuerpo, meta);
-    if (c.contexto) App.add(cuerpo, h('div.flu-contexto', h('div.etiqueta-campo', 'Contexto'), h('div', c.contexto)));
+    if (c.contexto) {
+      var sp = App.Adjuntos.separar(c.contexto);
+      App.add(cuerpo, h('div.flu-contexto', h('div.etiqueta-campo', 'Contexto'), sp.texto ? h('div', sp.texto) : null,
+        sp.rutas.length ? App.Adjuntos.chips(sp.rutas) : null));
+    }
     var linea = h('ol.pasos');
     pasos.forEach(function (p, i) { linea.appendChild(pasoItem(c, p, i)); });
     cuerpo.appendChild(linea);
@@ -385,6 +389,8 @@ App.Flujos = (function () {
       var nombre = h('input.campo', { maxlength: 80, placeholder: 'Clase 7', autofocus: true });
       var ctx = h('textarea.campo', { rows: 4, maxlength: 4000, placeholder: 'Lo que el equipo tiene que saber para arrancar: el tema, el público, las fechas…' });
       var res = h('div.ayuda'), err = h('div.error-txt');
+      var adj = App.Adjuntos({ texto: 'Adjuntar archivos', error: err });
+      adj.zona(hj.cuerpo, ctx);
       function resumen() {
         var f = fs.filter(function (x) { return x.id === sel.value; })[0];
         res.textContent = f ? (f.pasos.length + (f.pasos.length === 1 ? ' paso' : ' pasos') + (f.descripcion ? ' · ' + f.descripcion : '')) : '';
@@ -393,13 +399,22 @@ App.Flujos = (function () {
       App.add(hj.cuerpo,
         h('div.fila-campo', h('label.etiqueta-campo', 'Flujo'), sel, res),
         h('div.fila-campo', h('label.etiqueta-campo', 'Nombre de esta corrida'), nombre),
-        h('div.fila-campo', h('label.etiqueta-campo', 'Contexto'), ctx), err);
+        h('div.fila-campo', h('label.etiqueta-campo', 'Contexto'), ctx),
+        h('div.fila-campo', h('label.etiqueta-campo', 'Archivos'), h('div', adj.boton, adj.input), adj.lista,
+          h('div.ayuda', 'Fotos, documentos o lo que el equipo tenga que mirar. Los ven todos los pasos.')), err);
       var ok = h('button.btn.primario', { onclick: empezar }, 'Empezar');
       function empezar() {
         var n = nombre.value.trim();
         if (!n) { err.textContent = 'Ponele un nombre a la corrida, por ejemplo «Clase 7».'; nombre.focus(); return; }
         ok.disabled = true; err.textContent = '';
-        api().post('/api/flujos/' + sel.value + '/correr', { nombre: n, contexto: ctx.value.trim() }).then(function (rr) {
+        var leidos = [];
+        adj.leer().then(function (archivos) {
+          leidos = archivos;
+          var cuerpo = { nombre: n, contexto: ctx.value.trim() };
+          if (archivos.length) cuerpo.archivos = archivos;
+          return api().post('/api/flujos/' + sel.value + '/correr', cuerpo);
+        }).then(function (rr) {
+          adj.guardarEnBiblioteca(leidos);
           hj.cerrar();
           App.aviso('Arrancó «' + n + '».');
           if (App.Actividad) App.Actividad.ya();
