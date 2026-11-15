@@ -55,8 +55,8 @@
         colores('Piel', 'colorPiel', c.colores.piel),
         galeria('Cara', 'cara', 'cara', 'cara'),
         galeria('Peinado', 'pelo', 'pelo', 'cara'), colores('Color de pelo', 'colorPelo', c.colores.pelo),
-        galeria('Sombrero', 'sombrero', 'sombrero', 'cara'), galeria('Barba o moño', 'cuello', 'cuello', 'busto'),
-        conAccesorio ? colores('Color del sombrero o moño', 'colorAccesorio', c.colores.accesorio) : null,
+        galeria('Sombrero', 'sombrero', 'sombrero', 'cara'), galeria('Barba, moño o capa', 'cuello', 'cuello', 'busto'),
+        conAccesorio ? colores('Color del sombrero, moño o capa', 'colorAccesorio', c.colores.accesorio) : null,
         galeria('Ropa', 'torso', 'torso', 'torso'),
         colores('Color de la ropa', 'colorTorso', c.colores.torso), colores('Mangas', 'colorBrazos', c.colores.torso),
         galeria('Abajo', 'piernas', 'piernas', 'cuerpo'), colores((c.piernas[av.piernas] || {}).parte ? 'Color de la falda' : 'Color del pantalón', 'colorPiernas', c.colores.piernas));

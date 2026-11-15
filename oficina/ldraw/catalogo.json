@@ -134,6 +134,11 @@
    "nombre": "Largo con mechón",
    "parte": "85974",
    "genero": "f"
+  },
+  "coletas": {
+   "nombre": "Dos coletas",
+   "parte": "3625",
+   "genero": "f"
   }
  },
  "cara": {
@@ -326,6 +331,66 @@
    "nombre": "Sonrisa ladeada",
    "parte": "3626cp7n",
    "genero": "m"
+  },
+  "antifaz-negro": {
+   "nombre": "Antifaz negro",
+   "parte": "3626cpd6b",
+   "genero": "m",
+   "disfraz": true
+  },
+  "joker": {
+   "nombre": "Sonrisa de payaso, cejas verdes",
+   "parte": "3626cpb6",
+   "genero": "m",
+   "disfraz": true
+  },
+  "payaso-clasico": {
+   "nombre": "Sonrisa enorme, labios rojos",
+   "parte": "3626bpb3",
+   "genero": "m",
+   "disfraz": true
+  },
+  "monoculo": {
+   "nombre": "Monóculo y cejas fruncidas",
+   "parte": "3626bpb7",
+   "genero": "m",
+   "disfraz": true
+  },
+  "antifaz-verde": {
+   "nombre": "Antifaz verde",
+   "parte": "3626bpb2",
+   "genero": "m",
+   "disfraz": true
+  },
+  "bozal": {
+   "nombre": "Máscara plateada con rejilla",
+   "parte": "3626bp6x",
+   "genero": "m",
+   "disfraz": true
+  },
+  "gata": {
+   "nombre": "Antifaz y labios bordó",
+   "parte": "3626bpb8",
+   "genero": "f",
+   "disfraz": true
+  },
+  "labios-verdes": {
+   "nombre": "Labios verdes, cejas rojas",
+   "parte": "3626bpb5",
+   "genero": "f",
+   "disfraz": true
+  },
+  "arlequina": {
+   "nombre": "Cara blanca, labios fruncidos",
+   "parte": "3626bpb1",
+   "genero": "f",
+   "disfraz": true
+  },
+  "arlequina-antifaz": {
+   "nombre": "Antifaz negro y diamante",
+   "parte": "3626cpd6d",
+   "genero": "f",
+   "disfraz": true
   }
  },
  "torso": {
@@ -527,6 +592,75 @@
   "bufanda-roja": {
    "nombre": "Bufanda roja",
    "parte": "973p2u"
+  },
+  "batman": {
+   "nombre": "Batman clásico (óvalo amarillo)",
+   "parte": "973pbo",
+   "genero": "u",
+   "disfraz": true,
+   "amarilloFijo": true
+  },
+  "batman-oscuro": {
+   "nombre": "Batman oscuro",
+   "parte": "973pb1",
+   "genero": "u",
+   "disfraz": true,
+   "amarilloFijo": true
+  },
+  "batman-dorado": {
+   "nombre": "Batman gris y dorado",
+   "parte": "973pb0",
+   "genero": "u",
+   "disfraz": true
+  },
+  "robin": {
+   "nombre": "Robin",
+   "parte": "973pb2",
+   "genero": "u",
+   "disfraz": true,
+   "amarilloFijo": true
+  },
+  "joker": {
+   "nombre": "Chaleco naranja y moño violeta",
+   "parte": "973pb7",
+   "genero": "m",
+   "disfraz": true
+  },
+  "catsuit": {
+   "nombre": "Traje de gata con cierre",
+   "parte": "973pb8",
+   "genero": "f",
+   "disfraz": true
+  },
+  "arlequin": {
+   "nombre": "Arlequín blanco y negro",
+   "parte": "973pba",
+   "genero": "f",
+   "disfraz": true
+  },
+  "hiedra": {
+   "nombre": "Vestido de hojas",
+   "parte": "973pb5",
+   "genero": "f",
+   "disfraz": true
+  },
+  "acertijo": {
+   "nombre": "Signo de pregunta",
+   "parte": "973pbn",
+   "genero": "u",
+   "disfraz": true
+  },
+  "mitad": {
+   "nombre": "Mitad negra",
+   "parte": "973pbm",
+   "genero": "u",
+   "disfraz": true
+  },
+  "frac": {
+   "nombre": "Frac con moño gris",
+   "parte": "973p5t",
+   "genero": "m",
+   "disfraz": true
   }
  },
  "piernas": {
@@ -581,6 +715,31 @@
   "bombin": {
    "nombre": "Bombín",
    "parte": "95674"
+  },
+  "capucha-murcielago": {
+   "nombre": "Capucha de murciélago",
+   "parte": "55704",
+   "disfraz": true
+  },
+  "capucha-orejas": {
+   "nombre": "Capucha de orejas rectas",
+   "parte": "10113",
+   "disfraz": true
+  },
+  "capucha-gata": {
+   "nombre": "Capucha de gata",
+   "parte": "98729",
+   "disfraz": true
+  },
+  "galera": {
+   "nombre": "Galera",
+   "parte": "3878"
+  },
+  "casco-burbuja": {
+   "nombre": "Casco burbuja",
+   "parte": "30214",
+   "opacidad": 0.45,
+   "disfraz": true
   }
  },
  "cuello": {
@@ -603,6 +762,27 @@
    "nombre": "Moño",
    "parte": "27151",
    "color": "accesorio"
+  },
+  "capa-festoneada": {
+   "nombre": "Capa festoneada",
+   "parte": "56630c01",
+   "color": "accesorio",
+   "cuerpo": true,
+   "disfraz": true
+  },
+  "capa": {
+   "nombre": "Capa",
+   "parte": "50231c01",
+   "color": "accesorio",
+   "cuerpo": true,
+   "disfraz": true
+  },
+  "capa-cuello": {
+   "nombre": "Capa con cuello alto",
+   "parte": "42450c01",
+   "color": "accesorio",
+   "cuerpo": true,
+   "disfraz": true
   }
  },
  "colores": {
@@ -630,6 +810,10 @@
    {
     "id": "oscura",
     "hex": "#4e3122"
+   },
+   {
+    "id": "blanca",
+    "hex": "#f4f2ec"
    }
   ],
   "torso": [
@@ -704,6 +888,18 @@
    {
     "id": "amarillo",
     "hex": "#f2cd37"
+   },
+   {
+    "id": "violeta",
+    "hex": "#5b2c83"
+   },
+   {
+    "id": "verde",
+    "hex": "#3c8d3f"
+   },
+   {
+    "id": "gris-oscuro",
+    "hex": "#4a4e57"
    }
   ],
   "piernas": [
@@ -750,6 +946,14 @@
    {
     "id": "blanco",
     "hex": "#efefef"
+   },
+   {
+    "id": "violeta",
+    "hex": "#5b2c83"
+   },
+   {
+    "id": "verde",
+    "hex": "#3c8d3f"
    }
   ],
   "pelo": [
@@ -784,6 +988,10 @@
    {
     "id": "blanco",
     "hex": "#e8e6e0"
+   },
+   {
+    "id": "verde",
+    "hex": "#3c8d3f"
    }
   ],
   "accesorio": [
@@ -822,6 +1030,14 @@
    {
     "id": "verde-oscuro",
     "hex": "#2f5d3a"
+   },
+   {
+    "id": "violeta",
+    "hex": "#5b2c83"
+   },
+   {
+    "id": "gris-oscuro",
+    "hex": "#4a4e57"
    }
   ]
  }

@@ -97,9 +97,9 @@ App.Piezas = (function () {
 
   /* hexPiel: si viene, el amarillo LDraw (14) se pinta del color de piel. Los estampados de torso dibujan la piel
      del cuello y el escote en amarillo fijo, pensando en figuras amarillas. */
-  function malla(def, hexPrincipal, hexPiel) {
+  function malla(def, hexPrincipal, hexPiel, opacidad) {
     var m = def.ranuras.map(function (r) {
-      if (r.principal) return plastico(hexPrincipal);
+      if (r.principal) return plastico(hexPrincipal, { opacidad: opacidad });
       if (hexPiel && r.codigo === '14') return plastico(hexPiel);
       return plastico(r.hex, { opacidad: r.opacidad });
     });
@@ -127,6 +127,7 @@ App.Piezas = (function () {
     function claves(g, genero) {
       var ks = Object.keys(cat[g] || {});
       if (!todo && leg[g]) ks = ks.slice(0, leg[g]);
+      ks = ks.filter(function (k) { return !cat[g][k].disfraz; });   // disfraces (Batman y compañía): solo a mano, nunca al azar
       if (genero) { var f = ks.filter(function (k) { var x = cat[g][k].genero; return !x || x === 'u' || x === genero; }); if (f.length) ks = f; }
       return ks;
     }
@@ -143,7 +144,7 @@ App.Piezas = (function () {
     if (!HEX.test(a.colorBrazos || '')) a.colorBrazos = todo && sorteo('mb') < 0.3 ? hexDe(col.torso, hash(s + ':cb') % col.torso.length) : a.colorTorso;
     if (!HEX.test(a.colorAccesorio || '')) a.colorAccesorio = hexDe(col.accesorio, hash(s + ':ca') % col.accesorio.length);
     if (!(cat.piernas || {})[a.piernas]) a.piernas = todo && gen === 'f' && sorteo('fa') < 0.45 ? elegir(claves('piernas', 'f').slice(1), s, 'fa') : 'pantalon';
-    if (!(cat.sombrero || {})[a.sombrero]) a.sombrero = todo && sorteo('so') < 0.15 ? elegir(Object.keys(cat.sombrero).slice(1), s, 'so') : 'ninguno';
+    if (!(cat.sombrero || {})[a.sombrero]) a.sombrero = todo && sorteo('so') < 0.15 ? elegir(claves('sombrero').slice(1), s, 'so') : 'ninguno';
     if (!(cat.cuello || {})[a.cuello]) a.cuello = todo && sorteo('cu') < 0.15 ? elegir(claves('cuello', gen).slice(1), s, 'cu') : 'nada';
     return a;
   }
@@ -165,8 +166,9 @@ App.Piezas = (function () {
         cuerpo.add(malla(d[0], a.colorTorso, cat.torso[a.torso].amarilloFijo ? null : a.colorPiel));
         var cabeza = new T.Group(); cabeza.position.set(0, -24, 0); cuerpo.add(cabeza);
         cabeza.add(malla(d[1], a.colorPiel));
-        cabeza.add(malla(d[2], somb.parte ? a.colorAccesorio : a.colorPelo));   // el sombrero va en lugar del pelo
-        if (d[10]) { var cue3 = malla(d[10], cue.color === 'pelo' ? a.colorPelo : a.colorAccesorio); cue3.position.y = 24; cabeza.add(cue3); }  // cuello: origen en los hombros, gira con la cabeza
+        cabeza.add(malla(d[2], somb.parte ? a.colorAccesorio : a.colorPelo, null, somb.opacidad));   // el sombrero va en lugar del pelo
+        /* cuello: origen en los hombros. Barba y moño giran con la cabeza; la capa (cuerpo: true) queda fija al torso */
+        if (d[10]) { var cue3 = malla(d[10], cue.color === 'pelo' ? a.colorPelo : a.colorAccesorio); if (cue.cuerpo) cuerpo.add(cue3); else { cue3.position.y = 24; cabeza.add(cue3); } }
         function brazo(def, x, lado) {
           var g = new T.Group(); g.position.set(x, 8, 0); g.rotation.z = lado * 0.1;
           g.add(malla(def, a.colorBrazos));
