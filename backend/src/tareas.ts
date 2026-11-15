@@ -3,6 +3,7 @@
 //
 // Zonas horarias con `Intl` (sin Temporal): misma regla que Calendar de Swift: una hora que no existe ese día
 // (salto de DST hacia adelante) se corre hacia adelante; una que existe dos veces toma la primera.
+import { Adjuntos } from './adjuntos.js'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, type Obj } from './json.js'
 import type { Oficina } from './oficina.js'
@@ -37,7 +38,12 @@ export type TareaProgramada = {
   fecha?: string
   /** Solo las únicas: cuándo terminó bien y dejó su entrega (ISO 8601, UTC). */
   hecha?: string
+  /** Archivos adjuntos (rutas relativas a la oficina, dentro de `archivos/adjuntos/`): el agente los recibe con la consigna. */
+  archivos?: string[]
 }
+
+/** Lo que recibe el agente: la consigna y, si tiene, la lista de adjuntos. */
+export const mensajeTarea = (t: TareaProgramada): string => t.consigna + Adjuntos.texto(t.archivos ?? [])
 
 export const esUnica = (t: TareaProgramada) => t.fecha !== undefined
 
@@ -74,6 +80,7 @@ export function decodificarTarea(v: unknown): TareaProgramada {
   }
   if (fecha !== undefined) t.fecha = fecha
   if (hecha !== undefined) t.hecha = hecha
+  if (o.archivos !== undefined && o.archivos !== null) t.archivos = Array.isArray(o.archivos) ? o.archivos.map(str) : falla()
   return t
 }
 
@@ -97,6 +104,7 @@ export function tareaJSON(t: TareaProgramada, sistema: string = zonaDelSistema()
   o.tipo = esUnica(t) ? 'unica' : 'repetida'
   if (t.fecha !== undefined) o.fecha = t.fecha
   if (esUnica(t)) o.hecha = t.hecha ?? null
+  if (t.archivos !== undefined && t.archivos.length > 0) o.archivos = t.archivos
   return o
 }
 
@@ -154,6 +162,9 @@ export const ValidarTareas = {
       if (ValidarTareas.hora(t.hora) === undefined) throw new ErrorAPI(400, `La hora de la tarea ${t.id} tiene que ser HH:MM (por ejemplo 08:00).`)
       if (t.zona !== undefined && !ValidarTareas.zonaValida(t.zona)) throw new ErrorAPI(400, `La zona horaria de la tarea ${t.id} no existe: ${t.zona}.`)
       if (t.origen !== undefined && !ValidarTareas.origenValido(t.origen)) throw new ErrorAPI(400, `El origen de la tarea ${t.id} no es válido.`)
+      if (t.archivos !== undefined && (t.archivos.length > Adjuntos.maxArchivos || !t.archivos.every(Adjuntos.rutaValida))) {
+        throw new ErrorAPI(400, `Los archivos adjuntos de la tarea ${t.id} no son válidos.`)
+      }
     }
   },
 }

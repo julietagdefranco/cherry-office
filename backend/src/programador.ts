@@ -4,6 +4,7 @@
 // y costo normales) en una sesión nueva. El estado vive en SQLite (`ejecuciones`). También corre los «encargos» (pendientes
 // de reunión, pasos de flujo, acciones, coordinador, parte) y los «pedir cambios» de las entregas.
 import { randomUUID } from 'node:crypto'
+import { Adjuntos, type Adjunto } from './adjuntos.js'
 import { ClaudeError } from './claude-runner.js'
 import { ErrorAPI } from './errores.js'
 import { ArchivosEntrega, iso, type Entrega } from './entregas.js'
@@ -17,7 +18,7 @@ import { registrarModulo, type Servicios } from './servicios.js'
 import { num, txt, type Fila, type SQLiteDB } from './sqlite.js'
 import { CajaArchivos, CajaCosto } from './stream.js'
 import {
-  Programacion, ValidarTareas, esUnica, fechaInicio, tareaJSON, zonaDelSistema, type OrigenTarea, type TareaProgramada,
+  Programacion, ValidarTareas, esUnica, fechaInicio, mensajeTarea, tareaJSON, zonaDelSistema, type OrigenTarea, type TareaProgramada,
 } from './tareas.js'
 import { Slug, Validar, prefijo } from './validar.js'
 
@@ -502,7 +503,7 @@ export class Programador implements ProgramadorEntregas {
     const mcpUrl = mcp ? await mcp.url() : undefined
     if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
     const origen = Programador.origenEntrega(ej.tarea)
-    const carpeta = act.carpeta, agente = def.id, sid = ej.sid, consigna = t.consigna, nombre = t.nombre
+    const carpeta = act.carpeta, agente = def.id, sid = ej.sid, consigna = mensajeTarea(t), nombre = t.nombre
     const caja = new CajaCosto()
     const escritos = new CajaArchivos()
     const r = await runner.conCarrilDe(carpeta, agente, async (): Promise<{ texto: string; error?: string }> => {
@@ -693,8 +694,34 @@ export class TareasRouter implements SubRouter {
 
   // MARK: altas, cambios y bajas
 
+  /** Cuerpo de tareas: con archivos adjuntos (base64) puede ser más grande. */
+  private cuerpo(body?: Buffer): Obj {
+    if (body && body.length > maxBody) {
+      // grande solo si trae adjuntos: si no es JSON o no los trae, 413 como siempre
+      let d: unknown
+      try { d = JSON.parse(body.toString('utf8')) } catch {}
+      if (!esObjeto(d) || d.archivos === undefined) throw new ErrorAPI(413, 'pedido demasiado grande')
+    }
+    return objeto(body, Adjuntos.maxBody)
+  }
+
+  /** «quitarArchivos»: rutas de adjuntos que la tarea deja de llevar (los archivos quedan en la carpeta). */
+  private static quitar(v: unknown): string[] {
+    if (v === undefined || v === null) return []
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new ErrorAPI(400, '«quitarArchivos» tiene que ser una lista de rutas.')
+    return v as string[]
+  }
+
+  /** Guarda los adjuntos nuevos de una tarea del agente (que tiene que existir en la oficina activa). */
+  private guardarAdjuntos(archivos: Adjunto[], agente: string): string[] {
+    if (archivos.length === 0) return []
+    const a = this.s.oficinas.requerirActiva()
+    if (!a.oficina.agentes.some((x) => x.id === agente)) throw new ErrorAPI(404, 'No existe ese agente.')
+    return Adjuntos.guardar(a, `tareas/${agente}`, archivos)
+  }
+
   private async crear(body?: Buffer): Promise<Resp> {
-    const d = objeto(body, maxBody)
+    const d = this.cuerpo(body)
     const agente = Validar.texto(d.agente, 'agente', 41)!
     const nombre = Validar.texto(d.nombre, 'nombre', ValidarTareas.maxNombre)!
     const consigna = Validar.texto(d.consigna, 'consigna', ValidarTareas.maxConsigna)!
@@ -722,6 +749,7 @@ export class TareasRouter implements SubRouter {
     const origen = TareasRouter.origen(d.origen)
     const pedidoId = Validar.texto(d.id, 'id', 41, false)
     if (pedidoId !== undefined && !Slug.valido(pedidoId)) throw new ErrorAPI(400, 'Id de tarea inválido (usá minúsculas, números y guiones).')
+    const adjuntos = this.guardarAdjuntos(Adjuntos.leer(d.archivos), agente)
     const ahora = Programacion.iso(this.reloj())
     const [t, a] = this.s.oficinas.modificar((o) => {
       if (!o.agentes.some((x) => x.id === agente)) throw new ErrorAPI(404, 'No existe ese agente.')
@@ -733,6 +761,7 @@ export class TareasRouter implements SubRouter {
       const t: TareaProgramada = { id, agente, nombre, consigna, dias, hora, zona, activa, creada: ahora, desde: ahora }
       if (origen) t.origen = origen
       if (fecha !== undefined) t.fecha = fecha
+      if (adjuntos.length > 0) t.archivos = adjuntos
       ts.push(t)
       o.tareas = ts
       return t
@@ -749,7 +778,7 @@ export class TareasRouter implements SubRouter {
   }
 
   private editar(id: string, body?: Buffer): Resp {
-    const d = objeto(body, maxBody)
+    const d = this.cuerpo(body)
     const nombre = Validar.texto(d.nombre, 'nombre', ValidarTareas.maxNombre, false)
     const consigna = Validar.texto(d.consigna, 'consigna', ValidarTareas.maxConsigna, false)
     const dias = d.dias === undefined ? undefined : TareasRouter.dias(d.dias)
@@ -759,12 +788,27 @@ export class TareasRouter implements SubRouter {
     const tipo = TareasRouter.tipo(d.tipo)
     if (d.fecha !== undefined && d.dias !== undefined) throw new ErrorAPI(400, 'Elegí días (si se repite) o una fecha (si es una sola vez), no las dos cosas.')
     const fecha = d.fecha === undefined ? undefined : TareasRouter.fecha(d.fecha)
+    const quitar = TareasRouter.quitar(d.quitarArchivos)
+    const nuevos = Adjuntos.leer(d.archivos)
+    let adjuntos: string[] = []
+    if (nuevos.length > 0) {
+      const t0 = this.buscar(id, this.s.oficinas.requerirActiva())
+      const quedan = (t0.archivos ?? []).filter((r) => !quitar.includes(r)).length
+      if (quedan + nuevos.length > Adjuntos.maxArchivos) throw new ErrorAPI(400, `Una tarea puede llevar hasta ${Adjuntos.maxArchivos} archivos.`)
+      adjuntos = this.guardarAdjuntos(nuevos, t0.agente)
+    }
     const ahora = Programacion.iso(this.reloj())
     const [t, a] = this.s.oficinas.modificar((o) => {
       const i = o.tareas?.findIndex((x) => x.id === id) ?? -1
       if (i < 0) throw new ErrorAPI(404, 'No existe esa tarea.')
       const t: TareaProgramada = { ...o.tareas![i]! }
       let cambioHorario = false
+      if (quitar.length > 0 || adjuntos.length > 0) {
+        const lista = (t.archivos ?? []).filter((r) => !quitar.includes(r)).concat(adjuntos)
+        if (lista.length > Adjuntos.maxArchivos) throw new ErrorAPI(400, `Una tarea puede llevar hasta ${Adjuntos.maxArchivos} archivos.`)
+        if (lista.length > 0) t.archivos = lista
+        else delete t.archivos
+      }
       if (nombre !== undefined) t.nombre = nombre
       if (consigna !== undefined) t.consigna = consigna
       // pasar de un tipo al otro

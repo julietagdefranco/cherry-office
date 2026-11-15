@@ -99,15 +99,17 @@ actor MotorFlujos {
     // MARK: arranque y avance
 
     /// Crea la corrida con una copia de la definición y avanza al primer paso.
-    func iniciar(_ act: OficinaActiva, flujo: FlujoDef, nombre: String, contexto: String) async throws -> Corrida {
+    /// `adjuntos`: rutas de los archivos que la persona le pasó a la corrida; van al final del contexto (todos los pasos lo ven).
+    func iniciar(_ act: OficinaActiva, flujo: FlujoDef, nombre: String, contexto: String, adjuntos: [String] = []) async throws -> Corrida {
         let n = nombre.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (1...MotorFlujos.maxNombre).contains(n.count) else {
             throw ErrorAPI(400, "El nombre de la corrida tiene que tener entre 1 y \(MotorFlujos.maxNombre) caracteres.")
         }
-        let ctx = contexto.trimmingCharacters(in: .whitespacesAndNewlines)
+        var ctx = contexto.trimmingCharacters(in: .whitespacesAndNewlines)
         guard ctx.count <= MotorFlujos.maxContexto else {
             throw ErrorAPI(400, "El contexto es demasiado largo (máximo \(MotorFlujos.maxContexto) caracteres).")
         }
+        if !adjuntos.isEmpty { ctx = (ctx + Adjuntos.texto(adjuntos)).trimmingCharacters(in: .whitespacesAndNewlines) }
         guard !flujo.pasos.isEmpty else { throw ErrorAPI(400, "El flujo no tiene pasos.") }
         guard let data = try? OficinaStore.encoder.encode(flujo), let def = String(data: data, encoding: .utf8) else {
             throw ErrorAPI(500, "No pude guardar la definición del flujo.")

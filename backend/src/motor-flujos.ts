@@ -12,6 +12,7 @@ import { jsonSwift } from './json-swift.js'
 import type { OficinaActiva } from './oficinas.js'
 import { Programador, programadorDe, type Ejecucion } from './programador.js'
 import { rutaLibre } from './extraccion.js'
+import { Adjuntos } from './adjuntos.js'
 import type { Servicios } from './servicios.js'
 import { num } from './sqlite.js'
 import { largo, prefijo } from './validar.js'
@@ -123,13 +124,15 @@ export class MotorFlujos {
   // MARK: arranque y avance
 
   /** Crea la corrida con una copia de la definición y avanza al primer paso. */
-  async iniciar(act: OficinaActiva, flujo: FlujoDef, nombre: string, contexto: string): Promise<Corrida> {
+  /** `adjuntos`: rutas de los archivos que la persona le pasó a la corrida; van al final del contexto (todos los pasos lo ven). */
+  async iniciar(act: OficinaActiva, flujo: FlujoDef, nombre: string, contexto: string, adjuntos: string[] = []): Promise<Corrida> {
     const n = nombre.trim()
     if (largo(n) < 1 || largo(n) > MotorFlujos.maxNombre) {
       throw new ErrorAPI(400, `El nombre de la corrida tiene que tener entre 1 y ${MotorFlujos.maxNombre} caracteres.`)
     }
-    const ctx = contexto.trim()
+    let ctx = contexto.trim()
     if (largo(ctx) > MotorFlujos.maxContexto) throw new ErrorAPI(400, `El contexto es demasiado largo (máximo ${MotorFlujos.maxContexto} caracteres).`)
+    if (adjuntos.length > 0) ctx = (ctx + Adjuntos.texto(adjuntos)).trim()
     if (flujo.pasos.length === 0) throw new ErrorAPI(400, 'El flujo no tiene pasos.')
     const c = this.store.corridaCrear({ oficina: act.carpeta, flujo: flujo.id, nombre: n, contexto: ctx, definicion: jsonSwift(flujo) })
     if (!c) throw new ErrorAPI(500, 'No pude guardar la corrida.')

@@ -71,11 +71,13 @@
     App.add(cuerpo, lista, sug);
     var txt = h('textarea.campo', { rows: 1, placeholder: 'Escribile a ' + a.nombre + '…', maxlength: 20000 });
     var enviar = h('button.btn.primario.icono', { title: 'Enviar (Enter)', onclick: mandar }, App.icono('enviar'));
+    var adj = App.Adjuntos();
+    adj.zona(cuerpo); adj.zona(pie, txt);
     txt.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); mandar(); } });
     txt.addEventListener('input', function () { txt.style.height = 'auto'; txt.style.height = Math.min(160, txt.scrollHeight + 2) + 'px'; });
-    App.add(pie, h('div.redactar', txt, enviar),
+    App.add(pie, adj.lista, adj.error, adj.input, h('div.redactar', adj.boton, txt, enviar),
       h('div', { style: { display: 'flex', justifyContent: 'space-between', marginTop: '6px' } },
-        h('span.ayuda', 'Enter para enviar · Mayús+Enter para otra línea'),
+        h('span.ayuda', 'Enter para enviar · Mayús+Enter para otra línea · arrastrá o pegá archivos'),
         h('button.btn.chico.fantasma', { onclick: function () { sesiones[a.id] = App.uuid(); chats[a.id] = []; pintar(); } }, 'Conversación nueva')));
 
     function render() {
@@ -86,7 +88,13 @@
         (a.chips || []).forEach(function (c) { sug.appendChild(h('button.chip', { onclick: function () { txt.value = c; mandar(); } }, c)); });
       }
       msgs.forEach(function (m) {
-        if (m.r === 'u') lista.appendChild(h('div.msg.u', m.t));
+        if (m.r === 'u') {
+          // los archivos que le pasaste: los recién mandados (m.adj, nombres) o los guardados en el historial (bloque al final)
+          var sp = App.Adjuntos.separar(m.t);
+          var chipsAdj = sp.rutas.length ? App.Adjuntos.chips(sp.rutas)
+            : (m.adj && m.adj.length ? h('div.adjuntos', m.adj.map(function (n) { return h('div.adjunto', App.icono('clip'), h('span', n)); })) : null);
+          lista.appendChild(h('div.msg.u', sp.texto, chipsAdj));
+        }
         else {
           lista.appendChild(App.htmlSeguro(h('div.msg.a' + (m.e ? '.e' : '')), App.markdown(m.t)));
           if (m.consultas && m.consultas.length) lista.appendChild(bloqueConsultas(m.consultas));
@@ -99,17 +107,24 @@
 
     function mandar() {
       var t = txt.value.trim();
-      if (!t || enCurso[a.id]) return;
+      if ((!t && !adj.hay()) || enCurso[a.id]) return;
       if (!sesiones[a.id]) sesiones[a.id] = App.uuid();
-      (chats[a.id] = chats[a.id] || []).push({ r: 'u', t: t });
-      txt.value = ''; txt.style.height = '';
-      ocupado(a.id, true);
-      render();
-      if (App.Actividad) setTimeout(App.Actividad.ya, 300);
-      var id = a.id;
-      api.post('/api/chat', { agent: id, message: t, session: sesiones[id] }).then(function (r) {
+      var id = a.id, nombres = adj.nombres(), leidos = [];
+      ocupado(id, true);
+      adj.leer().then(function (archivos) {
+        leidos = archivos;
+        (chats[id] = chats[id] || []).push({ r: 'u', t: t, adj: nombres });
+        txt.value = ''; txt.style.height = '';
+        adj.vaciar();
+        if (actual === id && pestana === 'chat') render();
+        if (App.Actividad) setTimeout(App.Actividad.ya, 300);
+        var cuerpo = { agent: id, message: t, session: sesiones[id] };
+        if (archivos.length) cuerpo.archivos = archivos;
+        return api.post('/api/chat', cuerpo);
+      }).then(function (r) {
         if (App.Actividad) App.Actividad.ya();
         (chats[id] = chats[id] || []).push({ r: 'a', t: r.reply || '(sin respuesta)' });
+        adj.guardarEnBiblioteca(leidos);
       }).catch(function (e) {
         (chats[id] = chats[id] || []).push({ r: 'a', t: 'No pude responder: ' + e.message, e: true });
       }).then(function () { return cargarConsultas(id); }).then(function () {
@@ -416,6 +431,7 @@
           h('div.ayuda', activa && t.proxima ? 'Próxima: ' + fechaCorta(t.proxima, t.zona, true)
             : (activa ? 'Sin próxima corrida' : 'No corre mientras esté en pausa'))],
         t.ultima && !hecha ? h('div.ayuda', 'Última: ' + fechaCorta(t.ultima.inicio, t.zona, false) + (t.ultima.manual ? (unica ? ' (a mano)' : ' (prueba)') : '')) : null,
+        t.archivos && t.archivos.length ? App.Adjuntos.chips(t.archivos) : null,
         botones, historial);
     }
 
@@ -527,6 +543,16 @@
     var activa = h('input', { type: 'checkbox', checked: t ? t.activa !== false : true });
     var err = h('div.error-txt');
     var ayudaConsigna = h('div.ayuda');
+    /* archivos: los que ya lleva la tarea (se pueden sacar) y los nuevos */
+    var adj = App.Adjuntos({ texto: 'Adjuntar archivos', error: err });
+    adj.zona(hj.cuerpo, consigna);
+    var quitados = [], guardados = h('div');
+    function pintarGuardados() {
+      var quedan = ((t && t.archivos) || []).filter(function (r) { return quitados.indexOf(r) < 0; });
+      App.vaciar(guardados);
+      if (quedan.length) guardados.appendChild(App.Adjuntos.chips(quedan, function (r) { quitados.push(r); pintarGuardados(); }));
+    }
+    pintarGuardados();
 
     var filaDias = h('div.fila-campo', h('label.etiqueta-campo', 'Días'), chips);
     var filaCuando = t ? null : h('div.fila-campo', h('label.etiqueta-campo', 'Cuándo'),
@@ -552,6 +578,8 @@
     App.add(hj.cuerpo,
       h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), nombre),
       h('div.fila-campo', h('label.etiqueta-campo', 'Consigna'), consigna, ayudaConsigna),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Archivos'), guardados, h('div', adj.boton, adj.input), adj.lista,
+        h('div.ayuda', 'Lo que ' + a.nombre + ' tiene que mirar cada vez que haga la tarea (fotos, documentos…).')),
       h('div.fila-campo', h('label.etiqueta-campo', 'Tipo'),
         grupo([[false, 'Se repite'], [true, 'Una sola vez']], unica, function (v) { unica = v; pintarTipo(); })),
       filaDias, filaCuando,
@@ -578,8 +606,14 @@
         }
       }
       guardar.disabled = true; err.textContent = '';
-      var p = t ? api.patch('/api/tareas/' + encodeURIComponent(t.id), cuerpo)
-        : api.post('/api/tareas', Object.assign({ agente: a.id }, pre.origen ? { origen: pre.origen } : {}, cuerpo));
+      if (t && quitados.length) cuerpo.quitarArchivos = quitados;
+      var leidos = [];
+      var p = adj.leer().then(function (archivos) {
+        leidos = archivos;
+        if (archivos.length) cuerpo.archivos = archivos;
+        return t ? api.patch('/api/tareas/' + encodeURIComponent(t.id), cuerpo)
+          : api.post('/api/tareas', Object.assign({ agente: a.id }, pre.origen ? { origen: pre.origen } : {}, cuerpo));
+      }).then(function (r) { adj.guardarEnBiblioteca(leidos); return r; });
       p.then(function () {
         hj.cerrar();
         App.aviso(t ? 'Cambios guardados.' : (cuerpo.ahora ? a.nombre + ' se puso a trabajar en eso.' : 'Tarea creada.'));

@@ -124,7 +124,8 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     escudo: 'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6zM9 12l2 2 4-4',
     parte: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
     lapiz: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
-    bandeja: 'M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z'
+    bandeja: 'M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z',
+    clip: 'M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7.1'
   };
   /* «hace 5 min»: acepta segundos epoch, milisegundos, un Date o una fecha ISO */
   App.hace = function (fecha) {
@@ -307,6 +308,143 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     var w = window.open(url, '_blank');
     if (!w) { var a = h('a', { href: url, download: c.nombre || 'archivo' }); document.body.appendChild(a); a.click(); a.remove(); }
     setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  };
+
+  /* ---------- archivos para un agente («hacé algo con esta foto») ----------
+     En el chat, al arrancar una corrida y en las tareas. Se eligen con el botón, se arrastran o se pegan; viajan en base64
+     (`archivos: [{nombre, base64}]`) y el backend los guarda en archivos/adjuntos/ y le pasa las rutas al agente. */
+  var ADJ_MAX = 10, ADJ_MB = 25, ADJ_ENCABEZADO = 'Archivos adjuntos (leelos con Read antes de responder):';
+  var ADJ_IMAGEN = /\.(png|jpe?g|gif|webp|heic|bmp|svg)$/i;
+  /* tipos que la Biblioteca sabe leer (TipoArchivo.soportados del backend) */
+  var ADJ_BIBLIOTECA = /\.(pdf|docx?|rtf|pages|odt|txt|md|csv|tsv|json|png|jpe?g|gif|webp|heic)$/i;
+  var ADJ_CLAVE_BIBLIOTECA = 'hq-adjuntos-biblioteca';
+  App.Adjuntos = function (opc) {
+    opc = opc || {};
+    var archivos = [], urls = [];
+    var err = opc.error || h('div.error-txt');
+    var sel = h('input', { type: 'file', multiple: true, style: { display: 'none' } });
+    var lista = h('div.adjuntos');
+    /* «Guardar también en la biblioteca»: se recuerda entre envíos; solo aparece si hay algún archivo que la Biblioteca lee */
+    var aBiblioteca = false;
+    try { aBiblioteca = localStorage.getItem(ADJ_CLAVE_BIBLIOTECA) === '1'; } catch (x) { /* sin almacenamiento: apagada */ }
+    var casilla = h('input', { type: 'checkbox', checked: aBiblioteca, onchange: function () {
+      aBiblioteca = casilla.checked;
+      try { localStorage.setItem(ADJ_CLAVE_BIBLIOTECA, aBiblioteca ? '1' : '0'); } catch (x) { /* no se recuerda */ }
+    } });
+    var filaBiblioteca = h('label.adjuntos-biblioteca', { title: 'Además de pasárselos al agente, quedan en la Biblioteca (con su ficha) para que los consulte todo el equipo.' },
+      casilla, App.icono('libro'), 'Guardar también en la biblioteca');
+    var boton = h('button.btn' + (opc.texto ? '' : '.icono'), { type: 'button', title: 'Adjuntar archivos (también podés arrastrarlos o pegarlos)',
+      onclick: function () { sel.click(); } }, App.icono('clip'), opc.texto || null);
+    function total() { return archivos.reduce(function (n, f) { return n + f.size; }, 0); }
+    function agregar(files) {
+      err.textContent = '';
+      Array.prototype.forEach.call(files || [], function (f) {
+        if (archivos.length >= (opc.max || ADJ_MAX)) { err.textContent = 'Máximo ' + (opc.max || ADJ_MAX) + ' archivos por vez.'; return; }
+        if (total() + f.size > ADJ_MB * 1048576) { err.textContent = 'Los archivos pueden pesar hasta ' + ADJ_MB + ' MB en total.'; return; }
+        archivos.push(f);
+      });
+      pintar();
+      if (opc.alCambiar) opc.alCambiar();
+    }
+    function pintar() {
+      urls.forEach(function (u) { URL.revokeObjectURL(u); }); urls = [];
+      App.vaciar(lista);
+      archivos.forEach(function (f, i) {
+        var mini = null;
+        if (/^image\//.test(f.type)) { var u = URL.createObjectURL(f); urls.push(u); mini = h('img', { src: u, alt: '' }); }
+        lista.appendChild(h('div.adjunto', { title: f.name + ' · ' + App.tam(f.size) }, mini || App.icono('clip'), h('span', f.name),
+          h('button.btn.fantasma.chico.icono', { type: 'button', title: 'Sacar', onclick: function () { archivos.splice(i, 1); pintar(); if (opc.alCambiar) opc.alCambiar(); } }, App.icono('cerrar'))));
+      });
+      if (archivos.some(function (f) { return ADJ_BIBLIOTECA.test(f.name); })) lista.appendChild(filaBiblioteca);
+      lista.style.display = archivos.length ? '' : 'none';
+    }
+    /* después de mandarlos: copia en la Biblioteca (compartido) los que sabe leer, uno por uno, y avisa cómo fue */
+    function guardarEnBiblioteca(leidos) {
+      if (!aBiblioteca || !leidos || !leidos.length) return Promise.resolve();
+      var sirven = leidos.filter(function (a) { return ADJ_BIBLIOTECA.test(a.nombre); });
+      var otros = leidos.length - sirven.length, ok = 0, ya = 0, reemplazados = [], fallas = [];
+      return sirven.reduce(function (p, a) {
+        return p.then(function () {
+          return App.api.post('/api/archivos', { nombre: a.nombre, base64: a.base64 })
+            .then(function (r) { if (r.duplicado) ya++; else if (r.reemplazado) reemplazados.push(a.nombre); else ok++; })
+            .catch(function (e) { fallas.push(a.nombre + ': ' + e.message); });
+        });
+      }, Promise.resolve()).then(function () {
+        var partes = [];
+        if (ok) partes.push(ok === 1 ? 'Guardé 1 archivo en la biblioteca.' : 'Guardé ' + ok + ' archivos en la biblioteca.');
+        if (ya) partes.push(ya === 1 ? '1 ya estaba.' : ya + ' ya estaban.');
+        if (reemplazados.length) partes.push('Reemplacé en la biblioteca ' + reemplazados.join(', ') + ' (había otro con el mismo nombre).');
+        if (otros) partes.push(otros === 1 ? '1 no es de un tipo que la biblioteca lea.' : otros + ' no son de un tipo que la biblioteca lea.');
+        if (fallas.length) partes.push('No pude guardar ' + fallas.join(' · '));
+        if (partes.length) App.aviso(partes.join(' '), fallas.length > 0);
+      });
+    }
+    sel.addEventListener('change', function () { agregar(sel.files); sel.value = ''; });
+    function leer(f) {
+      return new Promise(function (res, rej) {
+        var fr = new FileReader();
+        fr.onload = function () { var s2 = String(fr.result || ''); res({ nombre: f.name || 'archivo', base64: s2.slice(s2.indexOf(',') + 1) }); };
+        fr.onerror = function () { rej(new Error('No pude leer «' + f.name + '».')); };
+        fr.readAsDataURL(f);
+      });
+    }
+    /* arrastrar y soltar (y pegar, en un campo de texto) sobre `el` */
+    function zona(el, campo) {
+      el.addEventListener('dragover', function (e) {
+        if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) { e.preventDefault(); el.classList.add('soltando'); }
+      });
+      el.addEventListener('dragleave', function (e) { if (!el.contains(e.relatedTarget)) el.classList.remove('soltando'); });
+      el.addEventListener('drop', function (e) {
+        el.classList.remove('soltando');
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); agregar(e.dataTransfer.files); }
+      });
+      if (campo) campo.addEventListener('paste', function (e) {
+        var fs = e.clipboardData && e.clipboardData.files;
+        if (fs && fs.length) {
+          e.preventDefault();
+          // una captura pegada llega como «image.png»: le ponemos fecha para que no se pisen los nombres
+          agregar(Array.prototype.map.call(fs, function (f) {
+            if (f.name && f.name !== 'image.png') return f;
+            var n = 'captura-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.png';
+            try { return new File([f], n, { type: f.type }); } catch (x) { return f; }
+          }));
+        }
+      });
+    }
+    pintar();
+    return {
+      boton: boton, lista: lista, input: sel, error: err, zona: zona, agregar: agregar,
+      hay: function () { return archivos.length > 0; },
+      nombres: function () { return archivos.map(function (f) { return f.name; }); },
+      leer: function () { return Promise.all(archivos.map(leer)); },
+      guardarEnBiblioteca: guardarEnBiblioteca,
+      vaciar: function () { archivos = []; pintar(); }
+    };
+  };
+  /* separa el bloque de adjuntos que el backend agrega al final de un mensaje: {texto, rutas} */
+  App.Adjuntos.separar = function (t) {
+    t = String(t || '');
+    var i = t.indexOf(ADJ_ENCABEZADO);
+    if (i < 0) return { texto: t, rutas: [] };
+    var rutas = t.slice(i + ADJ_ENCABEZADO.length).split('\n').filter(function (l) { return /^- archivos\/adjuntos\//.test(l); })
+      .map(function (l) { return l.slice(2).trim(); });
+    return { texto: t.slice(0, i).replace(/\s+$/, ''), rutas: rutas };
+  };
+  /* chips de archivos ya guardados en la oficina (rutas relativas): miniatura si es imagen; clic para abrir */
+  App.Adjuntos.chips = function (rutas, quitar) {
+    return h('div.adjuntos', (rutas || []).map(function (r) {
+      var nombre = r.split('/').pop(), mini = null;
+      if (ADJ_IMAGEN.test(nombre)) {
+        mini = h('img', { alt: '' });
+        App.api.get('/api/oficina/archivo', { ruta: r }).then(function (c) { if (c.base64) mini.src = 'data:' + c.mime + ';base64,' + c.base64; }).catch(function () {});
+      }
+      return h('div.adjunto.guardado', { title: r, onclick: function () {
+        App.api.get('/api/oficina/archivo', { ruta: r }).then(function (c) {
+          App.abrirContenido({ nombre: nombre, mime: c.mime, base64: c.base64, ruta: c.ruta });
+        }).catch(function () { App.aviso('No pude abrir ' + nombre + '. Está en la carpeta de la oficina: ' + r, true); });
+      } }, mini || App.icono('clip'), h('span', nombre),
+      quitar ? h('button.btn.fantasma.chico.icono', { type: 'button', title: 'Sacar de la tarea', onclick: function (e) { e.stopPropagation(); quitar(r); } }, App.icono('cerrar')) : null);
+    }));
   };
 
   /* imagen de retrato con carga diferida */

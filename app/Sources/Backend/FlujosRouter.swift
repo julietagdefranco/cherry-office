@@ -230,10 +230,13 @@ struct FlujosRouter: SubRouter {
     private func correr(_ act: OficinaActiva, _ id: String, _ body: Data?) async throws -> (Int, [String: Any]) {
         guard let f = buscar(act.oficina, id) else { throw ErrorAPI(404, "No existe ese flujo.") }
         guard f.activo else { throw ErrorAPI(409, "Ese flujo está pausado.") }
-        let d = try objeto(body)
+        let d = try objeto(body, max: Adjuntos.maxBody)
+        if (body?.count ?? 0) > FlujosRouter.maxBody, d["archivos"] == nil { throw ErrorAPI(400, "pedido inválido") }
         let nombre = try Validar.texto(d["nombre"], "nombre", max: MotorFlujos.maxNombre)!
         let contexto = try Validar.texto(d["contexto"], "contexto", max: MotorFlujos.maxContexto, obligatorio: false) ?? ""
-        let c = try await motor.iniciar(act, flujo: f, nombre: nombre, contexto: contexto)
+        let archivos = try Adjuntos.leer(d["archivos"])
+        let adjuntos = try Adjuntos.guardar(act, origen: "flujos/\(f.id)", archivos)
+        let c = try await motor.iniciar(act, flujo: f, nombre: nombre, contexto: contexto, adjuntos: adjuntos)
         return (200, ["corrida": c.json])
     }
 
