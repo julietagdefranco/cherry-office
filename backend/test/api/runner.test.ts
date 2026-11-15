@@ -228,20 +228,17 @@ setInterval(() => {}, 100)
   test('agentes distintos corren en paralelo', async () => {
     const sb = new Sandbox()
     const b = await sb.backend()
-    const t0 = Date.now()
     const rs = await Promise.all([
       chat(b, { agent: 'betty', message: 'DORMIR', session: U.a }),
       chat(b, { agent: 'marce', message: 'DORMIR', session: U.b }),
       chat(b, { agent: 'sofia', message: 'DORMIR', session: U.c }),
     ])
-    const dt = (Date.now() - t0) / 1000
     expect(rs.every((r) => r.status === 200)).toBe(true)
     const ev = sb.eventos
     expect(ev.length).toBe(6)
-    // los tres arrancan antes de que termine el primero
+    // los tres arrancan antes de que termine el primero (eso prueba el paralelo; medir el tiempo total falla en runners lentos)
     expect(ev.slice(0, 3).every((e) => e.startsWith('S '))).toBe(true)
     expect(new Set(ev.slice(0, 3))).toEqual(new Set(['S betty', 'S marce', 'S sofia']))
-    expect(dt, `tardó ${dt}s: parece secuencial`).toBeLessThan(2.6)
   })
 
   test('dos mensajes seguidos al mismo agente: el segundo ya usa --resume (carril cubre guardar+ejecutar)', async () => {
