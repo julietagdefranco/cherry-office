@@ -401,15 +401,21 @@ export class Programador implements ProgramadorEntregas {
   }
 
   /** Reserva `p.clave` y retoma la sesión en segundo plano (409 si la app se cierra o la clave ya está en uso). */
-  async retomarEnSegundoPlano(act: OficinaActiva, def: AgenteDef, e: Entrega | undefined, p: ParamsRetomar): Promise<void> {
+  async retomarEnSegundoPlano(act: OficinaActiva, def: AgenteDef, e: Entrega | undefined, p: ParamsRetomar, alFin?: (r: { entrega?: Entrega; error?: string }) => void): Promise<void> {
     if (this.cerrado) throw new ErrorAPI(409, 'La app se está cerrando.')
     this.verificar(act.carpeta)
     const clave = Programador.clave(act.carpeta, p.clave)
     if (this.reservadas.has(clave)) throw new ErrorAPI(409, p.origen === 'cambios' ? 'Ya le estás pidiendo cambios a esta entrega.' : 'Ya hay una corrida en curso para esto.')
     this.reservadas.add(clave)
     const id = -(++this.contadorRetomadas) // las corridas retomadas se guardan con id negativo (no chocan con las ejecuciones)
-    this.corridas.set(id, this.retomar(act, def, e, p).then(() => {}, () => {}).finally(() => this.termino(id, clave)))
+    this.corridas.set(id, this.retomar(act, def, e, p).then(
+      (r) => { try { alFin?.(r) } catch {} },
+      () => { try { alFin?.({ error: 'No pude retomar la conversación.' }) } catch {} },
+    ).finally(() => this.termino(id, clave)))
   }
+
+  /** ¿Hay una retomada en curso con esa clave de reserva (`cambios:<entrega>` o `espera:<id>`)? */
+  estaRetomando(oficina: string, clave: string): boolean { return this.reservadas.has(Programador.clave(oficina, clave)) }
 
   cambiandoEntrega(oficina: string, id: number): boolean { return this.reservadas.has(Programador.clave(oficina, Programador.claveCambios(id))) }
 
