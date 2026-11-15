@@ -345,6 +345,8 @@ const gente = (ps: AgenteDef[]) => ps.map((a) => `${a.nombre} (${a.rol})`).join(
 export function promptTurno(p: {
   oficina: Oficina; carpeta: string; tema: string; participantes: AgenteDef[]; quien: AgenteDef; turnos: TurnoReunion[]; ronda: number
   fichas?: string; patron?: PatronReunion; fase?: FaseTurno; lider?: AgenteDef; bandoA?: AgenteDef[]; bandoB?: AgenteDef[]
+  /** Turnos que había cuando este agente armó su prompt anterior en la reunión. */
+  leidos?: number
 }): string {
   const patron = p.patron ?? 'debate'
   const dicho = transcripcion(ReunionPatron.visibles(patron, p.turnos, p.ronda), p.oficina, maxTranscripcionTurno)
@@ -363,8 +365,20 @@ ${decisiones(p.carpeta)}${docs}
 
 Lo que se dijo hasta ahora (estamos en la ronda ${p.ronda}):
 ${dicho === '' ? '(todavía no habló nadie)' : dicho}
-
+${sinResponder(p.turnos, p.quien.id, p.oficina, p.leidos)}
 ${ReunionPatron.consigna(patron, p.fase ?? 'libre', p.quien, p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
+}
+
+/** Lo que escribió el usuario después del último turno de `quien`: tiene que responderlo o incorporarlo en su turno. */
+export function sinResponder(turnos: TurnoReunion[], quien: string, oficina: Oficina, leidos?: number): string {
+  // `leidos`: cuántos turnos había cuando armó su último prompt (lo que llegó mientras hablaba no lo vio)
+  let desde = 0
+  turnos.forEach((t, i) => { if (t.agente === quien && !t.error) desde = i + 1 })
+  if (leidos !== undefined) desde = Math.min(desde, leidos)
+  const msgs = turnos.slice(desde).filter((t) => t.agente === 'usuario').map((t) => `«${t.texto}»`)
+  if (msgs.length === 0) return ''
+  const n = nombreDe('usuario', oficina)
+  return `\nDesde tu último turno, ${n} escribió en la reunión:\n${msgs.join('\n')}\nRespondé o incorporá lo que dijo en tu intervención (sin dejar de lado el tema).\n`
 }
 
 export function promptSintesis(p: {
@@ -699,6 +713,10 @@ export class ReunionesRouter implements SubRouter {
   private readonly timeoutSintesis: number
   private readonly corriendo = new Map<string, Promise<void>>()
   private readonly hablando = new Map<string, string>()
+  /** Rondas que faltan después de la que está corriendo (un mensaje del usuario en la última suma una). */
+  private readonly restantes = new Map<string, number>()
+  /** `reunion:agente` → cuántos turnos había al armar su último prompt (para saber qué mensajes del usuario no vio). */
+  private readonly leidos = new Map<string, number>()
   private readonly cerrando = new Set<string>()
 
   constructor(private readonly s: Servicios) {
@@ -891,6 +909,13 @@ export class ReunionesRouter implements SubRouter {
     } catch {
       throw new ErrorAPI(500, 'No pude guardar tu intervención.')
     }
+    // Los agentes reaccionan: con rondas en curso lo incorporan los turnos que siguen; si ya es la última
+    // (alguien ya habló o está hablando sin verlo) se suma una ronda más; sin rondas en curso, arranca una.
+    if (this.corriendo.has(id)) {
+      if ((this.restantes.get(id) ?? 0) === 0) this.restantes.set(id, 1)
+    } else if (!this.cerrando.has(id)) {
+      this.arrancar(id, a, 1)
+    }
     return this.respuesta(id, a)
   }
 
@@ -1031,7 +1056,9 @@ export class ReunionesRouter implements SubRouter {
     let abortada = false
     let ultimoError: string | undefined
     try {
-      for (let i = 0; i < cuantas; i++) {
+      this.restantes.set(id, cuantas)
+      while ((this.restantes.get(id) ?? 0) > 0) {
+        this.restantes.set(id, (this.restantes.get(id) ?? 1) - 1)
         const r = await this.correrRonda(id, carpeta)
         algunoOk = algunoOk || r.ok
         ultimoError = r.error ?? ultimoError
@@ -1046,6 +1073,7 @@ export class ReunionesRouter implements SubRouter {
     } finally {
       this.corriendo.delete(id)
       this.hablando.delete(id)
+      this.restantes.delete(id)
     }
   }
 
@@ -1100,10 +1128,13 @@ export class ReunionesRouter implements SubRouter {
     if (!ag) return { agente: paso.agente, texto: 'No encontré al agente.', fallo: true, abortada: false }
     const patron: PatronReunion = esPatron(f.patron) ? f.patron : 'debate'
     const { lider, bandoA, bandoB } = rolesDe(f, of)
+    const turnos = this.db.turnosDe(id)
+    const clave = `${id}:${ag.id}`
     const prompt = promptTurno({
-      oficina: of, carpeta, tema: f.tema, participantes, quien: ag, turnos: this.db.turnosDe(id), ronda, fichas: fichas(carpeta, f.documentos),
-      patron, fase: paso.fase, lider, bandoA, bandoB,
+      oficina: of, carpeta, tema: f.tema, participantes, quien: ag, turnos, ronda, fichas: fichas(carpeta, f.documentos),
+      patron, fase: paso.fase, lider, bandoA, bandoB, leidos: this.leidos.get(clave),
     })
+    this.leidos.set(clave, turnos.length)
     let texto: string
     let fallo = false
     const caja = new CajaCosto()

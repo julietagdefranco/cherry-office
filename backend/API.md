@@ -57,7 +57,7 @@ Para compartir una oficina o pasarla a otra compu. Código: `backend/src/paquete
 
 ## Reuniones
 
-Varios agentes de la oficina activa opinan por **rondas** sobre un tema; el usuario puede intervenir, pedir otra ronda o cerrar. Al cerrar sale una síntesis (resumen, decisiones y pendientes). Código: `backend/src/reuniones.ts` (`ReunionesRouter`) y panel en `oficina/ui/reunion.js` (`App.Reunion.abrir()`).
+Varios agentes de la oficina activa opinan por **rondas** sobre un tema; el usuario les escribe como en un chat (los agentes reaccionan a cada mensaje), puede pedir otra ronda o cerrar. Al cerrar sale una síntesis (resumen, decisiones y pendientes). Código: `backend/src/reuniones.ts` (`ReunionesRouter`) y panel en `oficina/ui/reunion.js` (`App.Reunion.abrir()`).
 
 ## Tareas programadas y segundo plano
 
@@ -70,7 +70,7 @@ La app sigue viva con la ventana cerrada (el Dock o la bandeja la vuelven a abri
 | POST | `/api/reuniones` | `{tema, agentes:[ids], rondas?=1}` (tema ≤ 500 car., 1-20 agentes de la oficina, rondas 1-3) | La reunión (abajo). Arranca en segundo plano |
 | GET | `/api/reuniones` | | `{reuniones:[{id, tema, agentes, estado, creada, turnos:n}]}`, más nuevas primero (solo la oficina activa) |
 | GET | `/api/reuniones/:id` | | `{id, tema, agentes, estado, hablando, rondas, creada, turnos:[{ronda, agente, texto, ts, error?}], sintesis?, errorSintesis?, cerrada?, acta?, actaRuta?, error?}` |
-| POST | `/api/reuniones/:id/intervencion` | `{texto}` (≤ 5000) | La reunión. Queda como turno `agente:"usuario"` y lo leen los turnos siguientes (también si hay una ronda en curso). 409 si está cerrada |
+| POST | `/api/reuniones/:id/intervencion` | `{texto}` (≤ 5000) | La reunión. Queda como turno `agente:"usuario"` y los turnos siguientes lo reciben destacado para responderlo. Si hay rondas en curso, lo incorporan; si la que corre es la última, se suma una ronda más; si no corre ninguna, arranca una. 409 si está cerrada |
 | POST | `/api/reuniones/:id/ronda` | | La reunión, ya `en_curso`. 409 si hay una ronda en curso o está cerrada |
 | POST | `/api/reuniones/:id/cerrar` | | La reunión `cerrada` con `sintesis` (la llamada espera a la síntesis, hasta 3 min). 409 si hay una ronda en curso o ya está cerrada |
 
