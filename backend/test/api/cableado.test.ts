@@ -24,7 +24,9 @@ describe('Cableado de ejecución', () => {
     expect(Sandbox.valor(l, '--permission-mode')).toBe('default')
     expect(Sandbox.valor(l, '--permission-prompt-tool')).toBe('mcp__hq__pedir_permiso')
     expect(Sandbox.valor(l, '--disallowedTools')).toBe('mcp__claude_ai_*')
-    expect(l.includes('--append-system-prompt')).toBe(false)
+    // sin reglas ni límites, solo el párrafo de cómo pedirle algo a un colega
+    const i = Sandbox.valor(l, '--append-system-prompt')!
+    expect(i.startsWith('## Si te falta algo de un colega') && i.includes('pedir') && i.includes('quedo_esperando')).toBe(true)
   })
 
   // interno (unit test del port): Permisos.entorno(ctx) según ctx.permitidas

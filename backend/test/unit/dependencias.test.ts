@@ -86,11 +86,17 @@ function herramientasDe(p: Awaited<ReturnType<typeof preparar>>) {
   }
 }
 
+/** Deja pasar a los claude que esperan en modo `puerta` y espera a que no quede ninguna corrida en curso (si no, el cierre tarda). */
+async function terminar(p: Awaited<ReturnType<typeof preparar>>) {
+  p.sb.abrirPuerta()
+  await esperar(() => p.s.store.db.query("SELECT COUNT(*) AS n FROM ejecuciones WHERE estado='corriendo'")[0]!.n === 0)
+}
+
 describe('definiciones y permisos', () => {
   test('el perfil agente ve pedir; el creador no ve ninguna; sin el módulo no hay fábrica', async () => {
     const p = await preparar()
     const t = herramientasDe(p)
-    expect(nombres(t('marce').h)).toEqual(['colegas', 'consultar', 'pedir'])
+    expect(nombres(t('marce').h)).toEqual(['colegas', 'consultar', 'pedir', 'quedo_esperando', 'cancelar_espera'])
     expect(nombres(t('marce', { perfil: 'creador' }).h)).not.toContain('pedir')
     expect(herramientasDependencias(p.s, 't', { oficina: p.carpeta, agente: 'marce', sid: U.a, perfil: 'creador' })).toBeUndefined()
     const pedir = t('marce').h.definiciones.find((d) => d.name === 'pedir')!
@@ -121,6 +127,7 @@ describe('pedir', () => {
     expect(msg).toContain('archivos/entregables/arqui/')
     expect(msg.includes('\u0007')).toBe(false)
     expect(Sandbox.valor(l, '--agent')).toBe('arqui')
+    await terminar(p)
   })
 
   test('faltantes, uno mismo, inexistente y oficina cerrada dan isError sin lanzar claude ni gastar cupo', async () => {
@@ -143,7 +150,7 @@ describe('pedir', () => {
   test('cupo de 2 pedidos por token; el dedupe devuelve el abierto sin gastar cupo', async () => {
     const p = await preparar(['marce', 'arqui', 'nico', 'lola'])
     const t = herramientasDe(p)
-    p.sb.modo('arqui', 'lento')
+    p.sb.modo('arqui', 'puerta')
     const { h } = t('marce')
     const a = objeto(await h.llamar('pedir', { colega: 'arqui', que: 'uno' }))
     const otra = objeto(await h.llamar('pedir', { colega: 'arqui', que: 'uno de nuevo' }))
@@ -155,6 +162,7 @@ describe('pedir', () => {
     expect(p.dep.pedidos.lista(p.carpeta).length).toBe(2)
     // otro token tiene su propio cupo
     expect((await t('marce').h.llamar('pedir', { colega: 'lola', que: 'tres' }))?.esError).toBe(false)
+    await terminar(p)
   })
 
   test('tope de 10 pedidos abiertos por oficina y de HQ_MAX_PEDIDOS_DIA por día', async () => {
@@ -172,12 +180,13 @@ describe('pedir', () => {
     for (let i = 0; i < 3; i++) { const x = q.dep.pedidos.crear({ oficina: q.carpeta, de: 'x' + i, a: 'y' + i, que: 'q' })!; q.dep.pedidos.actualizar(q.carpeta, x.id, { estado: 'entregado' }) }
     const d = (await herramientasDe(q)('marce').h.llamar('pedir', { colega: 'arqui', que: 'x' }))!
     expect(d.esError && d.texto.includes('3 pedidos')).toBe(true)
+    await terminar(p)
   })
 
   test('profundidad mayor que 2 y ciclo: se rechazan según la cadena del pedido desde el que se llama', async () => {
     const p = await preparar(['marce', 'arqui', 'nico', 'lola', 'rita'])
     const t = herramientasDe(p)
-    const ejec = (sid: string, tarea: string, agente: string) => p.s.store.db.run("INSERT INTO ejecuciones(oficina,tarea,agente,programada,inicio,estado,sid,manual) VALUES(?,?,?,0,0,'corriendo',?,0)", [p.carpeta, tarea, agente, sid])
+    const ejec = (sid: string, tarea: string, agente: string) => p.s.store.db.run("INSERT INTO ejecuciones(oficina,tarea,agente,programada,inicio,estado,sid,manual) VALUES(?,?,?,0,0,'ok',?,0)", [p.carpeta, tarea, agente, sid])
     // marce -> arqui -> nico (profundidad 1) -> lola (profundidad 2)
     const p1 = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'marce', a: 'arqui', que: 'q' })!
     const p2 = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'arqui', a: 'nico', que: 'q', cadena: p1.cadena, profundidad: 1 })!
@@ -196,5 +205,224 @@ describe('pedir', () => {
     expect(ok.ok).toBe(true)
     const nuevo = p.dep.pedidos.uno(p.carpeta, ok.pedido)!
     expect([nuevo.cadena, nuevo.profundidad]).toEqual([p1.id, 2])
+    await terminar(p)
+  })
+})
+
+// MARK: - quedo_esperando y cancelar_espera
+
+describe('quedo_esperando', () => {
+  test('sin pedido abierto lo pide por vos y deja la espera atada a pedido:<n>, en el grupo de la sesión', async () => {
+    const p = await preparar()
+    const { h } = herramientasDe(p)('marce')
+    const r = (await h.llamar('quedo_esperando', { colega: 'arqui', que: 'el mapeo y la prueba', plazo_dias: 5 }))!
+    expect(r.esError, r.texto).toBe(false)
+    const j = objeto(r)
+    expect(j.ok).toBe(true)
+    const x = p.dep.esperas.una(p.carpeta, j.espera)!
+    const ped = p.dep.pedidos.uno(p.carpeta, j.pedido)!
+    expect([ped.de, ped.a, ped.que]).toEqual(['marce', 'arqui', 'el mapeo y la prueba'])
+    expect(x).toMatchObject({ agente: 'marce', esperaA: 'arqui', ref: `pedido:${ped.id}`, pedido: ped.id, grupo: `sid:${U.a}`, accion: 'continuar', sid: U.a, estado: 'esperando', ronda: 1, plazoDias: 5, origen: 'mcp' })
+    expect(j.aviso).toContain('Arqui')
+    await terminar(p)
+  })
+
+  test('con un pedido abierto lo usa; con un pedido ajeno o inexistente da error; con uno entregado nace lista', async () => {
+    const p = await preparar(['marce', 'arqui', 'nico'])
+    const t = herramientasDe(p)
+    p.sb.modo('arqui', 'puerta')
+    const { h } = t('marce')
+    const a = objeto(await h.llamar('pedir', { colega: 'arqui', que: 'mapeo' }))
+    const r = objeto(await h.llamar('quedo_esperando', { colega: 'arqui', que: 'mapeo' }))
+    expect(r.pedido).toBe(a.pedido)
+    expect(p.dep.pedidos.lista(p.carpeta).length).toBe(1)
+    // pedido de otro, o a otro colega, o inexistente
+    const ajeno = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'nico', a: 'arqui', que: 'q' })!
+    for (const id of [ajeno.id, 999, 'x']) {
+      const e = (await t('marce').h.llamar('quedo_esperando', { colega: 'arqui', que: 'm', pedido: id }))!
+      expect(e.esError && e.texto.includes('no es un pedido tuyo'), String(id)).toBe(true)
+    }
+    const aNico = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'marce', a: 'nico', que: 'q' })!
+    expect((await t('marce').h.llamar('quedo_esperando', { colega: 'arqui', que: 'm', pedido: aNico.id }))?.esError).toBe(true)
+    // entregado: nace lista, con lo que llegó
+    p.dep.pedidos.actualizar(p.carpeta, aNico.id, { estado: 'entregado', entrega: 42 })
+    const ok = objeto(await t('marce').h.llamar('quedo_esperando', { colega: 'nico', que: 'ya llegó', pedido: aNico.id }))
+    const x = p.dep.esperas.una(p.carpeta, ok.espera)!
+    expect([x.estado, x.entregaLlegada, x.ref]).toEqual(['lista', 42, `pedido:${aNico.id}`])
+    await terminar(p)
+  })
+
+  test('validaciones: faltantes, plazo fuera de rango, uno mismo, inexistente y oficina cerrada; no lanzan claude', async () => {
+    const p = await preparar()
+    const t = herramientasDe(p)
+    const { h } = t('marce')
+    expect((await h.llamar('quedo_esperando', { colega: 'arqui' }))?.esError).toBe(true)
+    for (const plazo of [0, 31, 1.5, '3']) {
+      const r = (await h.llamar('quedo_esperando', { colega: 'arqui', que: 'x', plazo_dias: plazo }))!
+      expect(r.esError && r.texto.includes('entre 1 y 30'), String(plazo)).toBe(true)
+    }
+    expect((await h.llamar('quedo_esperando', { colega: 'marce', que: 'x' }))?.esError).toBe(true)
+    expect((await h.llamar('quedo_esperando', { colega: 'fantasma', que: 'x' }))?.esError).toBe(true)
+    const c = (await t('marce', { oficinaId: '/otra' }).h.llamar('quedo_esperando', { colega: 'arqui', que: 'x' }))!
+    expect(c.esError && c.texto.includes('oficina')).toBe(true)
+    expect(p.sb.llamadas).toEqual([])
+    expect(p.dep.esperas.lista(p.carpeta)).toEqual([])
+  })
+
+  test('antideadlock: si B ya espera a A (directa o transitivamente), da error', async () => {
+    const p = await preparar(['marce', 'arqui', 'nico'])
+    const t = herramientasDe(p)
+    const hay = (agente: string, esperaA: string) => p.dep.esperas.crear({ oficina: p.carpeta, agente, esperaA, que: 'x', ref: `pedido:${agente}${esperaA}`, grupo: `sid:${agente}`, accion: 'continuar', origen: 'mcp' })
+    hay('arqui', 'marce')
+    const directo = (await t('marce').h.llamar('quedo_esperando', { colega: 'arqui', que: 'x' }))!
+    expect(directo.esError && directo.texto.includes('Arqui ya te está esperando a vos')).toBe(true)
+    // transitivo: nico espera a arqui, arqui a marce
+    const trans = (await t('marce').h.llamar('quedo_esperando', { colega: 'nico', que: 'x' }))!
+    expect(trans.esError).toBe(false) // nico no espera a nadie todavía
+    hay('nico', 'arqui')
+    const t2 = (await t('marce').h.llamar('quedo_esperando', { colega: 'nico', que: 'otra' }))!
+    expect(t2.esError && t2.texto.includes('Nico ya te está esperando')).toBe(true)
+    // una espera cerrada ya no cuenta
+    for (const x of p.dep.esperas.lista(p.carpeta, { agente: 'arqui' })) p.dep.esperas.actualizar(p.carpeta, x.id, { estado: 'hecha' })
+    expect((await t('marce').h.llamar('quedo_esperando', { colega: 'arqui', que: 'x' }))?.esError).toBe(false)
+    await terminar(p)
+  })
+
+  test('ronda: la segunda espera de la misma conversación es la ronda 2; la tercera se rechaza', async () => {
+    const p = await preparar(['marce', 'arqui', 'nico'])
+    const t = herramientasDe(p)
+    const e1 = objeto(await t('marce').h.llamar('quedo_esperando', { colega: 'arqui', que: 'uno' }))
+    expect(p.dep.esperas.una(p.carpeta, e1.espera)!.ronda).toBe(1)
+    // la v2 corre en la misma sesión con la espera 1 `relanzada`
+    p.dep.esperas.actualizar(p.carpeta, e1.espera, { estado: 'relanzada' })
+    const e2 = objeto(await t('marce').h.llamar('quedo_esperando', { colega: 'nico', que: 'dos' }))
+    expect(p.dep.esperas.una(p.carpeta, e2.espera)!.ronda).toBe(2)
+    p.dep.esperas.actualizar(p.carpeta, e2.espera, { estado: 'hecha' })
+    const e3 = (await t('marce').h.llamar('quedo_esperando', { colega: 'arqui', que: 'tres' }))!
+    expect(e3.esError && e3.texto.includes('Ya van dos versiones esperando a Arqui')).toBe(true)
+    // otra sesión es otra cadena
+    expect((await t('marce', { sid: U.b }).h.llamar('quedo_esperando', { colega: 'arqui', que: 'tres' }))?.esError).toBe(false)
+    await terminar(p)
+  })
+
+  test('hasta 5 esperas abiertas por agente y cupo de 3 por token', async () => {
+    const p = await preparar(['marce', 'arqui'])
+    const t = herramientasDe(p)
+    const { h } = t('marce')
+    p.sb.modo('arqui', 'puerta')
+    for (let i = 1; i <= 3; i++) expect((await h.llamar('quedo_esperando', { colega: 'arqui', que: `m${i}`, pedido: undefined }))?.esError, `m${i}`).toBe(false)
+    const cuarta = (await h.llamar('quedo_esperando', { colega: 'arqui', que: 'm4' }))!
+    expect(cuarta.esError && cuarta.texto.includes('3 esperas')).toBe(true)
+    // el tope por agente: 5 abiertas (con otros tokens)
+    for (let i = 0; i < 2; i++) expect((await t('marce', { sid: `5555555${i}-5555-4555-8555-555555555555` }).h.llamar('quedo_esperando', { colega: 'arqui', que: 'x' }))?.esError).toBe(false)
+    const sexta = (await t('marce', { sid: U.c }).h.llamar('quedo_esperando', { colega: 'arqui', que: 'x' }))!
+    expect(sexta.esError && sexta.texto.includes('5 esperas abiertas')).toBe(true)
+    await terminar(p)
+  })
+})
+
+describe('cancelar_espera', () => {
+  test('cancela solo las esperas propias y abiertas, con motivo', async () => {
+    const p = await preparar(['marce', 'arqui'])
+    const t = herramientasDe(p)
+    const e = objeto(await t('marce').h.llamar('quedo_esperando', { colega: 'arqui', que: 'm' }))
+    expect((await t('arqui').h.llamar('cancelar_espera', { espera: e.espera }))?.esError).toBe(true)
+    expect((await t('marce').h.llamar('cancelar_espera', { espera: 999 }))?.esError).toBe(true)
+    expect((await t('marce').h.llamar('cancelar_espera', {}))?.esError).toBe(true)
+    const r = (await t('marce').h.llamar('cancelar_espera', { espera: e.espera, motivo: 'lo resolví yo' }))!
+    expect(r.esError, r.texto).toBe(false)
+    const x = p.dep.esperas.una(p.carpeta, e.espera)!
+    expect([x.estado, x.motivo]).toEqual(['cancelada', 'lo resolví yo'])
+    const otra = (await t('marce').h.llamar('cancelar_espera', { espera: e.espera }))!
+    expect(otra.esError && otra.texto.includes('ya no está abierta')).toBe(true)
+    expect((await t('marce', { oficinaId: '/otra' }).h.llamar('cancelar_espera', { espera: e.espera }))?.esError).toBe(true)
+    await terminar(p)
+  })
+})
+
+// MARK: - gancho de entregas
+
+describe('gancho al registrar entregas', () => {
+  const registrar = (p: Awaited<ReturnType<typeof preparar>>, agente: string, o: { ref: string; sid?: string; padre?: number; origen?: string; titulo?: string }) =>
+    p.s.entregas.registrar({ oficina: p.carpeta, agente, nombre: agente, origen: o.origen ?? 'tarea', ref: o.ref, titulo: o.titulo ?? 'T', texto: 'texto', sid: o.sid ?? '', padre: o.padre })!
+
+  test('la entrega de A en su sid es la v1 de sus esperas abiertas; las de otra sid o ya vinculadas, no', async () => {
+    const p = await preparar()
+    const mk = (sid: string) => p.dep.esperas.crear({ oficina: p.carpeta, agente: 'marce', esperaA: 'arqui', que: 'x', ref: `pedido:${sid.length}`, grupo: `sid:${sid}`, accion: 'continuar', sid, origen: 'mcp' })!
+    const a = mk('s-uno'), b = mk('s-dos')
+    const v1 = registrar(p, 'marce', { ref: 't', sid: 's-uno' })
+    expect(p.dep.esperas.una(p.carpeta, a.id)!.entregaParcial).toBe(v1.id)
+    expect(p.dep.esperas.una(p.carpeta, b.id)!.entregaParcial).toBeUndefined()
+    registrar(p, 'marce', { ref: 't', sid: 's-uno' })
+    expect(p.dep.esperas.una(p.carpeta, a.id)!.entregaParcial).toBe(v1.id) // ya tenía v1
+    // una entrega de otro agente con la misma sid no vincula
+    registrar(p, 'nico', { ref: 't', sid: 's-dos' })
+    expect(p.dep.esperas.una(p.carpeta, b.id)!.entregaParcial).toBeUndefined()
+  })
+
+  test('la entrega de B con la ref del pedido cumple el pedido y deja lista la espera de A', async () => {
+    const p = await preparar()
+    const ped = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'marce', a: 'arqui', que: 'q', sid: 's1' })!
+    const x = p.dep.esperas.crear({ oficina: p.carpeta, agente: 'marce', esperaA: 'arqui', que: 'x', ref: `pedido:${ped.id}`, pedido: ped.id, grupo: 'sid:s1', accion: 'continuar', sid: 's1', origen: 'mcp' })!
+    // de otro agente con esa ref no satisface
+    registrar(p, 'nico', { ref: `pedido:${ped.id}`, origen: 'pedido' })
+    expect(p.dep.esperas.una(p.carpeta, x.id)!.estado).toBe('esperando')
+    expect(p.dep.pedidos.uno(p.carpeta, ped.id)!.estado).toBe('corriendo')
+    const e = registrar(p, 'arqui', { ref: `pedido:${ped.id}`, origen: 'pedido' })
+    const despues = p.dep.esperas.una(p.carpeta, x.id)!
+    expect([despues.estado, despues.entregaLlegada]).toEqual(['lista', e.id])
+    const pedido = p.dep.pedidos.uno(p.carpeta, ped.id)!
+    expect([pedido.estado, pedido.entrega]).toEqual(['entregado', e.id])
+  })
+
+  test('una entrega parcial de B no satisface; su v2 (origen espera, padre = v1) sí', async () => {
+    const p = await preparar(['marce', 'arqui', 'nico'])
+    const ped = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'marce', a: 'arqui', que: 'q', sid: 's1' })!
+    const ex1 = p.dep.esperas.crear({ oficina: p.carpeta, agente: 'marce', esperaA: 'arqui', que: 'x', ref: `pedido:${ped.id}`, pedido: ped.id, grupo: 'sid:s1', accion: 'continuar', sid: 's1', origen: 'mcp' })!
+    // arqui, en su corrida del pedido (sesión s2), espera a nico
+    const q = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'arqui', a: 'nico', que: 'q', sid: 's2', cadena: ped.id, profundidad: 1 })!
+    const ex2 = p.dep.esperas.crear({ oficina: p.carpeta, agente: 'arqui', esperaA: 'nico', que: 'y', ref: `pedido:${q.id}`, pedido: q.id, grupo: 'sid:s2', accion: 'continuar', sid: 's2', origen: 'mcp' })!
+    const v1 = registrar(p, 'arqui', { ref: `pedido:${ped.id}`, origen: 'pedido', sid: 's2' })
+    expect(p.dep.esperas.una(p.carpeta, ex2.id)!.entregaParcial).toBe(v1.id)
+    expect(p.dep.pedidos.uno(p.carpeta, ped.id)!.estado).toBe('corriendo')
+    expect(p.dep.esperas.una(p.carpeta, ex1.id)!.estado).toBe('esperando')
+    // nico entrega lo de arqui: ex2 lista (nico no entrega parcial)
+    const n = registrar(p, 'nico', { ref: `pedido:${q.id}`, origen: 'pedido' })
+    expect(p.dep.esperas.una(p.carpeta, ex2.id)).toMatchObject({ estado: 'lista', entregaLlegada: n.id })
+    expect(p.dep.pedidos.uno(p.carpeta, q.id)!.estado).toBe('entregado')
+    // la v2 de arqui se relanza (la espera 2 pasa a relanzada) y entrega
+    p.dep.esperas.actualizar(p.carpeta, ex2.id, { estado: 'relanzada' })
+    const v2 = registrar(p, 'arqui', { ref: `espera:${ex2.id}`, origen: 'espera', sid: 's2', padre: v1.id })
+    expect(p.dep.esperas.una(p.carpeta, ex2.id)).toMatchObject({ estado: 'hecha', entregaNueva: v2.id })
+    expect(p.dep.pedidos.uno(p.carpeta, ped.id)).toMatchObject({ estado: 'entregado', entrega: v2.id })
+    expect(p.dep.esperas.una(p.carpeta, ex1.id)).toMatchObject({ estado: 'lista', entregaLlegada: v2.id })
+  })
+
+  test('esperando a la persona: la entrega origen persona con la ref satisface; un agente no', async () => {
+    const p = await preparar()
+    const x = p.dep.esperas.crear({ oficina: p.carpeta, agente: 'marce', esperaA: 'persona', que: 'x', ref: 'encargo:abc:0', grupo: 'reunion:abc:1', accion: 'encargar', origen: 'reunion', tarea: 'encargo:abc:1' })!
+    registrar(p, 'arqui', { ref: 'encargo:abc:0' })
+    expect(p.dep.esperas.una(p.carpeta, x.id)!.estado).toBe('esperando')
+    const e = registrar(p, '', { ref: 'encargo:abc:0', origen: 'persona' })
+    expect(p.dep.esperas.una(p.carpeta, x.id)).toMatchObject({ estado: 'lista', entregaLlegada: e.id })
+  })
+
+  test('un pedido o un relanzamiento que terminan en error: el pedido pasa a fallido y las esperas a fallida', async () => {
+    const p = await preparar()
+    const ped = p.dep.pedidos.crear({ oficina: p.carpeta, de: 'marce', a: 'arqui', que: 'q' })!
+    const x = p.dep.esperas.crear({ oficina: p.carpeta, agente: 'marce', esperaA: 'arqui', que: 'x', ref: `pedido:${ped.id}`, pedido: ped.id, grupo: 'sid:s1', accion: 'continuar', sid: 's1', origen: 'mcp' })!
+    const ej = { id: 1, oficina: p.carpeta, tarea: `pedido:${ped.id}`, agente: 'arqui', programada: 0, inicio: 0, estado: 'error', sid: 's', resultado: '', error: 'se cayó', manual: true }
+    p.dep.alTerminarEjecucion(ej)
+    expect(p.dep.pedidos.uno(p.carpeta, ped.id)).toMatchObject({ estado: 'fallido', error: 'se cayó' })
+    expect(p.dep.esperas.una(p.carpeta, x.id)!.estado).toBe('esperando')
+    p.dep.esperas.actualizar(p.carpeta, x.id, { estado: 'relanzada' })
+    p.dep.alTerminarEjecucion({ ...ej, tarea: `espera:${x.id}`, error: 'falló la v2' })
+    expect(p.dep.esperas.una(p.carpeta, x.id)).toMatchObject({ estado: 'fallida', motivo: 'falló la v2' })
+    // las que terminan bien no cambian nada
+    const y = p.dep.esperas.crear({ oficina: p.carpeta, agente: 'marce', esperaA: 'arqui', que: 'x', ref: 'pedido:9', grupo: 'g', accion: 'encargar', origen: 'reunion', tarea: 'encargo:r:1', estado: 'relanzada' })!
+    p.dep.alTerminarEjecucion({ ...ej, tarea: 'encargo:r:1', estado: 'ok', error: undefined })
+    expect(p.dep.esperas.una(p.carpeta, y.id)!.estado).toBe('relanzada')
+    p.dep.alTerminarEjecucion({ ...ej, tarea: 'encargo:r:1', error: 'x' })
+    expect(p.dep.esperas.una(p.carpeta, y.id)!.estado).toBe('fallida')
   })
 })

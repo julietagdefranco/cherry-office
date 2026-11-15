@@ -6,13 +6,13 @@
 // concreta (`pedido:<n>` o `encargo:<reunión>:<m>`), así no hace falta un LLM para decidir si «llegó».
 import { mcpDe, normalizar, sanear } from './consultas.js'
 import { respuestaCoordinador } from './coordinador.js'
-import { iso } from './entregas.js'
+import { iso, type Entrega } from './entregas.js'
 import { ErrorAPI } from './errores.js'
 import type { Obj } from './json.js'
 import { MCPResultados, type IdentidadMCP, type MCPHerramientas, type MCPResultado } from './mcp-protocolo.js'
 import type { AgenteDef } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
-import { Programador, programadorDe } from './programador.js'
+import { Programador, programadorDe, type Ejecucion } from './programador.js'
 import type { Servicios } from './servicios.js'
 import { registrarModulo } from './servicios.js'
 import { num, txt, type Fila, type SQLValor, type SQLiteDB } from './sqlite.js'
@@ -260,7 +260,7 @@ export class EsperasStore {
 
   /** De la más vieja a la más nueva. */
   lista(oficina: string, f: {
-    estados?: string[]; agente?: string; esperaA?: string; grupo?: string; ref?: string; pedido?: number; sid?: string; reunion?: string; pendiente?: number
+    estados?: string[]; agente?: string; esperaA?: string; grupo?: string; ref?: string; pedido?: number; sid?: string; reunion?: string; pendiente?: number; tarea?: string
     /** Entrega que figura como parcial, llegada o nueva. */
     entrega?: number
     desde?: number; limite?: number
@@ -270,7 +270,7 @@ export class EsperasStore {
     if (f.estados && f.estados.length > 0) { sql += ` AND estado IN (${f.estados.map(() => '?').join(',')})`; p.push(...f.estados) }
     const igual = (col: string, v: SQLValor | undefined) => { if (v !== undefined) { sql += ` AND ${col}=?`; p.push(v) } }
     igual('agente', f.agente); igual('espera_a', f.esperaA); igual('grupo', f.grupo); igual('ref', f.ref); igual('pedido', f.pedido)
-    igual('sid', f.sid); igual('reunion', f.reunion); igual('pendiente', f.pendiente)
+    igual('sid', f.sid); igual('reunion', f.reunion); igual('pendiente', f.pendiente); igual('tarea', f.tarea)
     if (f.entrega !== undefined) { sql += ' AND (entrega_parcial=? OR entrega_llegada=? OR entrega_nueva=?)'; p.push(f.entrega, f.entrega, f.entrega) }
     if (f.desde !== undefined) { sql += ' AND creada>=?'; p.push(f.desde) }
     sql += ' ORDER BY id LIMIT ?'
@@ -307,6 +307,16 @@ export class EsperasStore {
     const cambiadas = this.db.run(`UPDATE esperas SET estado='relanzada', actualizada=? WHERE oficina=? AND grupo=? AND estado='lista'`, [ahora, oficina, grupo])
     if (cambiadas === 0) return []
     return this.lista(oficina, { grupo, estados: ['relanzada'] }).filter((x) => x.actualizada >= ahora)
+  }
+
+  /** La entrega `e` es la versión parcial (v1) de las esperas abiertas de `agente` en `sid` que todavía no tienen una. */
+  vincularParcial(oficina: string, agente: string, sid: string, entrega: number): number {
+    try {
+      return this.db.run(`UPDATE esperas SET entrega_parcial=?, actualizada=? WHERE oficina=? AND agente=? AND sid=? AND estado IN ('esperando','lista') AND entrega_parcial IS NULL`,
+        [entrega, Date.now() / 1000, oficina, agente, sid])
+    } catch {
+      return 0
+    }
   }
 
   /** Devuelve a `lista` las esperas `relanzada` de un grupo (el relanzamiento no pudo arrancar). */
@@ -409,6 +419,10 @@ export function esperaJSON(x: Espera, c: ContextoEspera): Obj {
 /** Lo que el hueco `dependencias` expone a los demás módulos. */
 export class ServicioDependencias {
   static readonly maxQue = 2000
+  static readonly maxQueEspera = 500
+  static readonly maxEsperasPorAgente = 5
+  static readonly esperasPorToken = 3
+  static readonly maxRondas = 2
   static readonly maxContexto = 4000
   static readonly pedidosPorCorrida = 2
   static readonly maxPedidosAbiertos = 10
@@ -429,6 +443,91 @@ export class ServicioDependencias {
     const t = Number((this.s.env.HQ_MAX_PEDIDOS_DIA ?? '').trim())
     return (this.s.env.HQ_MAX_PEDIDOS_DIA ?? '').trim() !== '' && Number.isFinite(t) && t > 0 ? Math.trunc(t) : ServicioDependencias.maxPedidosPorDia
   }
+
+  // MARK: satisfacer esperas (determinístico)
+
+  /** Entrega parcial: una espera abierta de su agente, en su misma conversación, la tiene como v1 (hay que esperar su v2). */
+  esParcial(e: Entrega): boolean {
+    if (e.sid === '' || e.agente === '') return false
+    return this.esperas.lista(e.oficina, { agente: e.agente, sid: e.sid, estados: esperasAbiertas }).some((x) => x.entregaParcial === e.id)
+  }
+
+  /** `e` satisface la espera `x`: la ref de su raíz es la de `x`, la entrega la hizo quien se esperaba y no es parcial. */
+  satisface(e: Entrega, x: Espera): boolean {
+    if (this.s.entregas.raiz(e.oficina, e).ref !== x.ref) return false
+    if (x.esperaA === 'persona' ? e.origen !== 'persona' : e.agente !== x.esperaA) return false
+    return !this.esParcial(e)
+  }
+
+  /** ¿Quien está en `desde` espera, directa o transitivamente, a `hacia`? (esperas abiertas de la oficina) */
+  esperaA(oficina: string, desde: string, hacia: string): boolean {
+    const aristas = this.esperas.lista(oficina, { estados: ['esperando', 'lista'] })
+    const vistos = new Set<string>()
+    const pila = [desde]
+    while (pila.length > 0) {
+      const a = pila.pop()!
+      if (vistos.has(a)) continue
+      vistos.add(a)
+      for (const x of aristas) {
+        if (x.agente !== a || x.esperaA === 'persona') continue
+        if (x.esperaA === hacia) return true
+        pila.push(x.esperaA)
+      }
+    }
+    return false
+  }
+
+  /** Gancho de `Entregas.registrar` (síncrono): vincula la v1, cumple pedidos, deja `lista` lo que esperaba esta entrega y
+   *  cierra las v2. Lo lento (relanzar) sale con `void`. */
+  alRegistrarEntrega(e: Entrega) {
+    const oficina = e.oficina
+    // 1. la v1 de las esperas de (agente, sid)
+    if (e.sid !== '' && e.agente !== '') this.esperas.vincularParcial(oficina, e.agente, e.sid, e.id)
+    // 2. pedidos cumplidos
+    const raiz = this.s.entregas.raiz(oficina, e)
+    const parcial = this.esParcial(e)
+    if (raiz.ref.startsWith(Programador.prefijoPedido) && !parcial) {
+      const ped = this.pedidos.uno(oficina, Number(raiz.ref.slice(Programador.prefijoPedido.length)))
+      if (ped && ped.estado === 'corriendo' && ped.a === e.agente) this.pedidos.actualizar(oficina, ped.id, { estado: 'entregado', entrega: e.id })
+    }
+    // 3. esperas satisfechas
+    if (!parcial) {
+      for (const x of this.esperas.lista(oficina, { estados: ['esperando'], ref: raiz.ref })) {
+        if (this.satisface(e, x)) this.esperas.actualizar(oficina, x.id, { estado: 'lista', entregaLlegada: e.id })
+      }
+    }
+    // 4. la v2 (o el pendiente que arrancó) está entregada
+    if (e.origen === 'espera' && e.ref.startsWith(Programador.prefijoEspera)) {
+      const lider = this.esperas.una(oficina, Number(e.ref.slice(Programador.prefijoEspera.length)))
+      if (lider) for (const x of this.esperas.lista(oficina, { grupo: lider.grupo, estados: ['relanzada'] })) this.esperas.actualizar(oficina, x.id, { estado: 'hecha', entregaNueva: e.id })
+    }
+    if (e.ref.startsWith(Programador.prefijoEncargo)) {
+      for (const x of this.esperas.lista(oficina, { estados: ['relanzada'], tarea: e.ref })) this.esperas.actualizar(oficina, x.id, { estado: 'hecha', entregaNueva: e.id })
+    }
+    // 5. relanzar lo que quedó listo
+    void this.procesarListas(oficina)
+  }
+
+  /** Gancho de `Programador.alTerminar`: un pedido que falló, o un relanzamiento que falló. */
+  alTerminarEjecucion(ej: Ejecucion) {
+    if (ej.estado !== 'error') return
+    const oficina = ej.oficina
+    const motivo = ej.error ?? 'error'
+    if (ej.tarea.startsWith(Programador.prefijoPedido)) {
+      const ped = this.pedidos.uno(oficina, Number(ej.tarea.slice(Programador.prefijoPedido.length)))
+      if (ped && ped.estado === 'corriendo') this.pedidos.actualizar(oficina, ped.id, { estado: 'fallido', error: motivo })
+      return
+    }
+    let relanzadas = this.esperas.lista(oficina, { estados: ['relanzada'], tarea: ej.tarea })
+    if (ej.tarea.startsWith(Programador.prefijoEspera)) {
+      const lider = this.esperas.una(oficina, Number(ej.tarea.slice(Programador.prefijoEspera.length)))
+      if (lider) relanzadas = this.esperas.lista(oficina, { grupo: lider.grupo, estados: ['relanzada'] })
+    }
+    for (const x of relanzadas) this.esperas.actualizar(oficina, x.id, { estado: 'fallida', motivo })
+  }
+
+  /** Relanza lo que está listo (Fase D4). */
+  async procesarListas(_oficina: string): Promise<void> {}
 
   /** `esperaJSON` con los nombres de la oficina de la espera (si es la activa; si no, los ids). */
   json(x: Espera, ahora?: number): Obj {
@@ -466,11 +565,32 @@ export class HerramientasDependencias implements MCPHerramientas {
           required: ['colega', 'que'],
         },
       },
+      {
+        name: 'quedo_esperando',
+        description: 'Avisá que entregás una versión parcial porque te falta algo de un colega. Cuando ese colega entregue, la oficina te vuelve a encargar el trabajo (versión completa) con lo tuyo y lo nuevo. Si no le pediste nada todavía, se lo pide por vos. Llamala antes de terminar, una vez por cosa que te falte.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            colega: { type: 'string', description: 'id o nombre del colega' },
+            que: { type: 'string', description: `qué te falta (hasta ${ServicioDependencias.maxQueEspera} caracteres)` },
+            pedido: { type: 'integer', description: 'id del pedido que le hiciste (opcional)' },
+            plazo_dias: { type: 'integer', description: 'cuántos días esperar antes de avisarle a la persona (1-30, 2 por defecto)' },
+          },
+          required: ['colega', 'que'],
+        },
+      },
+      {
+        name: 'cancelar_espera',
+        description: 'Cancela una espera tuya (por ejemplo, si resolviste lo que faltaba de otra forma).',
+        inputSchema: { type: 'object', properties: { espera: { type: 'integer' }, motivo: { type: 'string' } }, required: ['espera'] },
+      },
     ]
   }
 
   async llamar(nombre: string, a: Obj): Promise<MCPResultado | undefined> {
     switch (nombre) {
+      case 'quedo_esperando': return this.quedoEsperando(a)
+      case 'cancelar_espera': return this.cancelarEspera(a)
       case 'pedir': return this.pedir(a)
       default: return undefined
     }
@@ -573,6 +693,99 @@ export class HerramientasDependencias implements MCPHerramientas {
     if (r.yaPedido) o.yaPedido = true
     return respuestaCoordinador(o)
   }
+
+  // MARK: quedo_esperando
+
+  private async quedoEsperando(a: Obj): Promise<MCPResultado> {
+    const quien = texto(a.colega)
+    const que = texto(a.que)
+    if (quien === '' || que === '') return MCPResultados.error('Faltan «colega» y «que».')
+    let plazo = 2
+    if (a.plazo_dias !== undefined && a.plazo_dias !== null) {
+      if (typeof a.plazo_dias !== 'number' || !Number.isInteger(a.plazo_dias) || a.plazo_dias < 1 || a.plazo_dias > 30) {
+        return MCPResultados.error('«plazo_dias» tiene que ser un entero entre 1 y 30.')
+      }
+      plazo = a.plazo_dias
+    }
+    const act = this.activa()
+    if (!act) return sinOficina()
+    const c = this.colega(act, quien)
+    if ('error' in c) return c.error
+    const b = c.def
+    const oficina = act.carpeta
+    const yo = this.identidad.agente
+    const tokens = mcpDe(this.s)?.tokens
+    if (!tokens) return MCPResultados.error('No pude registrar la espera.')
+
+    // el pedido al que se ata la espera
+    let pedido: Pedido | undefined
+    if (a.pedido !== undefined && a.pedido !== null) {
+      const id = typeof a.pedido === 'number' && Number.isInteger(a.pedido) ? a.pedido : NaN
+      pedido = Number.isNaN(id) ? undefined : this.dep.pedidos.uno(oficina, id)
+      if (!pedido || pedido.de !== yo || pedido.a !== b.id || pedido.estado === 'cancelado') {
+        return MCPResultados.error(`El pedido ${sanear(String(a.pedido))} no es un pedido tuyo a ${sanear(b.nombre)}. Usá el número que te devolvió pedir, o no pases «pedido» y lo pido yo.`)
+      }
+    } else {
+      pedido = this.dep.pedidos.lista(oficina, { estados: ['corriendo'], de: yo, a: b.id, limite: 1 })[0]
+    }
+
+    // antideadlock: si B ya te espera a vos (directa o transitivamente), esperarlo es un callejón sin salida
+    if (this.dep.esperaA(oficina, b.id, yo)) {
+      return MCPResultados.error(sanear(`${b.nombre} ya te está esperando a vos: entregá lo que tengas sin esperar.`))
+    }
+    // ronda: cuántas versiones lleva esta cadena
+    let ronda = 1
+    const cerradas = this.dep.esperas.lista(oficina, { agente: yo, sid: this.identidad.sid, estados: ['hecha', 'relanzada', 'fallida'] })
+    for (const x of cerradas) ronda = Math.max(ronda, x.ronda + 1)
+    const ej = programadorDe(this.s)?.ejecuciones.porSid(this.identidad.sid)
+    if (ej?.tarea.startsWith(Programador.prefijoEspera)) {
+      const lider = this.dep.esperas.una(oficina, Number(ej.tarea.slice(Programador.prefijoEspera.length)))
+      if (lider) ronda = Math.max(ronda, lider.ronda + 1)
+    }
+    if (ronda > ServicioDependencias.maxRondas) {
+      return MCPResultados.error(sanear(`Ya van dos versiones esperando a ${b.nombre}: entregá lo que tengas y contale a la persona qué falta.`))
+    }
+    if (this.dep.esperas.lista(oficina, { agente: yo, estados: esperasAbiertas }).length >= ServicioDependencias.maxEsperasPorAgente) {
+      return MCPResultados.error(`Ya tenés ${ServicioDependencias.maxEsperasPorAgente} esperas abiertas: cancelá alguna o entregá lo que tengas.`)
+    }
+    if (!tokens.tomar(this.token, 'esperar', ServicioDependencias.esperasPorToken)) {
+      return MCPResultados.error(`Ya registraste ${ServicioDependencias.esperasPorToken} esperas en esta corrida y no podés hacer más. Contale a la persona lo que quedó pendiente.`)
+    }
+
+    // sin pedido abierto, se lo pide por vos (mismos topes y mismo cupo que pedir)
+    if (!pedido) {
+      const r = await this.crearPedido(act, b, que, '', '')
+      if ('error' in r) return r.error
+      pedido = r.pedido
+    }
+    const llego = pedido.estado === 'entregado' && pedido.entrega !== undefined
+    const x = this.dep.esperas.crear({
+      oficina, agente: yo, esperaA: b.id, que: prefijo(sanear(que), ServicioDependencias.maxQueEspera), ref: `${Programador.prefijoPedido}${pedido.id}`, pedido: pedido.id,
+      grupo: `sid:${this.identidad.sid}`, accion: 'continuar', sid: this.identidad.sid, estado: llego ? 'lista' : 'esperando',
+      entregaLlegada: llego ? pedido.entrega : undefined, ronda, plazoDias: plazo, origen: 'mcp',
+    })
+    if (!x) return MCPResultados.error('No pude registrar la espera.')
+    return respuestaCoordinador({
+      ok: true, espera: x.id, pedido: pedido.id,
+      aviso: `Entregá tu versión parcial marcando lo que falta; cuando ${b.nombre} entregue, te la vuelvo a encargar.`,
+    })
+  }
+
+  // MARK: cancelar_espera
+
+  private cancelarEspera(a: Obj): MCPResultado {
+    const act = this.activa()
+    if (!act) return sinOficina()
+    const id = typeof a.espera === 'number' && Number.isInteger(a.espera) ? a.espera : NaN
+    const x = Number.isNaN(id) ? undefined : this.dep.esperas.una(act.carpeta, id)
+    if (!x || x.agente !== this.identidad.agente) return MCPResultados.error('No tenés ninguna espera con ese número.')
+    if (x.estado !== 'esperando' && x.estado !== 'lista') return MCPResultados.error('Esa espera ya no está abierta.')
+    const motivo = prefijo(sanear(texto(a.motivo)), 300)
+    this.dep.esperas.actualizar(act.carpeta, x.id, { estado: 'cancelada', motivo: motivo === '' ? 'La canceló quien esperaba' : motivo })
+    // si el grupo quedó solo con listas, se relanza con lo que haya
+    void this.dep.procesarListas(act.carpeta)
+    return respuestaCoordinador({ ok: true, espera: x.id })
+  }
 }
 
 /** Todo perfil menos el creador. */
@@ -582,8 +795,11 @@ export const herramientasDependencias = (s: Servicios, token: string, identidad:
 }
 
 export function instalar(s: Servicios) {
-  s.huecos.dependencias = new ServicioDependencias(s)
+  const dep = new ServicioDependencias(s)
+  s.huecos.dependencias = dep
   mcpDe(s)?.registrarHerramientas(herramientasDependencias)
+  s.entregas.alRegistrar.push((e) => dep.alRegistrarEntrega(e))
+  programadorDe(s)?.alTerminar((ej) => dep.alTerminarEjecucion(ej))
 }
 
 registrarModulo('dependencias', 75, instalar)
