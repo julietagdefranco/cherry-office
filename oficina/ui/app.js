@@ -266,7 +266,9 @@
           dom.derecho));
       App.vaciar(raiz).appendChild(dom.app);
       App.dom = dom;
-      if (!App.Oficina3D.iniciar(dom.lienzo)) dom.carga.textContent = 'Esta compu no puede mostrar la oficina en 3D. El resto funciona igual.';
+      if (!App.Oficina3D.iniciar(dom.lienzo)) dom.carga.textContent = App.Oficina3D.sinMotor
+        ? 'No llegó el motor 3D (vendor/three.min.js): revisá que esté en la carpeta oficina/vendor del servidor. El resto funciona igual.'
+        : 'Esta compu no puede mostrar la oficina en 3D. El resto funciona igual.';
       App.Oficina3D.alElegirAgente(function (id) { App.Agente.abrir(id); });
       App.Oficina3D.alElegirLugar(function (t, id) {
         if (t === 'reunion') App.Reunion.abrir();
@@ -303,6 +305,7 @@
     dom.nombre.textContent = o.nombre;
     dom.sub.textContent = o.duenio ? 'de ' + o.duenio + ' · ' + o.agentes.length + ' ' + (o.agentes.length === 1 ? 'agente' : 'agentes') : o.agentes.length + ' agentes';
     pintarEquipo();
+    if (App.Oficina3D.sinMotor) return;           // sin three.js queda a la vista el aviso de montar()
     var t0 = performance.now();
     dom.carga.classList.remove('oculto');
     App.Oficina3D.construir(o, App.Yo.perfil()).then(function () { dom.carga.classList.add('oculto'); if (App.Agente.actual()) App.Oficina3D.elegir(App.Agente.actual()); })
