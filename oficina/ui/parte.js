@@ -94,12 +94,35 @@ App.Parte = (function () {
       trabado ? h('span.insignia.aviso', 'trabado hace ' + diasTxt(f.dias)) : null);
   }
 
-  function filaBloqueo(b) {
-    var abre = b.tipo === 'corrida' ? function () { if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(+b.ref); }
+  /* la espera con la v1 que la dejó esperando: abre esa entrega, o la reunión si el pendiente es de una reunión */
+  function abrirEspera(x) {
+    if (!x) return;
+    if (x.reunion && App.Reunion && App.Reunion.ver) App.Reunion.ver(x.reunion);
+    else if (x.entregaParcial) App.Entregables.abrir(x.entregaParcial);
+    else if (App.agente(x.agente)) App.Agente.abrir(x.agente, 'chat');
+  }
+  /* desde un aviso o un bloqueo que solo trae el id de la espera */
+  function abrirEsperaPorId(id) {
+    return api().get('/api/esperas', { estado: 'todas' }).then(function (r) {
+      abrirEspera((r.esperas || []).filter(function (x) { return String(x.id) === String(id); })[0]);
+    }).catch(App.fallo);
+  }
+
+  function filaEspera(x) {
+    var ag = App.agente(x.agente);
+    var estado = x.estado === 'lista' ? 'ya llegó, falta relanzar' : x.estado === 'relanzada' ? 'haciendo la versión completa' : (x.vencida ? 'vencida hace ' + diasTxt(x.dias) : 'hace ' + diasTxt(x.dias));
+    return h('button.parte-fila', { onclick: function () { abrirEspera(x); } },
+      ag ? App.retratoImg(ag, 'retrato', 64) : h('div.retrato.parte-ico', App.icono('reloj')),
+      h('div.parte-txt', h('div.parte-tit', x.agenteNombre + ' espera a ' + x.esperaANombre), h('div.parte-sub', x.que + ' · ' + estado)));
+  }
+
+  function filaBloqueo(b, esperas) {
+    var abre = b.tipo === 'espera' ? function () { var x = (esperas || {})[b.ref]; if (x) abrirEspera(x); else abrirEsperaPorId(b.ref); }
+      : b.tipo === 'corrida' ? function () { if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(+b.ref); }
       : b.tipo === 'entrega' ? function () { App.Entregables.abrir(+b.ref); }
       : b.tipo === 'tarea' ? function () { var t = b.ref && b.ref.split(':')[0]; if (App.agente(t)) App.Agente.abrir(t, 'tareas'); } : null;
     return h('button.parte-fila' + (abre ? '' : '.quieta'), { onclick: abre || null },
-      h('div.retrato.parte-ico.aviso', App.icono(b.tipo === 'corrida' ? 'flujo' : 'cerrar')),
+      h('div.retrato.parte-ico.aviso', App.icono(b.tipo === 'corrida' ? 'flujo' : b.tipo === 'espera' ? 'reloj' : 'cerrar')),
       h('div.parte-txt', h('div.parte-tit', b.texto)),
       typeof b.dias === 'number' ? h('span.insignia.aviso', diasTxt(b.dias)) : null);
   }
@@ -132,9 +155,9 @@ App.Parte = (function () {
   function pintar(p) {
     var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
     var necesita = p.teNecesita || [], rev = p.paraRevisar || { total: 0, entregas: [] }, flujos = p.flujos || [],
-        bloq = p.bloqueos || [], prox = p.proximas || [], narrado = p.narrado && p.narrado.texto ? p.narrado : null;
+        bloq = p.bloqueos || [], esperas = p.esperas || [], prox = p.proximas || [], narrado = p.narrado && p.narrado.texto ? p.narrado : null;
     var entregas = (rev.entregas || []).slice(0, 5);
-    var vacio = !necesita.length && !entregas.length && !flujos.length && !bloq.length && !prox.length && !narrado;
+    var vacio = !necesita.length && !entregas.length && !flujos.length && !esperas.length && !bloq.length && !prox.length && !narrado;
     var desde = p.desde ? App.hace(p.desde) : '';
     App.add(App.vaciar(der), cabecera(desde ? (desde === 'recién' ? 'Desde recién' : 'Desde ' + desde) : ''), cuerpo, pie);
 
@@ -158,10 +181,13 @@ App.Parte = (function () {
             rev.total > entregas.length ? h('button.btn.chico.fantasma', { onclick: function () { App.Entregables.abrir(); } }, 'Ver las ' + rev.total) : null]));
       }
       if (flujos.length) App.add(cuerpo, seccion('Flujos en curso', h('div.parte-filas', flujos.map(filaFlujo))));
+      if (esperas.length) App.add(cuerpo, seccion('En espera', h('div.parte-filas', esperas.map(filaEspera))));
     }
     var qp = p.paso && quePaso(p.paso);
     if (qp) App.add(cuerpo, seccion('Qué pasó', qp));
-    if (bloq.length) App.add(cuerpo, seccion('Bloqueos', h('div.parte-filas', bloq.map(filaBloqueo))));
+    var porId = {};
+    esperas.forEach(function (x) { porId[String(x.id)] = x; });
+    if (bloq.length) App.add(cuerpo, seccion('Bloqueos', h('div.parte-filas', bloq.map(function (b) { return filaBloqueo(b, porId); }))));
     if (prox.length) App.add(cuerpo, seccion('Próximas tareas', h('div.parte-filas', prox.map(filaProxima))));
 
     var listo = h('button.btn.primario', { onclick: function () {
@@ -194,5 +220,5 @@ App.Parte = (function () {
     }, 4000);
   }
 
-  return { abrir: abrir, alCerrarPanel: cerrarPanel };
+  return { abrir: abrir, alCerrarPanel: cerrarPanel, abrirEspera: abrirEsperaPorId };
 })();

@@ -11,7 +11,8 @@ App.Entregables = (function () {
   var filtro = { estado: 'sin_revisar', agente: '', origen: '' };
   var abierta = null;          // id de la entrega que muestra el panel (null = lista)
   var ORIGEN = { tarea: 'Tarea programada', encargo: 'Pendiente de reunión', reunion: 'Acta de reunión', chat: 'Chat', cambios: 'Con cambios',
-    flujo: 'Paso de un flujo', persona: 'Hecho por vos', propuesta: 'Propuesta', accion: 'Acción aprobada', parte: 'Parte del día' };
+    flujo: 'Paso de un flujo', persona: 'Hecho por vos', propuesta: 'Propuesta', accion: 'Acción aprobada', parte: 'Parte del día',
+    pedido: 'Pedido de un colega', espera: 'Versión completa' };
   var ESTADO = { sin_revisar: 'Sin revisar', revisada: 'Revisada', cambios: 'Reemplazada' };
 
   /* quién la hizo: en una entrega tuya (paso de persona) no hay agente */
@@ -135,7 +136,8 @@ App.Entregables = (function () {
   }
 
   function linkOrigen(e) {
-    var reu = e.origen === 'reunion' ? e.ref : (e.origen === 'encargo' ? (e.ref.split(':')[1] || '') : '');
+    /* solo los encargos `encargo:<reunión>:<n>` vienen de una reunión (los `coord:xxxx` del coordinador no) */
+    var reu = e.origen === 'reunion' ? e.ref : (e.origen === 'encargo' && e.ref.indexOf('encargo:') === 0 ? (e.ref.split(':')[1] || '') : '');
     if (reu && App.Reunion && App.Reunion.ver) return h('button.btn.chico.fantasma', { onclick: function () { App.Reunion.ver(reu); } }, App.icono('reunion'), 'Ver la reunión');
     if (e.origen === 'tarea' && e.agente) return h('button.btn.chico.fantasma', { onclick: function () { App.Agente.abrir(e.agente, 'tareas'); } }, 'Ver la tarea');
     return null;
@@ -150,13 +152,13 @@ App.Entregables = (function () {
   function pintarDetalle(e) {
     if (!abiertoPanel() || abierta !== e.id) return;
     var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
-    var bloqueAccion = h('div');
+    var bloqueAccion = h('div'), bloqueEspera = h('div');
     var volver = h('button.btn.fantasma.icono', { title: 'Volver a la lista', onclick: function () { pintarLista(); } }, '←');
     var sub = nombreDe(e) + ' · ' + (ORIGEN[e.origen] || e.origen) + ' · ' + hace(e.creada) + (typeof e.costo === 'number' && e.costo > 0 ? ' · ≈ US$ ' + e.costo.toFixed(2) : '');
     App.add(App.vaciar(der), cabecera(e.titulo, sub, volver), cuerpo, pie);
     var est = e.estado === 'sin_revisar' ? h('span.insignia.aviso', 'Sin revisar') : e.estado === 'revisada' ? h('span.insignia.ok', 'Revisada') : h('span.insignia', 'Reemplazada por una versión nueva');
     var meta = h('div.entrega-meta', est, e.padre ? h('span.insignia', 'Versión con cambios') : null, linkOrigen(e));
-    App.add(cuerpo, meta, bloqueAccion);
+    App.add(cuerpo, meta, bloqueEspera, bloqueAccion);
     if (e.enCambios) {
       App.add(cuerpo, h('div.entrega-meta', h('span.insignia.aviso', h('span.giro'), ' ' + nombre(e.agente) + ' está haciendo los cambios…')));
       vigilarCambios(e.id);
@@ -171,10 +173,12 @@ App.Entregables = (function () {
     var extra = { corrida: null, accion: null };
     Promise.all([
       api().get('/api/flujos/corridas', { entrega: e.id, estado: 'todas' }).then(function (r) { return (r.corridas || [])[0] || null; }).catch(function () { return null; }),
-      api().get('/api/acciones', { entrega: e.id }).then(function (r) { return r.accion || null; }).catch(function () { return null; })
+      api().get('/api/acciones', { entrega: e.id }).then(function (r) { return r.accion || null; }).catch(function () { return null; }),
+      api().get('/api/esperas', { entrega: e.id, estado: 'todas' }).then(function (r) { return r.esperas || []; }).catch(function () { return []; })
     ]).then(function (r) {
       if (!abiertoPanel() || abierta !== e.id) return;
       extra.corrida = r[0]; extra.accion = r[1];
+      pintarEspera(e, r[2], bloqueEspera);
       if (extra.corrida) {
         var c = extra.corrida;
         meta.appendChild(h('button.insignia.info.insignia-link', { title: 'Ver el flujo', onclick: function () { if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(c.id); } },
@@ -184,6 +188,50 @@ App.Entregables = (function () {
       pintarPie(e, extra, pie);
       if (extra.accion && extra.accion.estado === 'ejecutando') vigilarAccion(e.id);
     });
+  }
+
+  /* ---------------- esperas entre agentes (docs/plan-dependencias.md) ---------------- */
+  function despuesDeEspera(e, msg) {
+    if (msg) App.aviso(msg);
+    refrescarUltimas(); if (App.Actividad) App.Actividad.ya();
+    verEntrega(e.id);
+  }
+
+  /* una v1 con espera abierta: a quién espera y qué se puede hacer; una v2: de qué colega llegó lo que faltaba */
+  function pintarEspera(e, esperas, caja) {
+    App.vaciar(caja);
+    var filas = [];
+    (esperas || []).forEach(function (x) {
+      if (x.entregaParcial === e.id && (x.estado === 'esperando' || x.estado === 'lista' || x.estado === 'relanzada' || x.estado === 'fallida')) {
+        var botones = [];
+        var pedidoFallo = x.pedido && x.pedido.estado === 'fallido' && x.estado === 'esperando';
+        var texto = x.estado === 'esperando' ? 'Esperando a ' + x.esperaANombre + ': ' + x.que + ' · ' + hace(x.creada) + (x.vencida ? ' (ya pasó el plazo)' : '')
+          : x.estado === 'lista' ? 'Ya llegó lo de ' + x.esperaANombre + ' («' + x.que + '»): ' + x.agenteNombre + ' va a rehacer la versión completa.'
+          : x.estado === 'relanzada' ? x.agenteNombre + ' está haciendo la versión completa con lo de ' + x.esperaANombre + '…'
+          : 'No se pudo hacer la versión completa' + (x.motivo ? ': ' + x.motivo : '.');
+        if (pedidoFallo) texto += ' El pedido falló.';
+        if (x.estado === 'esperando' || x.estado === 'lista') {
+          botones.push(h('button.btn.chico', { onclick: function () {
+            api().post('/api/esperas/' + x.id + '/seguir').then(function () { despuesDeEspera(e, 'Listo: ' + x.agenteNombre + ' sigue sin esperar.'); }).catch(App.fallo);
+          } }, 'Seguir sin esperar'));
+          botones.push(h('button.btn.chico.fantasma', { onclick: function () {
+            api().post('/api/esperas/' + x.id + '/cancelar').then(function () { despuesDeEspera(e, 'Espera cancelada.'); }).catch(App.fallo);
+          } }, 'Cancelar espera'));
+        }
+        if (pedidoFallo || x.estado === 'fallida') {
+          botones.push(h('button.btn.chico', { onclick: function () {
+            api().post('/api/esperas/' + x.id + '/reintentar').then(function () { despuesDeEspera(e, pedidoFallo ? 'Se volvió a lanzar el pedido.' : 'Se vuelve a intentar.'); }).catch(App.fallo);
+          } }, pedidoFallo ? 'Reintentar el pedido' : 'Reintentar'));
+        }
+        filas.push(h('div.entrega-accion', h('h4', App.icono('reloj'), ' En espera'), h('div.acc-res', texto),
+          h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } }, botones)));
+      }
+      if (x.entregaNueva === e.id) {
+        filas.push(h('div.entrega-accion', h('h4', 'Versión completa'), h('div.acc-res', 'Llegó lo de ' + x.esperaANombre + ' («' + x.que + '») y esta es la versión completa.'),
+          x.entregaLlegada ? h('div', h('button.btn.chico.fantasma', { onclick: function () { verEntrega(x.entregaLlegada); } }, 'Ver lo que entregó ' + x.esperaANombre)) : null));
+      }
+    });
+    App.add(caja, filas);
   }
 
   /* ---------------- acción hacia afuera (plan §8) ---------------- */
