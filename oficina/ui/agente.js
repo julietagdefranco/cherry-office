@@ -378,6 +378,7 @@
   function estadoEjecucion(e) {
     if (!e) return h('span.insignia', 'Todavía no corrió');
     if (e.estado === 'corriendo') return h('span.insignia.aviso', 'Corriendo…');
+    if (e.estado === 'esperando_permiso') return h('span.insignia.aviso', 'Esperando tu permiso');
     return h('span.insignia' + (e.estado === 'ok' ? '.ok' : '.error'), e.estado === 'ok' ? 'Hecha' : 'Con error');
   }
 
@@ -481,7 +482,7 @@
 
     function filaEjecucion(e, t) {
       var texto = h('div', { style: { display: 'none', marginTop: '6px' } });
-      var detalle = e.estado === 'error' ? (e.error || 'Falló.') : (e.resultado || (e.estado === 'corriendo' ? 'Todavía está corriendo…' : '(sin respuesta)'));
+      var detalle = e.estado === 'error' ? (e.error || 'Falló.') : (e.resultado || (e.estado === 'corriendo' ? 'Todavía está corriendo…' : e.estado === 'esperando_permiso' ? 'Frenó: necesita tu permiso para seguir (mirá las tarjetas arriba a la derecha).' : '(sin respuesta)'));
       App.add(texto, e.estado === 'error' ? h('div.error-txt', detalle) : App.htmlSeguro(h('div.msg.a', { style: { maxWidth: 'none' } }), App.markdown(detalle)));
       var ver = h('button.btn.chico.fantasma', { onclick: function () {
         var abierto = texto.style.display !== 'none';

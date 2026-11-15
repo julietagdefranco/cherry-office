@@ -296,6 +296,9 @@
     if (enc && enc.estado === 'corriendo') {
       fila.appendChild(h('span.insignia.aviso', h('span.giro'), ' Trabajando en esto…'));
       vigilarPendientes(r.id);
+    } else if (enc && enc.estado === 'esperando_permiso') {
+      fila.appendChild(h('span.insignia.aviso', 'Esperando tu permiso'));
+      vigilarPendientes(r.id);
     } else if (enc && enc.entrega) {
       var revisada = enc.entregaEstado === 'revisada';
       fila.appendChild(h('span.insignia' + (revisada ? '.ok' : '.aviso'), revisada ? 'Entregado y revisado' : 'Entregado · sin revisar'));
@@ -303,7 +306,7 @@
     } else if (enc && enc.estado === 'error') {
       fila.appendChild(h('span.insignia.error', { title: enc.error || '' }, 'Falló'));
     }
-    if (est.encargable && !(enc && enc.estado === 'corriendo')) {
+    if (est.encargable && !(enc && (enc.estado === 'corriendo' || enc.estado === 'esperando_permiso'))) {
       fila.appendChild(h('button.btn.chico' + (enc ? '.fantasma' : ''), { onclick: function (ev) {
         ev.currentTarget.disabled = true;
         api.post('/api/reuniones/' + r.id + '/pendientes/' + i + '/encargar').then(function (d) {
@@ -337,7 +340,7 @@
     relojPend = setTimeout(function () {
       if (visto !== id) return;
       refrescar(id).then(function (d) {
-        if ((d.pendientesEstado || []).some(function (e) { return e.encargo && e.encargo.estado === 'corriendo'; })) vigilarPendientes(id);
+        if ((d.pendientesEstado || []).some(function (e) { return e.encargo && (e.encargo.estado === 'corriendo' || e.encargo.estado === 'esperando_permiso'); })) vigilarPendientes(id);
       }).catch(function () { /* se reintenta al volver a abrir */ });
     }, 3000);
   }

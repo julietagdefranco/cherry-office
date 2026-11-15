@@ -33,6 +33,9 @@ export type ContextoOficina = {
   reglas?: string[]
   /** Chat con la persona presente: lo no permitido se le pregunta (`--permission-prompt-tool`) en vez de rechazarse. */
   preguntar?: boolean
+  /** Corrida sin la persona (tareas): Bash, Edit y Write visibles pero en `dontAsk`; lo no permitido se rechaza, queda en
+   *  `permission_denials` y se guarda como pedido pendiente (permisos-tareas.ts). */
+  anotarRechazos?: boolean
 }
 
 /** Un servidor MCP de la cuenta (catálogo de conectores de claude.ai). */
@@ -235,14 +238,14 @@ function baseOficina(cfg: Config, ctx: ContextoOficina, agente: string): string 
 export const puedePreguntar = (ctx: ContextoOficina) => (ctx.preguntar ?? false) && ctx.mcpUrl !== undefined
 
 /** `--tools` de un agente de oficina: base + Edit,Write (si tiene alguna ruta) + las de sus reglas guardadas (Bash...)
- *  + Bash,Edit,Write si puede pedir permiso + las MCP si hay servidor. */
+ *  + Bash,Edit,Write si puede pedir permiso (o anota rechazos) + las MCP si hay servidor. */
 export function herramientasOficina(cfg: Config, ctx: ContextoOficina, agente: string): string {
   let h = baseOficina(cfg, ctx, agente)
   const lista = h.split(',').map((x) => x.trim())
   const sumar = (n: string) => { if (!lista.includes(n)) { lista.push(n); h += ',' + n } }
   if (ctx.escritura.length > 0) { h += ',Edit,Write'; lista.push('Edit', 'Write') }
   for (const r of ctx.reglas ?? []) { const i = r.indexOf('('); if (i >= 0) sumar(r.slice(0, i)) }
-  if (puedePreguntar(ctx)) for (const n of herramientasPreguntables) sumar(n)
+  if (puedePreguntar(ctx) || ctx.anotarRechazos) for (const n of herramientasPreguntables) sumar(n)
   if (ctx.mcpUrl !== undefined) h += ',' + (ctx.herramientasMCP ?? herramientasMCP).join(',')
   return h
 }

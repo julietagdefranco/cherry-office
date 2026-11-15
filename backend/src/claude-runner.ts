@@ -39,6 +39,24 @@ export type TurnoConPermiso = {
   env: Record<string, string>
 }
 
+/** Algo que claude no hizo por falta de permiso (un elemento de `permission_denials`). */
+export type Denegacion = { herramienta: string; input: Obj }
+
+/** Parámetros de un mensaje de chat (`ejecutarChat`). */
+export type ParamsChat = { agente: string; mensaje: string; sid: string; activa: boolean; carpeta?: string; armar: ArmarArgumentos; obs?: Observador; envExtra?: Record<string, string> }
+
+/** `permission_denials` de la salida JSON de claude: `[{tool_name, tool_use_id, tool_input}]`. */
+export function denegaciones(json: Obj | undefined): Denegacion[] {
+  const l = json?.permission_denials
+  if (!Array.isArray(l)) return []
+  const out: Denegacion[] = []
+  for (const d of l) {
+    if (!esObjeto(d) || typeof d.tool_name !== 'string' || d.tool_name === '') continue
+    out.push({ herramienta: d.tool_name, input: esObjeto(d.tool_input) ? d.tool_input : {} })
+  }
+  return out
+}
+
 export type TipoErrorClaude = 'sin_claude' | 'sin_proyecto' | 'timeout' | 'no_ejecuta' | 'login' | 'claude' | 'cerrando'
 
 export const mensajeLogin = "Claude Code todavía no tiene la sesión iniciada. Usá «Iniciar sesión» en la app o corré 'claude auth login' en la Terminal."
@@ -338,7 +356,12 @@ export class ClaudeRunner {
 
   /** Un mensaje de chat sin tomar el carril (el llamador ya lo tiene). Reintenta con la otra forma de sesión si
    *  claude dice que ya existe (o que no existe). */
-  async ejecutarChat(p: { agente: string; mensaje: string; sid: string; activa: boolean; carpeta?: string; armar: ArmarArgumentos; obs?: Observador; envExtra?: Record<string, string> }): Promise<string> {
+  async ejecutarChat(p: ParamsChat): Promise<string> {
+    return (await this.ejecutarChatDetalle(p)).texto
+  }
+
+  /** Como `ejecutarChat`, y además lo que claude rechazó por falta de permiso (`permission_denials` de la salida JSON). */
+  async ejecutarChatDetalle(p: ParamsChat): Promise<{ texto: string; denegados: Denegacion[] }> {
     this.verificar(p.carpeta)
     const flag = p.activa ? '--resume' : '--session-id'
     const correr = async (f: '--resume' | '--session-id') => {
@@ -354,9 +377,10 @@ export class ClaudeRunner {
       r = await correr('--session-id')
     }
     if (r.error !== undefined) throw ClaudeError.clasificar(r.error)
+    const denegados = denegaciones(r.json)
     const res = r.json?.result
-    if (typeof res === 'string' && res !== '') return res
-    return r.json === undefined ? r.res.stdout.trim() : ''
+    if (typeof res === 'string' && res !== '') return { texto: res, denegados }
+    return { texto: r.json === undefined ? r.res.stdout.trim() : '', denegados }
   }
 
   // MARK: auth

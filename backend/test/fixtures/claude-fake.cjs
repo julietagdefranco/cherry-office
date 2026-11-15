@@ -156,6 +156,19 @@ async function main() {
     fin()
     return 0
   }
+  if (m.includes('DENEGAR:') || m.includes('respondió los permisos que te faltaron')) {
+    // como claude en dontAsk: la primera vuelta (sesión nueva) no tiene permiso para el comando y lo informa en
+    // permission_denials; al retomar (--resume) lo hace y termina
+    if (!tiene('--resume')) {
+      const cmd = m.slice(m.indexOf('DENEGAR:') + 'DENEGAR:'.length).split('\n')[0]
+      salida(JSON.stringify({ type: 'result', result: 'No pude correr el comando.', is_error: false, total_cost_usd: 0.01,
+        permission_denials: [{ tool_name: 'Bash', tool_use_id: 'toolu_1', tool_input: { command: cmd, description: 'Prueba' } },
+          { tool_name: 'Bash', tool_use_id: 'toolu_2', tool_input: { command: cmd } },
+          { tool_name: 'mcp__claude_ai_Gmail__send', tool_use_id: 'toolu_3', tool_input: {} }] }))
+    } else salida(JSON.stringify({ type: 'result', result: 'Listo: corrí el comando y terminé.', is_error: false, total_cost_usd: 0.02 }))
+    fin()
+    return 0
+  }
   if (m.includes('PERMISO:')) {
     // como claude con --permission-prompt-tool: llama a `pedir_permiso` (Bash con el comando que sigue a PERMISO:) y espera
     const cmd = m.slice(m.indexOf('PERMISO:') + 'PERMISO:'.length)
