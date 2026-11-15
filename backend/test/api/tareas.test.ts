@@ -231,6 +231,72 @@ describe('Tareas programadas (API y programador)', () => {
     expect(t.corriendo).toBe(false)
   })
 
+  test('permisos pendientes: lo que la tarea no pudo hacer queda como pedido; al responder retoma la conversación y recién ahí entrega', async () => {
+    const f = await fix()
+    await nueva(f, { consigna: 'DENEGAR:git pull origin main' })
+    const pendientes = async (): Promise<Obj[]> => lista((await f.get('/api/actividad')).obj.permisos)
+    expect((await f.post('/api/tareas/informe-diario/correr')).status).toBe(202)
+    // frena: «esperando_permiso», sin entrega, con un pedido por comando (sin repetir; los conectores no se anotan)
+    expect(await esperar(async () => str((await ejecuciones(f, 'informe-diario'))[0]?.estado) === 'esperando_permiso', 15)).toBe(true)
+    // la corrida ve Bash, Edit y Write (para que el rechazo quede anotado) y sigue en dontAsk
+    const l0 = f.sb.llamadas.at(-1)!
+    expect(Sandbox.valor(l0, '--tools')?.split(',')).toEqual(expect.arrayContaining(['Bash', 'Edit', 'Write']))
+    expect(Sandbox.valor(l0, '--permission-mode')).toBe('dontAsk')
+    const ps = await pendientes()
+    expect(ps.length).toBe(1)
+    const p = ps[0]!
+    expect([str(p.agente), str(p.herramienta), str(p.detalle), str(p.tarea)]).toEqual(['marce', 'Bash', 'git pull origin main', 'Informe diario'])
+    expect(p.reglas).toEqual(['Bash(git pull:*)'])
+    expect(lista((await f.get('/api/entregas')).obj.entregas)).toEqual([])
+    const av = lista((await f.get('/api/avisos')).obj.avisos).find((a) => str(a.tipo) === 'permiso')
+    expect(str(av?.texto)).toContain('Informe diario')
+    // mientras espera no se puede volver a lanzar
+    expect((await f.post('/api/tareas/informe-diario/correr')).status).toBe(409)
+    const llamadas = f.sb.llamadas.length
+
+    // «Una vez»: retoma la misma sesión con el comando permitido solo para esa vuelta
+    const r = await f.post(`/api/permisos/${str(p.id)}`, { decision: 'una_vez' })
+    expect(r.status, JSON.stringify(r.obj)).toBe(200)
+    expect(r.obj.retoma).toBe(true)
+    expect(await pendientes()).toEqual([])
+    const fin = await terminada(f, 'informe-diario')
+    expect(str(fin.estado), JSON.stringify(fin)).toBe('ok')
+    expect(str(fin.resultado)).toBe('Listo: corrí el comando y terminé.')
+    expect(Math.abs(((fin.costo as number) ?? 0) - 0.03)).toBeLessThan(1e-9)   // las dos vueltas
+    const l1 = f.sb.llamadas.at(-1)!
+    expect(f.sb.llamadas.length).toBe(llamadas + 1)
+    expect(Sandbox.valor(l1, '--resume')).toBe(str(fin.sid))
+    expect(Sandbox.reglas(l1)).toContain('Bash(git pull:*)')
+    expect((l1.at(-1) ?? '').normalize('NFC')).toContain('git pull origin main')
+    // no quedó guardado en el agente (fue una vez) y la entrega salió al final
+    const marce = lista(f.oficinaJSON().agentes).find((a) => str(a.id) === 'marce')
+    expect(marce?.reglas).toBeUndefined()
+    expect(await esperar(async () => lista((await f.get('/api/entregas')).obj.entregas).length === 1)).toBe(true)
+    expect(str(lista((await f.get('/api/entregas')).obj.entregas)[0]?.resumen)).toContain('Listo')
+    // un pedido ya respondido no existe más
+    expect((await f.post(`/api/permisos/${str(p.id)}`, { decision: 'una_vez' })).status).toBe(404)
+  })
+
+  test('permisos pendientes: «Siempre» guarda la regla en el agente; «No» retoma igual avisando que no', async () => {
+    const f = await fix()
+    await nueva(f, { consigna: 'DENEGAR:npm install' })
+    const pendientes = async (): Promise<Obj[]> => lista((await f.get('/api/actividad')).obj.permisos)
+    expect((await f.post('/api/tareas/informe-diario/correr')).status).toBe(202)
+    expect(await esperar(async () => (await pendientes()).length === 1, 15)).toBe(true)
+    expect((await f.post(`/api/permisos/${str((await pendientes())[0]!.id)}`, { decision: 'siempre' })).status).toBe(200)
+    expect(str((await terminada(f, 'informe-diario')).estado)).toBe('ok')
+    expect(lista(f.oficinaJSON().agentes).find((a) => str(a.id) === 'marce')?.reglas).toEqual(['Bash(npm install:*)'])
+
+    await nueva(f, { nombre: 'Otra', consigna: 'DENEGAR:make build' })
+    expect((await f.post('/api/tareas/otra/correr')).status).toBe(202)
+    expect(await esperar(async () => (await pendientes()).length === 1, 15)).toBe(true)
+    expect((await f.post(`/api/permisos/${str((await pendientes())[0]!.id)}`, { decision: 'rechazar' })).status).toBe(200)
+    expect(str((await terminada(f, 'otra')).estado)).toBe('ok')
+    const ult = (f.sb.llamadas.at(-1)!.at(-1) ?? '').normalize('NFC')
+    expect(ult).toContain('No te dio permiso')
+    expect(Sandbox.reglas(f.sb.llamadas.at(-1)!)).not.toContain('Bash(make build:*)')
+  })
+
   test('probar ahora: la actividad muestra origen «tarea» con el nombre; no se puede lanzar ni borrar mientras corre (409)', async () => {
     const f = await fix()
     await nueva(f, { consigna: 'STREAM PAUSA informe' })

@@ -31,6 +31,13 @@ export interface MCPChat {
   permisos?: PermisosVivos
 }
 
+/** Pedidos de permiso de las corridas sin la persona (tareas): los pone el módulo de tareas (permisos-tareas.ts). */
+export interface PermisosTareasChat {
+  pendientes(oficina: string): Obj[]
+  /** undefined si no existe o ya se respondió. Lanza ErrorAPI si «siempre» no se puede guardar. */
+  responder(oficina: string, id: string, decision: DecisionPermiso): { reglas?: string[]; retoma?: boolean } | undefined
+}
+
 export type DepsChat = {
   config: Config
   store: Store
@@ -40,6 +47,7 @@ export type DepsChat = {
   entregas: Entregas
   log: HQLog
   mcp?: () => MCPChat | undefined
+  permisosTareas?: () => PermisosTareasChat | undefined
   catalogo?: FuenteCatalogo
   /** Resumen de corridas de flujos para /api/actividad (motor de flujos). */
   corridas?: (oficina: string) => Obj[]
@@ -212,7 +220,8 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     return resultado
   }
 
-  /** `POST /api/permisos/<id>` `{decision: una_vez|siempre|rechazar}`: responde un pedido de permiso de un chat.
+  /** `POST /api/permisos/<id>` `{decision: una_vez|siempre|rechazar}`: responde un pedido de permiso de un chat o de una
+   *  tarea que espera.
    *  «siempre» guarda las reglas del pedido en el agente (oficina.json) antes de dejarlo pasar. */
   function responderPermiso(id: string, body?: Buffer): Resp {
     const act = oficinas.requerirActiva()
@@ -221,7 +230,15 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (dec === undefined) return [400, { error: '«decision» tiene que ser una_vez, siempre o rechazar.' }]
     const vivos = d.mcp?.()?.permisos
     const p = vivos?.pedido(act.carpeta, id.toLowerCase())
-    if (!vivos || !p) return [404, { error: 'Ese pedido de permiso ya no está (venció o el chat terminó).' }]
+    if (!vivos || !p) {
+      // ¿un pedido de una tarea que espera? (esos no vencen: la tarea retoma cuando se responden todos)
+      const t = d.permisosTareas?.()?.responder(act.carpeta, id.toLowerCase(), dec)
+      if (!t) return [404, { error: 'Ese pedido de permiso ya no está (venció o el chat terminó).' }]
+      const r: Obj = { ok: true }
+      if (t.reglas) r.reglas = t.reglas
+      if (t.retoma) r.retoma = true
+      return [200, r]
+    }
     let reglas: string[] | undefined
     if (dec === 'siempre') {
       if (p.reglas.length === 0) return [400, { error: 'Esto solo se puede permitir una vez.' }]
@@ -248,7 +265,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
       r.entregasSinRevisar = entregas.sinRevisar(act.carpeta)
       r.corridas = d.corridas?.(act.carpeta) ?? []
       r.creadorVersion = d.creadorVersion?.(act.carpeta) ?? 0
-      r.permisos = (d.mcp?.()?.permisos?.pendientes(act.carpeta) ?? []).map(pedidoJSON)
+      r.permisos = [...(d.mcp?.()?.permisos?.pendientes(act.carpeta) ?? []).map(pedidoJSON), ...(d.permisosTareas?.()?.pendientes(act.carpeta) ?? [])]
       return [200, r]
     }
     if (seccion === 'permisos' && n === 3) return method === 'POST' ? responderPermiso(a2!, body) : no405
