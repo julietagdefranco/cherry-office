@@ -94,6 +94,27 @@ App.Parte = (function () {
       trabado ? h('span.insignia.aviso', 'trabado hace ' + diasTxt(f.dias)) : null);
   }
 
+  /* una cadena que se repite (A espera seguido a B): se ofrece pasarla a flujo; el borrador se abre en el editor y se guarda ahí */
+  function pintarPatrones(cuerpo) {
+    var caja = h('div');
+    cuerpo.appendChild(caja);
+    api().get('/api/esperas/patrones').then(function (r) {
+      if (!abiertoPanel() || !caja.parentNode) return;
+      (r.patrones || []).forEach(function (x) {
+        var btn = h('button.btn.chico', { onclick: function () {
+          btn.disabled = true;
+          api().post('/api/esperas/flujo', { agente: x.agente, esperaA: x.esperaA }).then(function (d) {
+            btn.disabled = false;
+            if (App.Flujos && App.Flujos.editor) App.Flujos.editor(null, d.borrador);
+          }).catch(function (e) { App.fallo(e); btn.disabled = false; });
+        } }, 'Armar un flujo');
+        caja.appendChild(seccion('Se repite', h('div.parte-fila.quieta',
+          h('div.parte-txt', h('div.parte-tit', quienNombre(x.agente) + ' espera seguido a ' + quienNombre(x.esperaA) + ': ¿armar un flujo?'),
+            h('div.parte-sub', x.veces + ' veces en el último mes')), btn)));
+      });
+    }).catch(function () { /* sin tarjeta */ });
+  }
+
   /* la espera con la v1 que la dejó esperando: abre esa entrega, o la reunión si el pendiente es de una reunión */
   function abrirEspera(x) {
     if (!x) return;
@@ -182,6 +203,7 @@ App.Parte = (function () {
       }
       if (flujos.length) App.add(cuerpo, seccion('Flujos en curso', h('div.parte-filas', flujos.map(filaFlujo))));
       if (esperas.length) App.add(cuerpo, seccion('En espera', h('div.parte-filas', esperas.map(filaEspera))));
+      pintarPatrones(cuerpo);
     }
     var qp = p.paso && quePaso(p.paso);
     if (qp) App.add(cuerpo, seccion('Qué pasó', qp));

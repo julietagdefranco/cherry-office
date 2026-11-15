@@ -300,3 +300,83 @@ describe('Dependencias entre pendientes de una reunión (API)', () => {
     expect((await f.get(`/api/reuniones/${id}/pendientes/encargar-todos`)).status).toBe(405)
   })
 })
+
+// MARK: - pasar a flujo
+
+describe('Pasar a flujo (API)', () => {
+  test('desde una reunión: pasos en orden topológico, recibeDe explícito (también []), pasos de la persona, y el editor lo puede guardar', async () => {
+    const f = await fixReunion()
+    f.sb.responder('acta', JSON.stringify({
+      resumen: 'R', decisiones: [], pendientes: [
+        { quien: 'Pato', que: 'Armar el informe', depende_de: [2] },
+        { quien: 'Marce', que: 'Armar el mapeo', depende_de: [] },
+        { quien: 'Ana', que: 'Revisar a mano', depende_de: [] },
+        { quien: 'Marce', que: 'Mandar todo', necesita_usuario: false, depende_de: [1, 3] },
+      ],
+    }))
+    const r = await f.post('/api/reuniones', { tema: 'lanzamiento', agentes: ['marce', 'pato'] })
+    const id = str(r.obj.id)
+    expect(await esperar(async () => str((await f.get(`/api/reuniones/${id}`)).obj.estado) === 'esperando', 15)).toBe(true)
+    expect((await f.post(`/api/reuniones/${id}/cerrar`)).status).toBe(200)
+
+    const b = await f.post(`/api/reuniones/${id}/flujo`)
+    expect(b.status, JSON.stringify(b.obj)).toBe(200)
+    const borrador = b.obj.borrador as Obj
+    expect(str(borrador.nombre)).toBe('lanzamiento')
+    expect(str(borrador.descripcion)).toBe('Armado desde la reunión «lanzamiento»')
+    expect(str(borrador.origen)).toBe(`reunion:${id}`)
+    expect(lista(borrador.pasos).map((p) => [p.id, p.quien, p.recibeDe, p.aprobacion])).toEqual([
+      ['p2', 'marce', [], false], ['p1', 'pato', ['p2'], false], ['p3', 'persona', [], false], ['p4', 'marce', ['p1', 'p3'], false],
+    ])
+    expect(lista(borrador.pasos)[0]).toMatchObject({ nombre: 'Armar el mapeo', consigna: 'Armar el mapeo', entrega: 'Lo que pide el pendiente' })
+    // sin guardar nada hasta que la persona lo pida: el borrador entra tal cual en POST /api/flujos
+    expect(lista((await f.get('/api/flujos')).obj.flujos)).toEqual([])
+    const g = await f.post('/api/flujos', borrador)
+    expect(g.status, JSON.stringify(g.obj)).toBe(200)
+    expect(lista((await f.get('/api/flujos')).obj.flujos).length).toBe(1)
+    // validaciones de la ruta
+    expect((await f.get(`/api/reuniones/${id}/flujo`)).status).toBe(405)
+    expect((await f.post(`/api/reuniones/${U.c}/flujo`)).status).toBe(404)
+  })
+
+  test('409 si la reunión no tiene pendientes o ninguno depende de otro', async () => {
+    const f = await fixReunion()
+    f.sb.responder('acta', JSON.stringify({ resumen: 'R', decisiones: [], pendientes: [{ quien: 'Marce', que: 'Uno' }, { quien: 'Pato', que: 'Dos', depende_de: [2] }] }))
+    const r = await f.post('/api/reuniones', { tema: 'x', agentes: ['marce', 'pato'] })
+    const id = str(r.obj.id)
+    expect(await esperar(async () => str((await f.get(`/api/reuniones/${id}`)).obj.estado) === 'esperando', 15)).toBe(true)
+    expect((await f.post(`/api/reuniones/${id}/flujo`)).status).toBe(409) // todavía no está cerrada
+    expect((await f.post(`/api/reuniones/${id}/cerrar`)).status).toBe(200)
+    const b = await f.post(`/api/reuniones/${id}/flujo`)
+    expect(b.status).toBe(409) // «dos» depende de sí mismo: se descartó y no queda ninguna cadena
+    expect(str(b.obj.error)).toContain('depende de otro')
+  })
+
+  test('esperas repetidas A→B: aparece el patrón y se arma un borrador de 2 pasos que se puede guardar como flujo', async () => {
+    const f = await fix()
+    f.sb.modo('arqui', 'puerta')
+    for (let i = 1; i <= 3; i++) {
+      f.sb.llamadasMCP('marce', [{ name: 'quedo_esperando', arguments: { colega: 'arqui', que: 'el mapeo del cliente' } }])
+      expect((await tareaAhora(f, 'marce', `Informe ${i}`, `MCP_LLAMAR ENTREGA:archivos/entregables/marce/v${i}.md`)).status).toBe(200)
+      expect(await esperar(async () => (await esperas(f)).length === i && (await entregas(f)).length === i, 20)).toBe(true)
+    }
+    const p = lista((await f.get('/api/esperas/patrones')).obj.patrones)
+    expect(p.length).toBe(1)
+    expect(p[0]).toMatchObject({ agente: 'marce', esperaA: 'arqui', veces: 3 })
+    expect(str(p[0]!.ultima)).toMatch(/Z$/)
+
+    expect((await f.post('/api/esperas/flujo', {})).status).toBe(400)
+    expect((await f.post('/api/esperas/flujo', { agente: 'marce', esperaA: 'fantasma' })).status).toBe(404)
+    expect((await f.post('/api/esperas/flujo', { agente: 'nico', esperaA: 'marce' })).status).toBe(409)
+    const r = await f.post('/api/esperas/flujo', { agente: 'marce', esperaA: 'arqui' })
+    expect(r.status, JSON.stringify(r.obj)).toBe(200)
+    const b = r.obj.borrador as Obj
+    expect(lista(b.pasos).map((x) => [x.id, x.quien, x.recibeDe, x.consigna])).toEqual([
+      ['p1', 'arqui', [], 'el mapeo del cliente'], ['p2', 'marce', ['p1'], 'Informe 3'],
+    ])
+    expect((await f.post('/api/flujos', b)).status).toBe(200)
+    expect((await f.get('/api/esperas/flujo')).status).toBe(405)
+    expect((await f.post('/api/esperas/patrones')).status).toBe(405)
+    f.sb.abrirPuerta()
+  })
+})

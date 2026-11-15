@@ -7,7 +7,7 @@
 import { mcpDe, normalizar, sanear } from './consultas.js'
 import { MotorFlujos } from './motor-flujos.js'
 import { respuestaCoordinador } from './coordinador.js'
-import { iso, type Entrega } from './entregas.js'
+import { TextoEntrega, iso, type Entrega } from './entregas.js'
 import { ErrorAPI } from './errores.js'
 import { objeto, objetoOpcional, type Obj } from './json.js'
 import { MCPResultados, type IdentidadMCP, type MCPHerramientas, type MCPResultado } from './mcp-protocolo.js'
@@ -18,6 +18,7 @@ import { atrapar, no404, no405, type Query, type Resp, type SubRouter } from './
 import type { Servicios } from './servicios.js'
 import { registrarModulo } from './servicios.js'
 import { num, txt, type Fila, type SQLValor, type SQLiteDB } from './sqlite.js'
+import { flujoDesde, flujoJSON } from './modelo-flujos.js'
 import { Validar, largo, prefijo } from './validar.js'
 
 
@@ -617,6 +618,49 @@ export class ServicioDependencias {
     return creadas
   }
 
+  // MARK: pasar a flujo (D7)
+
+  /** Pares (agente, esperado) con 3 o más esperas de los últimos 30 días: una cadena que se repite y se puede pasar a flujo. */
+  patrones(oficina: string, ahora: Date = new Date()): { agente: string; esperaA: string; veces: number; ultima: number }[] {
+    const desde = ahora.getTime() / 1000 - 30 * 86400
+    const por = new Map<string, { agente: string; esperaA: string; veces: number; ultima: number }>()
+    for (const x of this.esperas.lista(oficina, { desde, limite: 5000 })) {
+      if (x.origen !== 'mcp' || x.esperaA === 'persona' || x.estado === 'cancelada') continue
+      const k = `${x.agente}\u001f${x.esperaA}`
+      const p = por.get(k) ?? { agente: x.agente, esperaA: x.esperaA, veces: 0, ultima: 0 }
+      p.veces++
+      p.ultima = Math.max(p.ultima, x.creada)
+      por.set(k, p)
+    }
+    return [...por.values()].filter((p) => p.veces >= 3).sort((a, b) => b.ultima - a.ultima)
+  }
+
+  /** Borrador de flujo de 2 pasos para el par: lo que `esperaA` entrega (el pedido más frecuente) y la versión completa de
+   *  `agente` (que recibe de ese). Sin LLM y sin guardar nada. */
+  borradorDePar(act: OficinaActiva, agente: string, esperaA: string): Obj {
+    const oficina = act.carpeta
+    const a = act.oficina.agentes.find((x) => x.id === agente), b = act.oficina.agentes.find((x) => x.id === esperaA)
+    if (!a || !b) throw new ErrorAPI(404, 'Ese agente ya no está en la oficina.')
+    const pedidos = this.pedidos.lista(oficina, { de: agente, a: esperaA })
+    const esperas = this.esperas.lista(oficina, { agente, esperaA, limite: 5000 }).filter((x) => x.origen === 'mcp')
+    if (pedidos.length === 0 && esperas.length === 0) throw new ErrorAPI(409, 'Esos dos agentes no tienen pedidos ni esperas para armar un flujo.')
+    // el pedido más frecuente (a igual cantidad, el más nuevo: `lista` viene del más nuevo al más viejo)
+    const cuenta = new Map<string, number>()
+    for (const p of pedidos) cuenta.set(p.que, (cuenta.get(p.que) ?? 0) + 1)
+    let que = pedidos[0]?.que ?? esperas[esperas.length - 1]!.que
+    for (const p of pedidos) if ((cuenta.get(p.que) ?? 0) > (cuenta.get(que) ?? 0)) que = p.que
+    const v1 = [...esperas].reverse().map((x) => (x.entregaParcial === undefined ? undefined : this.s.entregas.una(oficina, x.entregaParcial))).find((e) => e !== undefined)
+    const usados = new Set((act.oficina.flujos ?? []).map((x) => x.id))
+    const flujo = flujoDesde({
+      nombre: prefijo(`${a.nombre} con ${b.nombre}`, 80), descripcion: prefijo(`Armado desde las esperas de ${a.nombre} a ${b.nombre}`, 600), origen: `esperas:${agente}:${esperaA}`,
+      pasos: [
+        { id: 'p1', nombre: prefijo(TextoEntrega.titulo(que), 80), quien: esperaA, consigna: que, recibeDe: [], entrega: `Lo que pide ${a.nombre}`, aprobacion: false },
+        { id: 'p2', nombre: prefijo(TextoEntrega.titulo(v1?.titulo ?? `Versión completa de ${a.nombre}`), 80), quien: agente, consigna: v1?.titulo ?? esperas[0]?.que ?? que, recibeDe: ['p1'], entrega: 'La versión completa', aprobacion: false },
+      ],
+    }, usados)
+    return { borrador: flujoJSON(flujo) }
+  }
+
   // MARK: acciones de la persona (rutas /api/esperas/:id/*)
 
   /** Cancela una espera abierta (la persona, o el agente con `cancelar_espera`). Un grupo que queda solo con listas se relanza. */
@@ -984,6 +1028,16 @@ export class DependenciasRouter implements SubRouter {
     if (partes.length > 4 || partes.includes('')) return no404
     const act = this.s.oficinas.requerirActiva()
     if (partes.length === 2) return method === 'GET' ? this.listar(act, query) : no405
+    if (path === '/api/esperas/patrones') {
+      if (method !== 'GET') return no405
+      return [200, { patrones: this.dep.patrones(act.carpeta).map((p) => ({ agente: p.agente, esperaA: p.esperaA, veces: p.veces, ultima: iso(p.ultima) })) }]
+    }
+    if (path === '/api/esperas/flujo') {
+      if (method !== 'POST') return no405
+      const d = objeto(body)
+      const agente = Validar.texto(d.agente, 'agente', 64)!, esperaA = Validar.texto(d.esperaA, 'esperaA', 64)!
+      return [200, this.dep.borradorDePar(act, agente, esperaA)]
+    }
     const id = Number(partes[2])
     if (!/^\d+$/.test(partes[2]!) || !Number.isSafeInteger(id)) return no404
     if (partes.length !== 4) return no404

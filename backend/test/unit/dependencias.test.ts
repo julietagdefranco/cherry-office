@@ -684,3 +684,41 @@ describe('esperas vencidas: parte y avisos', () => {
     expect(Parte.bloqueos(p.s, p.b.oficinas.activa()!, new Date()).some((b) => b.tipo === 'espera')).toBe(true)
   })
 })
+
+// MARK: - pasar a flujo
+
+describe('patrones y borrador de flujo', () => {
+  test('patrones: pares con 3 o más esperas de los últimos 30 días (de MCP, sin las de la persona ni las canceladas)', async () => {
+    const p = await preparar(['marce', 'arqui', 'nico'])
+    const mk = (agente: string, esperaA: string, o: { haceDias?: number; estado?: string; origen?: 'mcp' | 'reunion' } = {}) => {
+      const x = p.dep.esperas.crear({ oficina: p.carpeta, agente, esperaA, que: 'q', ref: 'pedido:1', grupo: 'g' + Math.random(), accion: 'continuar', origen: o.origen ?? 'mcp', estado: o.estado })!
+      if (o.haceDias) p.s.store.db.run('UPDATE esperas SET creada=? WHERE id=?', [Date.now() / 1000 - o.haceDias * 86400, x.id])
+      return x
+    }
+    mk('marce', 'arqui'); mk('marce', 'arqui', { haceDias: 10 }); mk('marce', 'arqui', { haceDias: 29, estado: 'hecha' })
+    mk('marce', 'nico'); mk('marce', 'nico'); mk('marce', 'nico', { haceDias: 45 })        // la tercera es muy vieja
+    mk('nico', 'arqui'); mk('nico', 'arqui'); mk('nico', 'arqui', { estado: 'cancelada' })  // una cancelada no cuenta
+    mk('arqui', 'persona'); mk('arqui', 'persona'); mk('arqui', 'persona')                  // a la persona, no
+    mk('nico', 'marce', { origen: 'reunion' }); mk('nico', 'marce', { origen: 'reunion' }); mk('nico', 'marce', { origen: 'reunion' })
+    const r = p.dep.patrones(p.carpeta)
+    expect(r.map((x) => [x.agente, x.esperaA, x.veces])).toEqual([['marce', 'arqui', 3]])
+    expect(p.dep.patrones('/otra')).toEqual([])
+  })
+
+  test('borradorDePar: 2 pasos (lo que entrega el esperado con su pedido más frecuente, y la versión completa que recibe de él) que pasan flujoDesde', async () => {
+    const p = await preparar()
+    const act = p.b.oficinas.activa()!
+    for (const q of ['el mapeo', 'el mapeo', 'la prueba']) p.dep.pedidos.crear({ oficina: p.carpeta, de: 'marce', a: 'arqui', que: q })
+    const v1 = p.s.entregas.crear({ oficina: p.carpeta, agente: 'marce', origen: 'tarea', ref: 't', titulo: 'Informe de ventas', texto: 'x' })!
+    p.dep.esperas.crear({ oficina: p.carpeta, agente: 'marce', esperaA: 'arqui', que: 'el mapeo', ref: 'pedido:1', grupo: 'g', accion: 'continuar', origen: 'mcp', entregaParcial: v1.id })
+    const { borrador } = p.dep.borradorDePar(act, 'marce', 'arqui') as { borrador: Record<string, any> }
+    expect(borrador.nombre).toBe('Marce con Arqui')
+    expect(borrador.origen).toBe('esperas:marce:arqui')
+    expect(borrador.pasos).toEqual([
+      { id: 'p1', nombre: 'el mapeo', quien: 'arqui', consigna: 'el mapeo', recibeDe: [], entrega: 'Lo que pide Marce', aprobacion: false },
+      { id: 'p2', nombre: 'Informe de ventas', quien: 'marce', consigna: 'Informe de ventas', recibeDe: ['p1'], entrega: 'La versión completa', aprobacion: false },
+    ])
+    expect(() => p.dep.borradorDePar(act, 'marce', 'nico')).toThrow(/no está en la oficina/)
+    expect(() => p.dep.borradorDePar(act, 'arqui', 'marce')).toThrow(/no tienen pedidos/)
+  })
+})

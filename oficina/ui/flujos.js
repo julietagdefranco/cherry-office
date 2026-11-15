@@ -427,9 +427,11 @@ App.Flujos = (function () {
   }
 
   /* ---------------- hoja: flujos de la oficina (editor) ---------------- */
-  function editor(idInicial) {
+  /* `borrador` (opcional): un FlujoDef armado por el servidor (desde una reunión o desde esperas repetidas); se abre como un flujo
+     nuevo ya cargado y sin guardar, y la persona lo guarda con el botón de siempre */
+  function editor(idInicial, borrador) {
     var hj = App.hoja({ titulo: 'Flujos de la oficina', ancho: 720 });
-    var flujos = [], ed = null, sucio = false, err = h('div.error-txt');
+    var flujos = [], ed = null, sucio = false, err = h('div.error-txt'), borradorPendiente = borrador || null;
     var selector = h('div.flu-selector'), formulario = h('div'), pie = hj.pie;
     App.add(hj.cuerpo, selector, formulario, err);
 
@@ -438,13 +440,15 @@ App.Flujos = (function () {
         pasos: [pasoNuevo()] };
     }
     function pasoNuevo() {
-      return { id: null, nombre: '', quien: '', consigna: '', recibe: '', entrega: '', aprobacion: false, plazoDias: '', esperaDias: '', recibeDe: [], abierto: true };
+      return { id: null, nombre: '', quien: '', consigna: '', recibe: '', entrega: '', aprobacion: false, plazoDias: '', esperaDias: '', recibeDe: [], recibeNada: false, abierto: true };
     }
     function desdeFlujo(f) {
       return { id: f.id, nombre: f.nombre || '', descripcion: f.descripcion || '', activo: f.activo !== false, origen: f.origen,
         pasos: (f.pasos || []).map(function (p, i) {
           return { id: p.id, nombre: p.nombre || '', quien: p.quien || '', consigna: p.consigna || '', recibe: p.recibe || '', entrega: p.entrega || '',
-            aprobacion: !!p.aprobacion, plazoDias: p.plazoDias || '', esperaDias: p.esperaDias || '', recibeDe: (p.recibeDe || []).slice(), abierto: (f.pasos || []).length <= 3 };
+            aprobacion: !!p.aprobacion, plazoDias: p.plazoDias || '', esperaDias: p.esperaDias || '', recibeDe: (p.recibeDe || []).slice(),
+            /* `recibeDe: []` explícito = no recibe nada (sin él, recibe del paso anterior): hay que mandarlo tal cual al guardar */
+            recibeNada: Array.isArray(p.recibeDe) && p.recibeDe.length === 0, abierto: (f.pasos || []).length <= 3 };
         }) };
     }
 
@@ -454,6 +458,7 @@ App.Flujos = (function () {
         var f = elegirId && flujos.filter(function (x) { return x.id === elegirId; })[0];
         ed = f ? desdeFlujo(f) : (flujos.length && elegirId !== null ? desdeFlujo(flujos[0]) : vacioEd());
         sucio = false;
+        if (borradorPendiente) { ed = desdeFlujo(borradorPendiente); ed.id = null; sucio = true; borradorPendiente = null; }
         pintar();
       }).catch(function (e) { err.textContent = e.message; });
     }
@@ -542,11 +547,12 @@ App.Flujos = (function () {
             var clave = q.id;
             var k = p.recibeDe.indexOf(clave);
             if (k >= 0) p.recibeDe.splice(k, 1); else p.recibeDe.push(clave);
+            p.recibeNada = false;   // al tocar una casilla, se vuelve a la regla de siempre
             sucio = true; pintar();
           } }, (j + 1) + '. ' + (q.nombre || 'Paso')));
         });
         cuerpo.appendChild(h('div.fila-campo', h('label.etiqueta-campo', 'Recibe lo que entregaron'),
-          previos, h('div.ayuda', 'Sin elegir ninguno, recibe lo del paso inmediato anterior.')));
+          previos, h('div.ayuda', p.recibeNada && !(p.recibeDe || []).length ? 'Este paso no recibe nada de los anteriores. Si elegís alguno, recibe solo lo de ese.' : 'Sin elegir ninguno, recibe lo del paso inmediato anterior.')));
       }
       caja.appendChild(cuerpo);
       return caja;
@@ -585,6 +591,7 @@ App.Flujos = (function () {
         if (p.consigna.trim()) o.consigna = p.consigna.trim();
         if (p.recibe.trim()) o.recibe = p.recibe.trim();
         if (rec.length) o.recibeDe = rec;
+        else if (p.recibeNada) o.recibeDe = [];
         if (String(p.plazoDias).trim() !== '') o.plazoDias = +p.plazoDias;
         if (String(p.esperaDias).trim() !== '') o.esperaDias = +p.esperaDias;
         pasos.push(o);
@@ -592,6 +599,7 @@ App.Flujos = (function () {
       if (!ed.nombre.trim()) throw new Error('Ponele un nombre al flujo.');
       var cuerpo = { nombre: ed.nombre.trim(), pasos: pasos, activo: !!ed.activo };
       cuerpo.descripcion = ed.descripcion.trim();
+      if (!ed.id && ed.origen) cuerpo.origen = ed.origen;   // un flujo nuevo armado desde una reunión o desde esperas recuerda de dónde salió
       return cuerpo;
     }
 

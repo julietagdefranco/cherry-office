@@ -17,6 +17,7 @@ import type { OficinaActiva } from './oficinas.js'
 import { dirsVinculos, Instrucciones } from './permisos.js'
 import { anexarDecisiones } from './plantillas.js'
 import { dependenciasDe } from './dependencias.js'
+import { flujoDesde, flujoJSON } from './modelo-flujos.js'
 import { Programador, programadorDe } from './programador.js'
 import { atrapar, no404, no405, type Query, type Resp, type SubRouter } from './router.js'
 import { entregasRouterDe } from './rutas-entregas.js'
@@ -802,6 +803,7 @@ export class ReunionesRouter implements SubRouter {
         const id = partes[2]!.toLowerCase()
         if (m !== 'POST') return no405
         switch (partes[3]) {
+          case 'flujo': return [200, this.borradorFlujo(id)]
           case 'intervencion': return [200, this.intervenir(id, body)]
           case 'ronda': return [200, this.otraRonda(id)]
           case 'cerrar': return [200, await this.cerrar(id)]
@@ -1248,6 +1250,34 @@ export class ReunionesRouter implements SubRouter {
     const g = this.db.una(id, a.carpeta)
     if (!g) throw new ErrorAPI(404, 'No encontré esa reunión.')
     return { id: g.id, pendientesEstado: this.estadoPendientes(g, a) ?? [] }
+  }
+
+  /** `POST /api/reuniones/:id/flujo`: borrador (sin guardar nada) de un flujo con los pendientes como pasos, en orden
+   *  topológico: cada uno recibe de las dependencias que tiene. La persona lo ajusta en el editor de flujos y lo guarda. */
+  private borradorFlujo(id: string): Obj {
+    const { a, f, ps } = this.conPendientes(id)
+    if (!ps.some((p) => (p.dependeDe?.length ?? 0) > 0)) throw new ErrorAPI(409, 'Ningún pendiente de esta reunión depende de otro: no hay una cadena para pasar a flujo.')
+    // Kahn estable por índice: siempre sale el de menor índice entre los que ya tienen todo lo que esperan
+    const orden: number[] = []
+    const listos = new Set<number>()
+    while (orden.length < ps.length) {
+      const i = ps.findIndex((p, k) => !listos.has(k) && (p.dependeDe ?? []).every((d) => listos.has(d)))
+      if (i < 0) throw new ErrorAPI(409, 'Los pendientes dependen unos de otros en círculo: no se puede armar el flujo.')
+      orden.push(i)
+      listos.add(i)
+    }
+    const pasos = orden.map((i) => {
+      const p = ps[i]!
+      const ag = PendientesReunion.agente(p.quien, a.oficina)
+      return {
+        id: `p${i + 1}`, nombre: prefijo(TextoEntrega.titulo(p.que), 80), quien: p.usuario || !ag ? 'persona' : ag.id, consigna: p.que,
+        // `[]` explícito: sin él, un paso raíz que queda en segundo lugar recibiría del anterior
+        recibeDe: (p.dependeDe ?? []).map((d) => `p${d + 1}`), entrega: 'Lo que pide el pendiente', aprobacion: false,
+      }
+    })
+    const usados = new Set((a.oficina.flujos ?? []).map((x) => x.id))
+    const flujo = flujoDesde({ nombre: prefijo(f.tema, 80), descripcion: prefijo(`Armado desde la reunión «${f.tema}»`, 600), origen: `reunion:${f.id}`, pasos }, usados)
+    return { borrador: flujoJSON(flujo) }
   }
 
   /** «Hacelo ahora»: valida el pendiente y lanza el encargo (o lo deja esperando a sus dependencias). 202 con la reunión (y
