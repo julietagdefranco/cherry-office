@@ -427,7 +427,7 @@ public actor Programador {
         ctx.mcpUrl = mcpUrl
         let ctxFinal = ctx, mcp = self.mcp
         let origen = Programador.origenEntrega(ej.tarea)
-        let carpeta = act.carpeta, agente = def.id, sid = ej.sid, consigna = t.consigna, nombre = t.nombre
+        let carpeta = act.carpeta, agente = def.id, sid = ej.sid, consigna = t.mensaje, nombre = t.nombre
         let caja = CajaCosto()
         let escritos = CajaArchivos()
         struct Resultado: Sendable { var texto: String; var error: String? }

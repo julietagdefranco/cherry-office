@@ -11,6 +11,7 @@ import { consultasDe } from './consultas.js'
 import {
   CorridasStore, corridaJSON, corridasAbiertas, pasoJSON, resumenPaso, type Corrida,
 } from './corridas-store.js'
+import { Adjuntos } from './adjuntos.js'
 import { ErrorAPI } from './errores.js'
 import { entregasRouterDe } from './rutas-entregas.js'
 import { esObjeto, type Obj } from './json.js'
@@ -251,10 +252,13 @@ export class FlujosRouter implements SubRouter {
     const f = act.oficina.flujos?.find((x) => x.id === id)
     if (!f) throw new ErrorAPI(404, 'No existe ese flujo.')
     if (!f.activo) throw new ErrorAPI(409, 'Ese flujo está pausado.')
-    const d = objeto(body)
+    const d = objeto(body, Adjuntos.maxBody)
+    if ((body?.length ?? 0) > maxBody && d.archivos === undefined) throw new ErrorAPI(400, 'pedido inválido')
     const nombre = Validar.texto(d.nombre, 'nombre', MotorFlujos.maxNombre)!
     const contexto = Validar.texto(d.contexto, 'contexto', MotorFlujos.maxContexto, false) ?? ''
-    const c = await this.motor.iniciar(act, f, nombre, contexto)
+    const archivos = Adjuntos.leer(d.archivos)
+    const adjuntos = Adjuntos.guardar(act, `flujos/${f.id}`, archivos)
+    const c = await this.motor.iniciar(act, f, nombre, contexto, adjuntos)
     return [200, { corrida: corridaJSON(c) }]
   }
 

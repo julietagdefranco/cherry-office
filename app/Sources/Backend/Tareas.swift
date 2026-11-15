@@ -39,19 +39,24 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
     public var fecha: String?
     /// Solo las únicas: cuándo terminó bien y dejó su entrega (ISO 8601, UTC). Una única hecha no vuelve a correr sola.
     public var hecha: String?
+    /// Archivos adjuntos (rutas relativas a la oficina, dentro de `archivos/adjuntos/`): el agente los recibe con la consigna.
+    public var archivos: [String]?
 
     public init(id: String, agente: String, nombre: String, consigna: String, dias: [Int], hora: String,
                 zona: String? = nil, activa: Bool = true, creada: String? = nil, desde: String? = nil, origen: OrigenTarea? = nil,
-                fecha: String? = nil, hecha: String? = nil) {
+                fecha: String? = nil, hecha: String? = nil, archivos: [String]? = nil) {
         self.id = id; self.agente = agente; self.nombre = nombre; self.consigna = consigna; self.dias = dias
         self.hora = hora; self.zona = zona; self.activa = activa; self.creada = creada; self.desde = desde; self.origen = origen
-        self.fecha = fecha; self.hecha = hecha
+        self.fecha = fecha; self.hecha = hecha; self.archivos = archivos
     }
+
+    /// Lo que recibe el agente: la consigna y, si tiene, la lista de adjuntos.
+    public var mensaje: String { consigna + Adjuntos.texto(archivos ?? []) }
 
     /// Una sola vez (con fecha), en lugar de repetirse por días.
     public var unica: Bool { fecha != nil }
 
-    enum CodingKeys: String, CodingKey { case id, agente, nombre, consigna, dias, hora, zona, activa, creada, desde, origen, fecha, hecha }
+    enum CodingKeys: String, CodingKey { case id, agente, nombre, consigna, dias, hora, zona, activa, creada, desde, origen, fecha, hecha, archivos }
 
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -68,6 +73,7 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
         origen = try c.decodeIfPresent(OrigenTarea.self, forKey: .origen)
         fecha = try c.decodeIfPresent(String.self, forKey: .fecha)
         hecha = try c.decodeIfPresent(String.self, forKey: .hecha)
+        archivos = try c.decodeIfPresent([String].self, forKey: .archivos)
     }
 
     /// Zona efectiva: la de la tarea, o la del sistema si no tiene (o no se reconoce).
@@ -89,6 +95,7 @@ public struct TareaProgramada: Codable, Sendable, Equatable {
         o["tipo"] = unica ? "unica" : "repetida"
         if let fecha { o["fecha"] = fecha }
         if unica { o["hecha"] = hecha ?? NSNull() }
+        if let archivos, !archivos.isEmpty { o["archivos"] = archivos }
         return o
     }
 }
@@ -136,6 +143,9 @@ public enum ValidarTareas {
             guard hora(t.hora) != nil else { throw ErrorAPI(400, "La hora de la tarea \(t.id) tiene que ser HH:MM (por ejemplo 08:00).") }
             if let z = t.zona, !zonaValida(z) { throw ErrorAPI(400, "La zona horaria de la tarea \(t.id) no existe: \(z).") }
             if let og = t.origen, !origenValido(og) { throw ErrorAPI(400, "El origen de la tarea \(t.id) no es válido.") }
+            if let a = t.archivos, a.count > Adjuntos.maxArchivos || !a.allSatisfy(Adjuntos.rutaValida) {
+                throw ErrorAPI(400, "Los archivos adjuntos de la tarea \(t.id) no son válidos.")
+            }
         }
     }
 }

@@ -1,7 +1,9 @@
 // Rutas del núcleo para el chat (Router.swift): historial, chat, actividad, avisos y costos.
+import { Adjuntos, type Adjunto } from './adjuntos.js'
 import type { Avisos } from './avisos.js'
 import { TextoAviso, avisoJSON } from './avisos.js'
 import { ClaudeError, type ClaudeRunner } from './claude-runner.js'
+import { ErrorAPI } from './errores.js'
 import type { Config } from './config.js'
 import { ArchivosEntrega, TextoEntrega, type Entregas } from './entregas.js'
 import { esObjeto, maxBody, objeto, type Obj } from './json.js'
@@ -94,16 +96,27 @@ export function rutasChat(d: DepsChat): RutaNucleo {
   async function chat(body?: Buffer): Promise<Resp> {
     const act = oficinas.requerirActiva()
     if (!body) return invalido
-    if (body.length > maxBody) return [413, { error: 'pedido demasiado grande' }]
+    // con archivos adjuntos el cuerpo puede ser grande (base64); sin ellos, el tope de siempre
+    if (body.length > Adjuntos.maxBody) return [413, { error: 'pedido demasiado grande' }]
     let b: unknown
     try {
       b = JSON.parse(body.toString('utf8'))
     } catch {
-      return invalido
+      b = undefined
     }
+    if (body.length > maxBody && (!esObjeto(b) || b.archivos === undefined)) return [413, { error: 'pedido demasiado grande' }]
     if (!esObjeto(b) || typeof b.agent !== 'string' || typeof b.message !== 'string' || typeof b.session !== 'string') return invalido
+    let adjuntos: Adjunto[]
+    try {
+      adjuntos = Adjuntos.leer(b.archivos)
+    } catch (e) {
+      if (e instanceof ErrorAPI) return [e.status, { error: e.mensaje }]
+      throw e
+    }
     const agente = b.agent
-    const msg = b.message.trim()
+    const escrito = b.message.trim()
+    // solo archivos, sin texto: se los pasa igual
+    const msg = escrito === '' && adjuntos.length > 0 ? 'Te paso estos archivos.' : escrito
     const def = act.oficina.agentes.find((a) => a.id === agente)
     if (!def || msg === '' || largo(msg) > maxMensaje || !uuidValido(b.session)) return invalido
     const sid = b.session.toLowerCase()
@@ -122,6 +135,14 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (dueno !== undefined && dueno !== agente) return invalido
     const of = store.oficinaDe(sid)
     if (of !== undefined && of !== act.carpeta) return invalido
+    // los adjuntos se guardan en la oficina y el agente recibe sus rutas al final del mensaje
+    let mensaje: string
+    try {
+      mensaje = msg + Adjuntos.texto(Adjuntos.guardar(act, `chat/${agente}`, adjuntos))
+    } catch (e) {
+      if (e instanceof ErrorAPI) return [e.status, { error: e.mensaje }]
+      throw e
+    }
     const t0 = Date.now()
     const carpeta = act.carpeta
     const caja = new CajaCosto()
@@ -141,14 +162,14 @@ export function rutasChat(d: DepsChat): RutaNucleo {
         if (mcpUrl !== undefined && mcp) envExtra[variableTokenMCP] = mcp.emitir({ oficina: carpeta, agente, sid, perfil: ctx.perfilMCP, interactivo: true })
         try {
           store.asegurarSesion(sid, agente, carpeta)
-          store.agregar(sid, 'u', msg)
+          store.agregar(sid, 'u', mensaje)
           const activa = store.estaActiva(sid)
           const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: msg, extra: caja.observador(escritos.observador()) },
             async (obs, token) => {
               const resumen = runner.resumirTarea(msg, { oficina: carpeta, agente, token, store })
               try {
                 return await runner.ejecutarChat({
-                  agente, mensaje: msg, sid, activa, carpeta, obs, envExtra,
+                  agente, mensaje, sid, activa, carpeta, obs, envExtra,
                   armar: (p) => argumentos(config, ctx, p),
                 })
               } finally {
