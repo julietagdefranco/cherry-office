@@ -555,6 +555,58 @@ describe('Reuniones', () => {
     expect(lista((await f.get('/api/reuniones')).obj.reuniones)[0]?.estado).toBe('cerrada')
   })
 
+  // MARK: resumen sin cerrar
+
+  test('resumen: arma un resumen parcial sin cerrar (sin acta, sin decisiones.md, sin avisos) y la reunión sigue', async () => {
+    const f = await fix()
+    const previas = f.leer('conocimiento/decisiones.md')
+    const id = str((await nueva(f, 'plan', ['marce', 'nico'])).obj.id)
+    await aguardar(f, id)
+    f.sb.responder('acta', '{"resumen": "Marce quiere reels, Nico anuncios.", "decisiones": ["Lanzar en diciembre"], "abiertas": ["¿Cuánto presupuesto hay?", " "], "pendientes": [{"quien": "Nico", "que": "Cotizar"}]}')
+    const r = await f.post(`/api/reuniones/${id}/resumen`)
+    expect(r.status, JSON.stringify(r.obj)).toBe(200)
+    expect(r.obj.estado).toBe('esperando')
+    expect(r.obj.sintesis).toBeUndefined()
+    expect(r.obj.acta).toBeUndefined()
+    const rp = dict(r.obj.resumenParcial)
+    expect(rp.resumen).toBe('Marce quiere reels, Nico anuncios.')
+    expect(rp.decisiones).toEqual(['Lanzar en diciembre'])
+    expect(rp.abiertas).toEqual(['¿Cuánto presupuesto hay?'])
+    expect(lista(rp.pendientes).map((x) => str(x.que))).toEqual(['Cotizar'])
+    expect(rp.turnos).toBe(2)
+    expect(str(rp.ts).endsWith('Z')).toBe(true)
+    expect(f.leer('conocimiento/decisiones.md')).toBe(previas)
+    expect(fs.existsSync(ruta(f.carpeta, 'reuniones')) ? fs.readdirSync(ruta(f.carpeta, 'reuniones')).filter((x) => x.endsWith('.md')) : []).toEqual([])
+    const p = llamadasConPrompt(f, 'secretario de actas')[0]!.at(-1)!
+    expect(p.includes('TODAVÍA NO TERMINÓ')).toBe(true)
+    // queda guardado y la reunión se puede seguir y cerrar normalmente
+    expect(dict((await ver(f, id)).resumenParcial).resumen).toBe('Marce quiere reels, Nico anuncios.')
+    expect((await f.post(`/api/reuniones/${id}/intervencion`, { texto: 'Hay 100 mil' })).status).toBe(200)
+    await aguardar(f, id)
+    f.sb.modo('acta', null)
+    fs.rmSync(`${f.sb.binDir}/resp.acta.json`, { force: true })
+    const c = await f.post(`/api/reuniones/${id}/cerrar`)
+    expect(c.status).toBe(200)
+    expect(c.obj.resumenParcial).toBeUndefined()
+    expect(dict(c.obj.sintesis).resumen).toBe('Se acordó avanzar con el plan.')
+    // cerrada: 409
+    expect((await f.post(`/api/reuniones/${id}/resumen`)).status).toBe(409)
+  })
+
+  test('resumen: falla del secretario -> error y la reunión no cambia; sin opiniones -> 409', async () => {
+    const f = await fix([{ id: 'marce', depto: 'redes' }])
+    const id = str((await nueva(f, 'tema', ['marce'])).obj.id)
+    await aguardar(f, id)
+    f.sb.modo('acta', 'nojson')
+    const r = await f.post(`/api/reuniones/${id}/resumen`)
+    expect(r.status).toBe(500)
+    expect(r.obj.error).toBe('El resumen no vino en el formato esperado.')
+    const g = await ver(f, id)
+    expect(g.estado).toBe('esperando')
+    expect(g.resumenParcial).toBeUndefined()
+    expect((await llamar(f.b, 'GET', `/api/reuniones/${id}/resumen`)).status).toBe(405)
+  })
+
   test('cerrar: dos veces 409; actas del mismo día y tema con -2; tema sin letras -> «reunion»', async () => {
     const f = await fix([{ id: 'marce', depto: 'redes' }])
     const actas: string[] = []
