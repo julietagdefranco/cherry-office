@@ -1,17 +1,13 @@
-# Próspera HQ
+# oficina/ (el front)
 
-Oficina 3D estilo LEGO con tus agentes. Cada personaje es un agente de `~/.claude/agents/`.
+La interfaz de Oficina: la maqueta 3D (three.js + piezas LDraw) y todas las pantallas. Es la única fuente del front
+para las dos apps: la de Mac (`app/`) y la de Windows (`desktop/`) la sirven tal cual.
 
-## Cómo abrirla (lo más fácil)
-Doble clic en **`Abrir Próspera HQ.command`**.
-- La primera vez abre el navegador para que inicies sesión con tu cuenta de Claude (una sola vez).
-- Después abre la oficina en http://localhost:8765. Cerrá esa ventana negra para apagarla.
-- Si macOS dice que no puede abrirlo: clic derecho sobre el archivo, "Abrir" y confirmar.
+- `index.html`: punto de entrada.
+- `ui/`: un módulo por pantalla (`app.js` arma la base; `oficina3d.js` la maqueta; `contratar.js` el editor de
+  agentes y minifigs; `flujos.js`, `reunion.js`, `biblioteca.js`, `parte.js`, `entregables.js`, `creador.js`…) y los
+  estilos (`estilo.css` y uno por módulo grande).
+- `ldraw/`: piezas LDraw empaquetadas y `catalogo.json` (caras, peinados, ropa y demás opciones del editor).
+- `personajes/`, `Agentes imagenes/`: retratos de los agentes de Próspera.
 
-## Qué se puede hacer
-- Clic en un personaje (o en su nombre en la barra): camina a la sala de reuniones y se abre un chat privado.
-- Arrastrar para girar la vista, rueda del mouse para acercar.
-- Los chats son de solo lectura: los agentes pueden leer tus archivos pero no editan, publican ni envían nada desde acá.
-
-## Para cambiar cosas
-Nombres, ropa, pelo y posiciones: lista `AGENTES` al principio de `index.html`.
+Para probarla en el navegador: `cd app && swift run oficina-dev` y abrir http://localhost:8765 (ver el README de la raíz).
