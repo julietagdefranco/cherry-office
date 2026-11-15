@@ -90,6 +90,8 @@ describe('Parte.armar / GET /api/parte con datos sembrados', () => {
     st.corridaActualizar(c, cr.id, { paso: 1 })
     const p1 = st.pasoCrear({ corrida: cr.id, paso: 0, intento: 1, quien: 'marce', estado: 'corriendo' })!
     st.pasoActualizar(p1.id, { estado: 'listo', fin: Date.now() / 1000, sumarCosto: 0.1 })
+    // la corrida espera desde hace un minuto: si no, puede caer en el mismo milisegundo que el aviso guardado y el orden se vuelve azar
+    s.store.db.run('UPDATE corridas SET actualizada=actualizada-60 WHERE id=?', [cr.id])
     // entregas, ejecuciones, reunión cerrada y un aviso
     const e1 = s.entregas.crear({ oficina: c, agente: 'marce', origen: 'tarea', ref: 'informe', titulo: 'Informe del lunes', texto: 'Todo bien' })!
     s.entregas.crear({ oficina: c, agente: 'marce', origen: 'tarea', ref: 'informe', titulo: 'Otro', texto: 'x' })

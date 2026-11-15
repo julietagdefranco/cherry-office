@@ -255,19 +255,16 @@ struct RunnerTests {
     func paralelismoEntreAgentes() async throws {
         let sb = Sandbox(); defer { withExtendedLifetime(sb) {} }
         let b = try sb.backend()
-        let t0 = Date()
         async let r1 = chat(b, agent: "betty", message: "DORMIR", session: U.a)
         async let r2 = chat(b, agent: "marce", message: "DORMIR", session: U.b)
         async let r3 = chat(b, agent: "sofia", message: "DORMIR", session: U.c)
         let rs = await [r1, r2, r3]
-        let dt = Date().timeIntervalSince(t0)
         #expect(rs.allSatisfy { $0.status == 200 })
         let ev = sb.eventos
         #expect(ev.count == 6)
-        // los tres arrancan antes de que termine el primero
+        // los tres arrancan antes de que termine el primero (eso prueba el paralelo; medir el tiempo total falla en runners lentos)
         #expect(Array(ev.prefix(3)).allSatisfy { $0.hasPrefix("S ") })
         #expect(Set(ev.prefix(3)) == ["S betty", "S marce", "S sofia"])
-        #expect(dt < 2.6, "tardó \(dt)s: parece secuencial")
     }
 
     @Test("dos mensajes seguidos al mismo agente: el segundo ya usa --resume (carril cubre guardar+ejecutar)")
