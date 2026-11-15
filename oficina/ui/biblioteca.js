@@ -38,7 +38,8 @@
     var input = h('input', { type: 'file', multiple: true, style: { display: 'none' }, onchange: function () { subir(input.files); input.value = ''; } });
     var tabs = h('div.pestanas', { style: { padding: '0 18px', marginBottom: '0' } });
     var lista = h('div.biblio-lista'), det = h('div.biblio-det');
-    var zona = h('div', { style: { position: 'relative', flex: 1, minHeight: 0 } }, h('div.biblio', lista, det));
+    var biblio = h('div.biblio', lista, det);
+    var zona = h('div', { style: { position: 'relative', flex: 1, minHeight: 0 } }, biblio);
     hj.cuerpo.style.cssText = 'padding:0;display:flex;flex-direction:column;overflow:hidden';
     App.add(hj.cuerpo, 
       h('div.biblio-barra', App.icono('buscar'), buscar, dep, h('span', { style: { flex: 1 } }),
@@ -79,6 +80,7 @@
               f.snippet ? h('div.archivo-snip', f.snippet.replace(/[\[\]]/g, '')) : null),
             etiquetaEstado(f)));
         });
+        biblio.classList.toggle('con-sel', !!sel);
         if (sel) detalle(sel); else App.vaciar(det).appendChild(h('div.vacio', 'Elegí un archivo para ver su ficha.'));
       }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
     }
@@ -88,7 +90,8 @@
         var f = r.archivo, fi = f.ficha || {};
         function sec(t, c) { return c ? h('div.det-sec', h('h4', t), c) : null; }
         function ul(l) { return l && l.length ? h('ul', l.map(function (x) { return h('li', x); })) : null; }
-        App.add(App.vaciar(det), 
+        App.add(App.vaciar(det),
+          h('button.btn.chico.fantasma.solo-angosto', { style: { marginBottom: '8px' }, onclick: function () { sel = null; cargarArchivos(); } }, App.icono('atras'), 'Todos los archivos'),
           h('h3', { style: { fontSize: '15px', marginBottom: '4px' } }, f.titulo),
           h('div.ayuda', { style: { marginBottom: '12px' } }, f.nombre + ' · ' + App.tam(f.tam || 0)),
           h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' } },
@@ -139,7 +142,7 @@
 
     /* ---- carpetas vinculadas ---- */
     function cargarVinculos() {
-      det.style.display = 'none';
+      det.style.display = 'none'; biblio.classList.remove('con-sel');
       api.get('/api/vinculos').then(function (r) {
         App.vaciar(lista);
         lista.appendChild(h('p.ayuda', { style: { padding: '12px 18px 4px' } }, 'Carpetas que ya tenés en la compu (por ejemplo, de Drive). No se copian: se leen en su lugar y los agentes con acceso pueden consultarlas.'));
@@ -170,7 +173,7 @@
 
     /* ---- propuestas de cambio al conocimiento ---- */
     function cargarPropuestas() {
-      det.style.display = 'none';
+      det.style.display = 'none'; biblio.classList.remove('con-sel');
       api.get('/api/biblioteca/propuestas').then(function (r) {
         App.vaciar(lista);
         lista.appendChild(h('p.ayuda', { style: { padding: '12px 18px 8px' } }, 'Cuando un documento contradice lo que la oficina tiene anotado, el bibliotecario propone un cambio. Nada se modifica sin tu OK.'));
