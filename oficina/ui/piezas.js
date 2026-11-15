@@ -108,6 +108,31 @@ App.Piezas = (function () {
     return x;
   }
 
+  /* Ojos blancos para capuchas con ranuras (55704, 10113): las ranuras quedan sobre la frente y los ojos de las caras
+     estampadas caen justo debajo, así que por el hueco solo se veía piel. Dos parches curvos (cilindro r=13.1 LDU,
+     apenas por fuera de la cabeza r≈12.9 y por dentro de la capucha r≈16.6) cubren x 1.75–10.75, y 4–7.75: la capucha
+     tapa todo menos lo que asoma por las ranuras (medidas en x 2.5–9.75, y 4.25–7). Espacio LDraw de la cabeza. */
+  var ojosGeo = null, ojosMat = null;
+  function ojosCapucha() {
+    if (!ojosGeo) {
+      var R = 13.1, x0 = 1.75, x1 = 10.75, y0 = 4, y1 = 7.75, nx = 16, pos = [], idx = [];
+      [1, -1].forEach(function (lado) {
+        var base = pos.length / 3;
+        for (var i = 0; i <= nx; i++) {
+          var x = lado * (x0 + (x1 - x0) * i / nx), z = -Math.sqrt(R * R - x * x);
+          pos.push(x, y0, z, x, y1, z);
+        }
+        for (var j = 0; j < nx; j++) { var a = base + 2 * j; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+      });
+      ojosGeo = new T.BufferGeometry();
+      ojosGeo.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
+      ojosGeo.setIndex(idx);
+      ojosGeo.computeVertexNormals();
+      ojosMat = new T.MeshStandardMaterial({ color: lineal('#f4f4f4'), roughness: 0.3, metalness: 0, side: T.DoubleSide });
+    }
+    return new T.Mesh(ojosGeo, ojosMat);
+  }
+
   /* ---------- avatar ---------- */
   function hash(s) { var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
   function elegir(lista, h, sal) { return lista[(hash(h + ':' + sal)) % lista.length]; }
@@ -167,6 +192,7 @@ App.Piezas = (function () {
         var cabeza = new T.Group(); cabeza.position.set(0, -24, 0); cuerpo.add(cabeza);
         cabeza.add(malla(d[1], a.colorPiel));
         cabeza.add(malla(d[2], somb.parte ? a.colorAccesorio : a.colorPelo, null, somb.opacidad));   // el sombrero va en lugar del pelo
+        if (somb.ojos) cabeza.add(ojosCapucha());
         /* cuello: origen en los hombros. Barba y moño giran con la cabeza; la capa (cuerpo: true) queda fija al torso */
         if (d[10]) { var cue3 = malla(d[10], cue.color === 'pelo' ? a.colorPelo : a.colorAccesorio); if (cue.cuerpo) cuerpo.add(cue3); else { cue3.position.y = 24; cabeza.add(cue3); } }
         function brazo(def, x, lado) {
