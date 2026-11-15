@@ -1,5 +1,5 @@
 // App de escritorio de la Oficina (Mac y Windows): la carcasa Electron alrededor del backend TypeScript.
-// Equivale a la app Swift (AppDelegate, HQSchemeHandler, Abrir, Notificaciones, BarraMenu, MainMenu):
+// Reemplazó a la app Swift de Mac (hasta la 0.7):
 // - La página se sirve por el esquema hq://app/ (estáticos en lista blanca y /api/* al router, en proceso: sin puerto).
 // - El front habla con la app por `window.webkit.messageHandlers.hq.postMessage` (lo expone el preload).
 // - Cerrar la ventana no cierra la app: queda en la bandeja (Windows) o en el Dock y la barra de menú (Mac).

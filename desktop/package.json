@@ -3,7 +3,7 @@
   "productName": "Oficina",
   "version": "0.7.1",
   "private": true,
-  "description": "Oficina: tu oficina de agentes de Claude (Mac y Windows).",
+  "description": "Oficina: tu oficina de agentes de Claude (Mac y Windows). De acá salen el .dmg y el .exe de las releases.",
   "main": "dist/main.cjs",
   "devDependencies": {
     "@types/node": "^26.6.6",
@@ -56,8 +56,9 @@
       ],
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
-      "identity": null,
-      "minimumSystemVersion": "13.0"
+      "identity": "-",
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": false
     },
     "dmg": {
       "artifactName": "Oficina-${version}-arm64.dmg"

@@ -6,8 +6,8 @@
 #   Si no existe, la crea como borrador para completar las notas antes de publicarla.
 # - A mano (Actions → Release → Run workflow): arma los instaladores y los deja como artefactos del run, sin release.
 #
-# Mac: la app Swift (app/). Windows: la carcasa Electron (desktop/) con el backend TypeScript.
-# La versión sale siempre de app/Resources/Info.plist (el job de Windows se la pone a desktop/package.json).
+# Las dos plataformas salen de la carcasa Electron (desktop/) con el backend TypeScript (backend/).
+# La versión sale de desktop/package.json.
 name: Release
 
 on:
@@ -23,79 +23,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  mac:
-    name: macOS (arm64)
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Versión
-        id: version
-        run: |
-          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' app/Resources/Info.plist)"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
-            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de Info.plist ($VERSION)."
-            exit 1
-          fi
-
-      # Compilaciones de Swift (debug de los tests y release de la app): con la caché solo se recompila lo que cambió.
-      - name: Caché de la compilación de Swift
-        uses: actions/cache@v4
-        with:
-          path: app/.build
-          key: swift-${{ runner.os }}-${{ hashFiles('app/Package.swift', 'app/Package.resolved') }}-${{ hashFiles('app/Sources/**', 'app/Tests/**') }}
-          restore-keys: |
-            swift-${{ runner.os }}-${{ hashFiles('app/Package.swift', 'app/Package.resolved') }}-
-
-      - name: Tests del backend
-        run: app/Tests/run-tests.sh
-
-      - name: Compilar y empaquetar
-        run: app/make-dmg.sh --rebuild
-
-      - name: Renombrar instalador
-        id: dmg
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          NAME="Oficina-$VERSION-arm64.dmg"
-          mv "app/build/Oficina $VERSION.dmg" "app/build/$NAME"
-          SHA="$(shasum -a 256 "app/build/$NAME" | cut -d' ' -f1)"
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          {
-            echo "### $NAME"
-            echo
-            echo "SHA-256: \`$SHA\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Guardar como artefacto
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.dmg.outputs.name }}
-          path: app/build/${{ steps.dmg.outputs.name }}
-          retention-days: 14
-
-      - name: Adjuntar a la release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          VERSION: ${{ steps.version.outputs.version }}
-          FILE: app/build/${{ steps.dmg.outputs.name }}
-          SHA: ${{ steps.dmg.outputs.sha }}
-        run: |
-          # el job de Windows corre en paralelo: si la otra ya creó la release, solo se sube el archivo
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "Oficina $VERSION" \
-              --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true
-          fi
-          gh release upload "$TAG" "$FILE" --clobber
-
-  windows:
-    name: Windows (x64)
-    runs-on: windows-latest
+  instalador:
+    name: ${{ matrix.nombre }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { nombre: macOS (arm64), os: macos-latest, builder: --mac --arm64, archivo: "Oficina-{v}-arm64.dmg", tests: true }
+          - { nombre: Windows (x64), os: windows-latest, builder: --win --x64, archivo: "Oficina-Setup-{v}.exe", tests: false }
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     defaults:
       run:
@@ -110,11 +46,11 @@ jobs:
       - name: Versión
         id: version
         run: |
-          VERSION="$(grep -A1 'CFBundleShortVersionString' app/Resources/Info.plist | grep -o '<string>[^<]*</string>' | head -1 | sed 's/<[^>]*>//g')"
-          [ -n "$VERSION" ] || { echo "::error::No pude leer la versión de Info.plist."; exit 1; }
+          VERSION="$(node -p "require('./desktop/package.json').version")"
+          [ -n "$VERSION" ] || { echo "::error::No pude leer la versión de desktop/package.json."; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
-            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de Info.plist ($VERSION)."
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de desktop/package.json ($VERSION)."
             exit 1
           fi
 
@@ -143,27 +79,32 @@ jobs:
           (cd backend && npx tsc --noEmit)
           (cd desktop && npx tsc -p .)
 
+      # En Windows y Linux los corre backend.yml en cada cambio; acá, en Mac, antes de publicar.
+      - name: Tests del backend
+        if: matrix.tests
+        working-directory: backend
+        run: npx vitest run
+
       - name: Compilar y empaquetar
         working-directory: desktop
         run: |
-          npm pkg set version="${{ steps.version.outputs.version }}"
           node scripts/build.mjs --recursos
-          npx electron-builder --win --x64 --publish never
+          npx electron-builder ${{ matrix.builder }} --publish never
 
       - name: Instalador
-        id: exe
+        id: inst
         run: |
-          NAME="Oficina-Setup-${{ steps.version.outputs.version }}.exe"
+          NAME="$(echo '${{ matrix.archivo }}' | sed "s/{v}/${{ steps.version.outputs.version }}/")"
           [ -f "desktop/release/$NAME" ] || { echo "::error::No se generó desktop/release/$NAME"; exit 1; }
-          SHA="$(sha256sum "desktop/release/$NAME" | cut -d' ' -f1)"
+          SHA="$(node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))" "desktop/release/$NAME")"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           { echo "### $NAME"; echo; echo "SHA-256: \`$SHA\`"; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Guardar como artefacto
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.exe.outputs.name }}
-          path: desktop/release/${{ steps.exe.outputs.name }}
+          name: ${{ steps.inst.outputs.name }}
+          path: desktop/release/${{ steps.inst.outputs.name }}
           retention-days: 14
 
       - name: Adjuntar a la release
@@ -172,8 +113,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
-          FILE: desktop/release/${{ steps.exe.outputs.name }}
+          FILE: desktop/release/${{ steps.inst.outputs.name }}
         run: |
+          # los dos instaladores se arman en paralelo: si el otro ya creó la release, solo se sube el archivo
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "Oficina $VERSION" \
               --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true

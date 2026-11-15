@@ -1,5 +1,8 @@
 # Plan: backend en TypeScript (etapa 1 de la app multiplataforma)
 
+> **Estado:** las dos etapas están hechas. El backend TS (`backend/`) es el único y la carcasa Electron (`desktop/`)
+> arma el `.dmg` y el `.exe`; la app Swift (`app/`) se borró. Este plan queda como registro.
+
 ## Contexto
 La app pasa a ser multiplataforma (Mac y Windows) con un solo código:
 - **Etapa 1 (este plan):** portar el backend Swift (`app/Sources/Backend`, ~13 mil líneas) a TypeScript sobre Node, con **la misma API**, y verificarlo contra la oficina sin cambios en el navegador, como hoy `oficina-dev`.

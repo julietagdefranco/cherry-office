@@ -1,12 +1,12 @@
-# App de escritorio (Electron) para Windows: en cada cambio arma el instalador y lo deja como artefacto del run,
-# para probarlo en una Windows antes de sacar una release (la release la arma release.yml con la etiqueta).
+# App de escritorio (Electron): en cada cambio arma el instalador de Windows y el .dmg de Mac y los deja como
+# artefactos del run, para probarlos antes de sacar una release (la release la arma release.yml con la etiqueta).
 name: Desktop
 
 on:
   push:
-    paths: ["desktop/**", "backend/src/**", "backend/package*.json", "oficina/**", "app/Resources/vendor/**", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "backend/src/**", "backend/package*.json", "oficina/**", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["desktop/**", "backend/src/**", "backend/package*.json", "oficina/**", "app/Resources/vendor/**", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "backend/src/**", "backend/package*.json", "oficina/**", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 permissions:
@@ -17,9 +17,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  windows:
-    name: instalador de Windows
-    runs-on: windows-latest
+  instalador:
+    name: instalador de ${{ matrix.nombre }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { nombre: Windows, os: windows-latest, builder: --win --x64, patron: "Oficina-Setup-*.exe", artefacto: Oficina-Setup-windows }
+          - { nombre: Mac, os: macos-latest, builder: --mac --arm64, patron: "Oficina-*-arm64.dmg", artefacto: Oficina-mac }
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     defaults:
       run:
@@ -58,11 +64,11 @@ jobs:
         working-directory: desktop
         run: |
           node scripts/build.mjs --recursos
-          npx electron-builder --win --x64 --publish never
+          npx electron-builder ${{ matrix.builder }} --publish never
 
       - name: Guardar instalador
         uses: actions/upload-artifact@v4
         with:
-          name: Oficina-Setup-windows
-          path: desktop/release/Oficina-Setup-*.exe
+          name: ${{ matrix.artefacto }}
+          path: desktop/release/${{ matrix.patron }}
           retention-days: 7

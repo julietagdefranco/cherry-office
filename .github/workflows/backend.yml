@@ -1,6 +1,6 @@
-# Tests del backend TypeScript en Windows y Linux (en macOS se corren a mano, también contra el backend Swift).
+# Tests del backend TypeScript en Windows y Linux (en macOS los corre release.yml antes de publicar).
 #
-# Corre la suite de paridad contra el backend TS con el `claude` falso (backend/test/fixtures/claude-fake.cjs):
+# Corre la suite contra el backend TS con el `claude` falso (backend/test/fixtures/claude-fake.cjs):
 # no usa el claude real ni ninguna cuenta.
 # - Windows: el mensaje viaja por la entrada estándar (el runner lo hace siempre ahí).
 # - Linux: dos pasadas en paralelo (jobs separados), con el mensaje como argumento (igual que en Mac) y por la
@@ -38,7 +38,6 @@ jobs:
       run:
         working-directory: backend
     env:
-      HQ_BACKEND: ts
       HQ_MENSAJE_STDIN: ${{ matrix.stdin }}
     steps:
       - uses: actions/checkout@v4

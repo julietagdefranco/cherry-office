@@ -33,36 +33,38 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
 ## Estructura del repo
 | Carpeta | Qué hay |
 |---|---|
-| `oficina/` | El front (HTML, JS y three.js): la maqueta 3D y todas las pantallas. Única fuente para las dos apps. |
-| `app/` | App de Mac en Swift (SwiftUI + WKWebView) con su backend. De acá sale el `.dmg` de las releases. Ver [app/README.md](app/README.md), que también documenta la API. |
-| `backend/` | El mismo backend portado a TypeScript, con una suite de paridad que corre contra los dos. Ver [backend/PORTAR.md](backend/PORTAR.md). |
-| `desktop/` | Carcasa Electron alrededor de `backend/` y `oficina/`: de acá sale el instalador de Windows. Ver [desktop/README.md](desktop/README.md). |
+| `oficina/` | El front (HTML, JS y three.js, con `vendor/` offline): la maqueta 3D y todas las pantallas. |
+| `backend/` | El backend en TypeScript (Node): oficinas, agentes, chat, flujos, tareas, biblioteca. La API está en [backend/API.md](backend/API.md). |
+| `desktop/` | La app de escritorio: carcasa Electron alrededor de `backend/` y `oficina/`. De acá salen el `.dmg` y el `.exe` de las releases. Ver [desktop/README.md](desktop/README.md). |
 | `docs/` | Planes de diseño y `aprendizajes.md` (cómo se comporta el `claude` real). |
 | `agentes/`, `contexto/`, `instalar.command` | El equipo original de Próspera (ver abajo). |
 | `tools/` | Utilidades sueltas, como el empaquetado de piezas LDraw. |
 
+Hasta la 0.7 la app de Mac era nativa en Swift, con su propio backend; se retiró al pasar las dos plataformas a
+Electron (queda en el historial de git, antes de borrar `app/`).
+
 ## Desarrollo
-La interfaz se prueba en el navegador con el backend Swift, sin compilar la .app:
+La interfaz se prueba en el navegador con el backend, sin armar la app:
 ```bash
-cd app && swift run oficina-dev      # http://localhost:8765
+npm ci --prefix backend
+npm run dev --prefix backend        # http://localhost:8765
 ```
-Variables útiles: `PORT`, `HQ_DATA_DIR`, `HQ_OFICINAS_DIR`, `CLAUDE_BIN` (ver `app/Sources/Dev/main.swift`).
+Variables útiles: `PORT`, `HQ_DATA_DIR`, `HQ_OFICINAS_DIR`, `CLAUDE_BIN`, `HQ_UI_DIR` (ver `backend/src/dev.ts`).
 
-Tests:
+Tests (con un `claude` falso, sin tocar tus datos ni tu cuenta):
 ```bash
-app/Tests/run-tests.sh                 # Swift
-npm run test:ts --prefix backend       # paridad contra el backend TS (test:swift, contra el Swift)
+npm test --prefix backend
 ```
 
-App de escritorio Electron (Windows o Mac):
+App de escritorio (Mac o Windows):
 ```bash
 npm ci --prefix backend && npm ci --prefix desktop
 npm start --prefix desktop
 ```
 
 ### Releases
-La versión sale de `CFBundleShortVersionString` en `app/Resources/Info.plist`; hay que subirla también en
-`desktop/package.json` y `desktop/package-lock.json`. Al subir una etiqueta `vX.Y.Z`, el workflow
+La versión sale de `desktop/package.json` (subirla también en `desktop/package-lock.json`, por ejemplo con
+`npm version X.Y.Z --no-git-tag-version --prefix desktop`). Al subir una etiqueta `vX.Y.Z`, el workflow
 `.github/workflows/release.yml` corre los tests, arma el `.dmg` y el `.exe` y los adjunta a la release de esa etiqueta.
 Si la release no existe, la crea como borrador para completar las notas.
 

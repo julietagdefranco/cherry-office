@@ -1,5 +1,5 @@
 // Compila la carcasa: main (con el backend TS adentro) y preload a CommonJS, con esbuild.
-// `--recursos` además arma build/recursos/oficina (el front filtrado como en app/build.sh + vendor/), que
+// `--recursos` además arma build/recursos/oficina (el front filtrado, con vendor/: three.js y Poppins), que
 // electron-builder copia como recurso de la app.
 import { build } from 'esbuild'
 import fs from 'node:fs'
@@ -22,11 +22,11 @@ await build({ ...comun, entryPoints: [path.join(raiz, 'src/preload.ts')], outfil
 if (process.argv.includes('--recursos')) {
   const dest = path.join(raiz, 'build/recursos/oficina')
   fs.rmSync(dest, { recursive: true, force: true })
-  // lo mismo que excluye app/build.sh: lo que es solo del modo desarrollo, datos locales y laboratorio
+  // fuera: lo que es solo del modo desarrollo, datos locales y laboratorio
   const fuera = (rel) => {
     const base = path.basename(rel)
     if (['server.py', 'lanzar.py', '.datos', '.sesiones.json', 'Agentes imagenes', '__pycache__', '.DS_Store', 'README.md',
-      'vendor', 'lego_man.json', 'personajes', '_labvendor', '_ldraw'].includes(base)) return true
+      'lego_man.json', 'personajes', '_labvendor', '_ldraw'].includes(base)) return true
     if (base.endsWith('.command') || base.startsWith('config') || base.startsWith('_lab') || base.startsWith('_cara')) return true
     if (['_fig.html', '_figuras_demo.html'].includes(base)) return true
     if (rel === 'js' || (rel.startsWith('ui/') && base.startsWith('_'))) return true
@@ -42,7 +42,6 @@ if (process.argv.includes('--recursos')) {
     } else fs.copyFileSync(o, path.join(dest, rel))
   }
   copiar('')
-  fs.cpSync(path.join(repo, 'app/Resources/vendor'), path.join(dest, 'vendor'), { recursive: true, filter: (f) => !f.endsWith('.DS_Store') })
   const deben = ['index.html', 'ui/base.js', 'ui/app.js', 'ldraw/catalogo.json', 'ldraw/minifigs.mpd', 'ldraw/LICENSE-LDraw.txt',
     'vendor/three.min.js', 'vendor/LDrawLoader.js', 'vendor/LICENSE-three.txt', 'vendor/LICENSE-Poppins-OFL.txt']
   for (const f of deben) if (!fs.existsSync(path.join(dest, f))) throw new Error(`Falta en los recursos: oficina/${f}`)

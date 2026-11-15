@@ -40,7 +40,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
   var plataforma = (window.oficinaApp && window.oficinaApp.plataforma) || 'darwin';
   App.nativo = {
     hay: !!puente,
-    /* «en Finder» (Mac, app Swift o Electron) o «en el Explorador» (Windows) */
+    /* «en Finder» (Mac) o «en el Explorador» (Windows) */
     enExplorador: plataforma === 'win32' ? 'en el Explorador' : plataforma === 'darwin' ? 'en Finder' : 'en la carpeta',
     /* abre un archivo o carpeta con la app predeterminada del sistema (solo rutas dentro de la oficina o vínculos) */
     abrir: function (ruta) { if (puente) puente.postMessage({ accion: 'abrir', ruta: ruta }); },
