@@ -110,6 +110,7 @@ struct PermisosTests {
         let act = try #require(await b.oficinas.activa())
         var ctx = Permisos.contexto(act, agente: try #require(act.oficina.agente("betty")))
         ctx.mcpUrl = await b.mcp.url()   // el chat suma el servidor MCP propio (Fase 4)
+        ctx.preguntar = true             // y, con la persona presente, pide permiso en vivo
         let esperado = Permisos.argumentos(sb.config(), oficina: ctx, agente: "betty", mensaje: "--help", sid: U.a, flag: "--session-id")
         #expect(sb.llamadas == [esperado])
         #expect(sb.llamadas.first?.suffix(2) == ["--", "--help"])

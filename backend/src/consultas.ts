@@ -4,7 +4,7 @@
 // Otros módulos (coordinador, acciones, creador) agregan sus herramientas al servidor con
 // `mcpDe(s)?.registrarHerramientas(...)` desde su `instalar`.
 import { ClaudeError } from './claude-runner.js'
-import type { Obj } from './json.js'
+import { esObjeto, type Obj } from './json.js'
 import type { HQLog } from './log.js'
 import { MCPServidor } from './mcp-servidor.js'
 import {
@@ -12,6 +12,7 @@ import {
 } from './mcp-protocolo.js'
 import { OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
 import { Instrucciones, dirsVinculos } from './permisos.js'
+import { PermisosVivos } from './permisos-vivos.js'
 import type { ClaudeRunner } from './claude-runner.js'
 import { no405, type Resp } from './router.js'
 import type { MCPChat } from './rutas-chat.js'
@@ -116,7 +117,7 @@ export class ConsultasMCP {
   private readonly creador: FabricaHerramientas[] = []
 
   /** `timeout`: segundos por consulta (120 por defecto; `HQ_CONSULTA_TIMEOUT` en el entorno lo cambia). */
-  constructor(private readonly s: Servicios, readonly tokens: MCPTokens, readonly timeout = 120) {}
+  constructor(private readonly s: Servicios, readonly tokens: MCPTokens, readonly timeout = 120, readonly permisos: PermisosVivos = new PermisosVivos()) {}
 
   private get store() { return this.s.store }
   private get runner(): ClaudeRunner { return this.s.runner }
@@ -143,6 +144,16 @@ export class ConsultasMCP {
       if (h) partes.push(h)
     }
     return new HerramientasCompuestas(partes)
+  }
+
+  /** `pedir_permiso` (lo llama claude por `--permission-prompt-tool`, no el agente): espera a la persona. */
+  async pedirPermiso(token: string, ident: IdentidadMCP, args: Obj): Promise<MCPResultado> {
+    const h = (typeof args.tool_name === 'string' ? args.tool_name : '').trim()
+    const input: Obj = esObjeto(args.input) ? args.input : {}
+    if (h === '') return MCPResultados.ok(PermisosVivos.respuesta('rechazar', input))
+    const d = await this.permisos.pedir({ token, identidad: ident, herramienta: h, input })
+    this.log.info(`permiso agente=${ident.agente} herramienta=${h} decision=${d ?? 'sin respuesta'}`)
+    return MCPResultados.ok(PermisosVivos.respuesta(d, input))
   }
 
   colegas(id: IdentidadMCP): MCPResultado {
@@ -199,6 +210,13 @@ export class ConsultasMCP {
   }
 }
 
+export const nombrePermiso = 'pedir_permiso'
+export const definicionPermiso: Obj = {
+  name: nombrePermiso,
+  description: 'Uso interno de la oficina para pedirle permiso a la persona. No la llames vos: la usa Claude Code solo.',
+  inputSchema: { type: 'object', properties: { tool_name: { type: 'string' }, input: { type: 'object' }, tool_use_id: { type: 'string' } }, required: ['tool_name', 'input'] },
+}
+
 /** Las herramientas de `hq` atadas a un token. */
 export class HerramientasHQ implements MCPHerramientas {
   constructor(private readonly consultas: ConsultasMCP, private readonly token: string, private readonly identidad: IdentidadMCP) {}
@@ -218,10 +236,12 @@ export class HerramientasHQ implements MCPHerramientas {
           required: ['colega', 'pregunta'],
         },
       },
+      ...(this.identidad.interactivo ? [definicionPermiso] : []),
     ]
   }
 
   async llamar(nombre: string, argumentos: Obj): Promise<MCPResultado | undefined> {
+    if (nombre === nombrePermiso && this.identidad.interactivo) return this.consultas.pedirPermiso(this.token, this.identidad, argumentos)
     switch (nombre) {
       case 'colegas': return this.consultas.colegas(this.identidad)
       case 'consultar': return this.consultas.consultar(this.token, this.identidad, argumentos)
@@ -235,13 +255,17 @@ export class HerramientasHQ implements MCPHerramientas {
 /** Lo que el hueco `mcp` expone a los demás módulos. */
 export class ServicioMCP implements MCPChat {
   readonly tokens = new MCPTokens()
+  /** Pedidos de permiso en vivo de los chats (`pedir_permiso`). */
+  readonly permisos: PermisosVivos
   readonly consultas: ConsultasMCP
   readonly servidor: MCPServidor
 
   constructor(s: Servicios) {
     const t = Number((s.env.HQ_CONSULTA_TIMEOUT ?? '').trim())
     const timeout = (s.env.HQ_CONSULTA_TIMEOUT ?? '').trim() !== '' && Number.isFinite(t) ? t : 120
-    this.consultas = new ConsultasMCP(s, this.tokens, timeout)
+    this.permisos = new PermisosVivos({ env: s.env })
+    this.permisos.alCambiar(() => s.runner.actividad.tocar())
+    this.consultas = new ConsultasMCP(s, this.tokens, timeout, this.permisos)
     this.servidor = new MCPServidor(this.tokens, (token, id) => this.consultas.herramientas(token, id), s.log)
   }
 
@@ -249,8 +273,9 @@ export class ServicioMCP implements MCPChat {
   registrarHerramientas(fabrica: FabricaHerramientas, para: 'resto' | 'creador' = 'resto') { this.consultas.registrarHerramientas(fabrica, para) }
 
   url() { return this.servidor.url() }
-  emitir(p: { oficina: string; agente: string; sid: string; perfil: string }) { return this.tokens.emitir(p) }
+  emitir(p: { oficina: string; agente: string; sid: string; perfil: string; interactivo?: boolean }) { return this.tokens.emitir(p) }
   revocar(token: string) { this.tokens.revocar(token) }
+  cancelarPermisos(token: string) { this.permisos.cancelar(token) }
 }
 
 /** El servicio MCP (undefined hasta que se instala el módulo de consultas). */

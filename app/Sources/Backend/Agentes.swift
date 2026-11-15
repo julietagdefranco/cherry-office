@@ -275,6 +275,8 @@ extension Oficinas {
         public var prompt: String?, description: String?, chips: [String]?, modelo: String?, brief: String?
         /// Si la clave viene, reemplaza; una lista vacía (o límites sin ítems) borra.
         public var limites: LimitesAgente?, conectores: [ConectorAsignado]?, permisos: [String]?
+        /// Permisos guardados con «Siempre» (solo se pueden quitar o reemplazar: los agrega `agregarReglas`).
+        public var reglas: [String]?
         static func desde(_ d: [String: Any]) throws -> CambiosAgente {
             var c = CambiosAgente()
             c.nombre = try Validar.texto(d["nombre"], "nombre", max: 80, obligatorio: false)
@@ -289,6 +291,10 @@ extension Oficinas {
             c.limites = try NuevoAgente.limitesValidos(d["limites"])
             c.conectores = try NuevoAgente.conectoresValidos(d["conectores"])
             c.permisos = try NuevoAgente.permisosValidos(d["permisos"])
+            if d["reglas"] != nil, !(d["reglas"] is NSNull), let r = try LecturaAPI.lista(d["reglas"], "reglas") {
+                try ValidarAgenteExtra.reglas(r)
+                c.reglas = r
+            }
             return c
         }
     }
@@ -307,6 +313,7 @@ extension Oficinas {
         if let v = c.limites { o.agentes[i].limites = v.vacio ? nil : v }
         if let v = c.conectores { o.agentes[i].conectores = v.isEmpty ? nil : v }
         if let v = c.permisos { o.agentes[i].permisos = v.isEmpty ? nil : v }
+        if let v = c.reglas { o.agentes[i].reglas = v.isEmpty ? nil : v }
         if var av = c.avatar {
             if av.semilla == nil { av.semilla = o.agentes[i].avatar?.semilla ?? id }
             o.agentes[i].avatar = av
@@ -336,6 +343,20 @@ extension Oficinas {
         }
         try OficinaStore.escribir(o, carpeta: a.carpeta)
         return (o.agentes[i], OficinaActiva(carpeta: a.carpeta, oficina: o))
+    }
+
+    /// Suma reglas de «Siempre» a un agente de la oficina activa (sin repetir). Devuelve las reglas que quedaron.
+    @discardableResult
+    public func agregarReglas(_ id: String, _ nuevas: [String]) throws -> [String] {
+        let a = try requerirActiva()
+        var o = a.oficina
+        guard let i = o.agentes.firstIndex(where: { $0.id == id }) else { throw ErrorAPI(404, "No existe ese agente.") }
+        var rs = o.agentes[i].reglas ?? []
+        for r in nuevas where !rs.contains(r) { rs.append(r) }
+        try ValidarAgenteExtra.reglas(rs)
+        o.agentes[i].reglas = rs.isEmpty ? nil : rs
+        try OficinaStore.escribir(o, carpeta: a.carpeta)
+        return rs
     }
 
     /// Detalle editable: la definición, `description`, `prompt` (sin la sección de memoria) y `modelo` del `.md`.

@@ -68,6 +68,8 @@ public final class Backend: Sendable {
         self.oficinas = oficinas
         let mcp = MCPServidor(store: store, runner: runner, log: log, env: env)
         self.mcp = mcp
+        let actividad = runner.actividad
+        mcp.permisos.alCambiar { actividad.tocar() }
         let programador = Programador(store: store, runner: runner, oficinas: oficinas, config: cfg, log: log, mcp: mcp, env: env)
         self.programador = programador
         let motor = MotorFlujos(store: store, runner: runner, oficinas: oficinas, programador: programador, log: log, env: env)

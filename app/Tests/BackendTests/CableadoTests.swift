@@ -68,12 +68,13 @@ struct CableadoTests {
         #expect(a.suffix(2) == ["--", "m"])
     }
 
-    @Test("un agente común: dontAsk y la veda de los conectores de claude.ai")
+    @Test("un agente común en un chat: pide permiso en vivo (modo default) y la veda de los conectores de claude.ai")
     func agenteComun() async throws {
         let f = try await fix()
         _ = await chat(f.b, agent: "marce", message: "hola", session: U.a)
         let l = try #require(f.sb.llamadas.last)
-        #expect(Sandbox.valor(l, "--permission-mode") == "dontAsk")
+        #expect(Sandbox.valor(l, "--permission-mode") == "default")
+        #expect(Sandbox.valor(l, "--permission-prompt-tool") == "mcp__hq__pedir_permiso")
         #expect(Sandbox.valor(l, "--disallowedTools") == "mcp__claude_ai_*")
         #expect(!l.contains("--append-system-prompt"))
     }
@@ -86,6 +87,9 @@ struct CableadoTests {
         #expect(Permisos.entorno(ctx).isEmpty)
         ctx.permitidas = ["mcp__claude_ai_Gmail__search_threads"]
         #expect(Permisos.entorno(ctx) == ["MCP_CONNECTION_NONBLOCKING": "false"])
+        // pidiendo permiso en vivo, claude espera a la persona más de los 60 s por defecto
+        ctx.preguntar = true; ctx.mcpUrl = "http://127.0.0.1:1/mcp"
+        #expect(Permisos.entorno(ctx)["MCP_TOOL_TIMEOUT"] == Permisos.esperaHerramientaMCP)
     }
 
     @Test("entorno: MCP_CONNECTION_NONBLOCKING=false llega al proceso hijo de ejecutarChat (sin conectores no se toca)")

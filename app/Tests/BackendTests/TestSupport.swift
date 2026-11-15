@@ -28,6 +28,8 @@ import Testing
 ///   consulta  (--agent, "consulta de un colega")             -> "Mi mirada de <agente> sobre la consulta." (costo 0.03)
 ///   CONSULTAR:<colega> [x4] (en un chat) -> llama por HTTP a `consultar` del servidor MCP (URL de --mcp-config, token de
 ///                         $HQ_MCP_TOKEN); guarda las respuestas en `mcp.<agente>.out`, el token en `token.log` y la URL en `url.log`
+///   PERMISO:<comando> (en un chat) -> como claude con --permission-prompt-tool: llama a `pedir_permiso` (Bash, ese comando),
+///                         espera la respuesta y la guarda en `mcp.<agente>.out` (token en `token.log`, URL en `url.log`)
 ///   CREADOR_LLAMAR (en un chat del Creador) -> lee `creador.calls` (una línea JSON `{name, arguments}` por llamada) y hace un
 ///                         POST `tools/call` al servidor MCP por cada una, igual que CONSULTAR (URL de --mcp-config, token de
 ///                         $HQ_MCP_TOKEN). Las respuestas JSON-RPC van a `creador.out`, una por línea. Se arma con
@@ -183,6 +185,21 @@ final class Sandbox: @unchecked Sendable {
         echo >> "$D/mcp.$agent.out"
       done
       echo "{\"type\":\"result\",\"result\":\"consulte\",\"is_error\":false,\"total_cost_usd\":0.01}"
+      fin; exit 0
+    fi
+    if [[ "$msg" == *PERMISO:* ]]; then
+      # como claude con --permission-prompt-tool: llama a `pedir_permiso` del servidor MCP (Bash con el comando que sigue
+      # a PERMISO:) y espera la respuesta; la guarda en `mcp.<agente>.out` (token en token.log, URL en url.log)
+      cmd="${msg#*PERMISO:}"
+      cfg=""; prev=""
+      for a in "$@"; do if [[ "$prev" == "--mcp-config" ]]; then cfg="$a"; fi; prev="$a"; done
+      url="$(echo "$cfg" | grep -o 'http://127[^"]*')"
+      echo "$HQ_MCP_TOKEN" >> "$D/token.log"
+      echo "$url" >> "$D/url.log"
+      body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"pedir_permiso\",\"arguments\":{\"tool_name\":\"Bash\",\"input\":{\"command\":\"$cmd\",\"description\":\"Prueba\"},\"tool_use_id\":\"toolu_1\"}}}"
+      curl -s -m 30 -H "Authorization: Bearer $HQ_MCP_TOKEN" -H 'Content-Type: application/json' -d "$body" "$url" >> "$D/mcp.$agent.out"
+      echo >> "$D/mcp.$agent.out"
+      echo "{\"type\":\"result\",\"result\":\"permiso pedido\",\"is_error\":false,\"total_cost_usd\":0.01}"
       fin; exit 0
     fi
     if [[ "$msg" == *CREADOR_LLAMAR* ]]; then

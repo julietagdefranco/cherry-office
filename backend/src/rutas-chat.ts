@@ -9,6 +9,8 @@ import { ArchivosEntrega, TextoEntrega, type Entregas } from './entregas.js'
 import { esObjeto, maxBody, objeto, type Obj } from './json.js'
 import type { HQLog } from './log.js'
 import type { Oficinas } from './oficinas.js'
+import type { PermisosVivos } from './permisos-vivos.js'
+import { pedidoJSON, decisionesPermiso, type DecisionPermiso } from './permisos-vivos.js'
 import { argumentos, contexto, entorno, variableTokenMCP, type FuenteCatalogo } from './permisos.js'
 import { no405, type Resp, type RutaNucleo } from './router.js'
 import type { InfoClaude } from './rutas-oficinas.js'
@@ -21,8 +23,12 @@ export const maxMensaje = 100_000
 /** Servidor MCP propio (consultas entre agentes): lo enchufa ese módulo. Sin él, el chat corre sin consultas. */
 export interface MCPChat {
   url(): Promise<string | undefined>
-  emitir(p: { oficina: string; agente: string; sid: string; perfil: string }): string
+  emitir(p: { oficina: string; agente: string; sid: string; perfil: string; interactivo?: boolean }): string
   revocar(token: string): void
+  /** Rechaza los pedidos de permiso pendientes de ese token. */
+  cancelarPermisos?(token: string): void
+  /** Pedidos de permiso pendientes de una oficina. */
+  permisos?: PermisosVivos
 }
 
 export type DepsChat = {
@@ -146,12 +152,14 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const mcp = d.mcp?.()
     const mcpUrl = mcp ? await mcp.url() : undefined
     if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
+    // la persona está en el chat: lo que el agente no tiene permitido se le pregunta (tarjeta en la oficina)
+    ctx.preguntar = true
 
     let resultado: Resp
     try {
       resultado = await runner.conCarrilDe(carpeta, agente, async (): Promise<Resp> => {
         const envExtra: Record<string, string> = { ...entorno(ctx) }
-        if (mcpUrl !== undefined && mcp) envExtra[variableTokenMCP] = mcp.emitir({ oficina: carpeta, agente, sid, perfil: ctx.perfilMCP })
+        if (mcpUrl !== undefined && mcp) envExtra[variableTokenMCP] = mcp.emitir({ oficina: carpeta, agente, sid, perfil: ctx.perfilMCP, interactivo: true })
         try {
           store.asegurarSesion(sid, agente, carpeta)
           store.agregar(sid, 'u', mensaje)
@@ -194,7 +202,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           return [500, { error: t }]
         } finally {
           const tok = envExtra[variableTokenMCP]
-          if (tok !== undefined) mcp?.revocar(tok)
+          if (tok !== undefined) { mcp?.revocar(tok); mcp?.cancelarPermisos?.(tok) }
         }
       })
     } finally {
@@ -202,6 +210,28 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     }
     log.info(`chat agente=${agente} sid=${sid.slice(0, 8)} estado=${resultado[0]} seg=${((Date.now() - t0) / 1000).toFixed(1)}`)
     return resultado
+  }
+
+  /** `POST /api/permisos/<id>` `{decision: una_vez|siempre|rechazar}`: responde un pedido de permiso de un chat.
+   *  «siempre» guarda las reglas del pedido en el agente (oficina.json) antes de dejarlo pasar. */
+  function responderPermiso(id: string, body?: Buffer): Resp {
+    const act = oficinas.requerirActiva()
+    const b = objeto(body)
+    const dec = typeof b.decision === 'string' && (decisionesPermiso as string[]).includes(b.decision) ? (b.decision as DecisionPermiso) : undefined
+    if (dec === undefined) return [400, { error: '«decision» tiene que ser una_vez, siempre o rechazar.' }]
+    const vivos = d.mcp?.()?.permisos
+    const p = vivos?.pedido(act.carpeta, id.toLowerCase())
+    if (!vivos || !p) return [404, { error: 'Ese pedido de permiso ya no está (venció o el chat terminó).' }]
+    let reglas: string[] | undefined
+    if (dec === 'siempre') {
+      if (p.reglas.length === 0) return [400, { error: 'Esto solo se puede permitir una vez.' }]
+      reglas = oficinas.agregarReglas(p.agente, p.reglas)
+    }
+    if (!vivos.responder(act.carpeta, p.id, dec)) return [404, { error: 'Ese pedido de permiso ya no está (venció o el chat terminó).' }]
+    log.info(`permiso agente=${p.agente} herramienta=${p.herramienta} respuesta=${dec}`)
+    const r: Obj = { ok: true }
+    if (reglas) r.reglas = reglas
+    return [200, r]
   }
 
   return async ({ method, partes, query, body }) => {
@@ -212,14 +242,16 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (seccion === 'actividad' && n === 2) {
       if (method !== 'GET') return no405
       const act = oficinas.activa()
-      if (!act) return [200, { agentes: {}, version: 0, avisos: [], entregasSinRevisar: 0, corridas: [], creadorVersion: 0 }]
+      if (!act) return [200, { agentes: {}, version: 0, avisos: [], entregasSinRevisar: 0, corridas: [], creadorVersion: 0, permisos: [] }]
       const r = runner.actividad.json(act.carpeta)
       r.avisos = avisos.pendientes(act.carpeta).map(avisoJSON)
       r.entregasSinRevisar = entregas.sinRevisar(act.carpeta)
       r.corridas = d.corridas?.(act.carpeta) ?? []
       r.creadorVersion = d.creadorVersion?.(act.carpeta) ?? 0
+      r.permisos = (d.mcp?.()?.permisos?.pendientes(act.carpeta) ?? []).map(pedidoJSON)
       return [200, r]
     }
+    if (seccion === 'permisos' && n === 3) return method === 'POST' ? responderPermiso(a2!, body) : no405
     if (seccion === 'avisos' && n === 2) {
       if (method !== 'GET') return no405
       const act = oficinas.requerirActiva()

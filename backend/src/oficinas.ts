@@ -303,6 +303,21 @@ export class Oficinas {
     return [r, new OficinaActiva(a.carpeta, o)]
   }
 
+  /** Suma reglas de «Siempre» a un agente de la oficina activa (sin repetir). Devuelve las reglas que quedaron. */
+  agregarReglas(id: string, nuevas: string[]): string[] {
+    const [rs] = this.modificar((o) => {
+      const ag = o.agentes.find((x) => x.id === id)
+      if (!ag) throw new ErrorAPI(404, 'No existe ese agente.')
+      const rs = [...(ag.reglas ?? [])]
+      for (const r of nuevas) if (!rs.includes(r)) rs.push(r)
+      ValidarAgenteExtra.reglas(rs)
+      if (rs.length === 0) delete ag.reglas
+      else ag.reglas = rs
+      return rs
+    })
+    return rs
+  }
+
   editar(nombre?: string, duenio?: string): OficinaActiva {
     const n = nombre === undefined ? undefined : nombre.trim()
     if (n !== undefined && (n === '' || largo(n) > 80)) throw new ErrorAPI(400, 'El nombre de la oficina es obligatorio (hasta 80 caracteres).')

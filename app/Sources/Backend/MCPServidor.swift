@@ -53,6 +53,8 @@ enum HTTPMinimo {
 public final class MCPServidor: @unchecked Sendable {
     let tokens = MCPTokens()
     let consultas: ConsultasMCP
+    /// Pedidos de permiso en vivo de los chats (`pedir_permiso`).
+    let permisos: PermisosVivos
     private let log: HQLog
     private let cola = DispatchQueue(label: "hq.mcp")
     private let lock = NSLock()
@@ -65,7 +67,8 @@ public final class MCPServidor: @unchecked Sendable {
          env: [String: String] = ProcessInfo.processInfo.environment) {
         self.log = log
         let t = timeoutConsulta ?? env["HQ_CONSULTA_TIMEOUT"].flatMap(TimeInterval.init) ?? 120
-        consultas = ConsultasMCP(store: store, runner: runner, log: log, tokens: tokens, timeout: t)
+        permisos = PermisosVivos(env: env)
+        consultas = ConsultasMCP(store: store, runner: runner, log: log, tokens: tokens, timeout: t, permisos: permisos)
         arrancar()
     }
 
