@@ -102,7 +102,7 @@ describe('Consultas entre agentes (MCP)', () => {
     expect((await rpc(url, 'inventado', 'tools/list')).status).toBe(401)
     const ok = await rpc(url, t, 'tools/list')
     expect(ok.status).toBe(200)
-    expect(lista(dict(ok.obj.result).tools).map((x) => str(x.name))).toEqual(['colegas', 'consultar'])
+    expect(lista(dict(ok.obj.result).tools).map((x) => str(x.name))).toEqual(['colegas', 'consultar', 'pedir_permiso'])   // el token de un chat es interactivo
 
     // GET (el sondeo SSE de claude) y otras rutas
     expect((await crudo(url, 'GET')).status).toBe(405)

@@ -8,6 +8,13 @@
 #
 # Las dos plataformas salen de la carcasa Electron (desktop/) con el backend TypeScript (backend/).
 # La versión sale de desktop/package.json.
+#
+# Actualizaciones automáticas: cada release lleva lo que leen las apps instaladas.
+# - Mac: Oficina-X-arm64.zip firmado con la clave EdDSA (secret SPARKLE_PRIVATE_KEY) y appcast.xml. Lo leen el
+#   actualizador propio de la app Electron (desktop/src/actualizaciones-mac.ts) y Sparkle en la 1.0 Swift, que así
+#   pasa sola a la app Electron.
+# - Windows (electron-updater): latest.yml y el .blockmap junto al .exe.
+# Las apps solo ven releases publicadas (no borradores): publicar la release es lo que la manda a todos.
 name: Release
 
 on:
@@ -22,24 +29,18 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # descargas de Electron y de las herramientas de electron-builder (NSIS, 7zip): van a la caché
+  ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+  # sign_update: firma EdDSA del .zip de Mac (la misma herramienta y formato que usaba la app Swift)
+  SPARKLE_VERSION: "2.10.1"
+
 jobs:
-  instalador:
-    name: ${{ matrix.nombre }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { nombre: macOS (arm64), os: macos-latest, builder: --mac --arm64, archivo: "Oficina-{v}-arm64.dmg", tests: true }
-          - { nombre: Windows (x64), os: windows-latest, builder: --win --x64, archivo: "Oficina-Setup-{v}.exe", tests: false }
-    runs-on: ${{ matrix.os }}
+  mac:
+    name: macOS (arm64)
+    runs-on: macos-latest
     timeout-minutes: 30
-    defaults:
-      run:
-        shell: bash
-    env:
-      # descargas de Electron y de las herramientas de electron-builder (NSIS, 7zip): van a la caché
-      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
     steps:
       - uses: actions/checkout@v4
 
@@ -47,7 +48,152 @@ jobs:
         id: version
         run: |
           VERSION="$(node -p "require('./desktop/package.json').version")"
-          [ -n "$VERSION" ] || { echo "::error::No pude leer la versión de desktop/package.json."; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de desktop/package.json ($VERSION)."
+            exit 1
+          fi
+          # CFBundleVersion entero y creciente (1.2.3 -> 10203): Sparkle en la 1.0 Swift (build 10) lo compara con el suyo
+          BUILD="$(node -p "const [a,b,c]=require('./desktop/package.json').version.split('-')[0].split('.').map(Number); a*10000+b*100+c")"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Caché de Electron
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: electron-${{ runner.os }}-${{ hashFiles('desktop/package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Dependencias
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix desktop
+
+      - name: Tipos
+        run: |
+          (cd backend && npx tsc --noEmit)
+          (cd desktop && npx tsc -p .)
+
+      # En Windows y Linux los corre backend.yml en cada cambio; acá, en Mac, antes de publicar.
+      - name: Tests del backend
+        working-directory: backend
+        run: npx vitest run
+
+      - name: Compilar y empaquetar
+        working-directory: desktop
+        run: |
+          node scripts/build.mjs --recursos
+          npx electron-builder --mac --arm64 --publish never -c.buildVersion=${{ steps.version.outputs.build }}
+
+      - name: Instalador
+        id: dmg
+        run: |
+          NAME="Oficina-${{ steps.version.outputs.version }}-arm64.dmg"
+          [ -f "desktop/release/$NAME" ] || { echo "::error::No se generó desktop/release/$NAME"; exit 1; }
+          codesign --verify --deep --strict desktop/release/mac-arm64/Oficina.app
+          SHA="$(shasum -a 256 "desktop/release/$NAME" | cut -d' ' -f1)"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          { echo "### $NAME"; echo; echo "SHA-256: \`$SHA\`"; } >> "$GITHUB_STEP_SUMMARY"
+
+      # El actualizador baja el .zip (no el .dmg) y lo verifica con la firma EdDSA que va en appcast.xml.
+      - name: Paquete de actualización
+        id: zip
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "::error::Falta el secret SPARKLE_PRIVATE_KEY: sin él la release no le llega a las Mac por actualización automática."
+              exit 1
+            fi
+            echo "::warning::Sin SPARKLE_PRIVATE_KEY: no se arma el paquete de actualización."
+            echo "listo=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ZIP="Oficina-$VERSION-arm64.zip"
+          (cd desktop/release/mac-arm64 && ditto -c -k --sequesterRsrc --keepParent Oficina.app "../$ZIP")
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          mkdir -p "$RUNNER_TEMP/sparkle" && tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          KEY="$RUNNER_TEMP/sparkle.key"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY"
+          FIRMA="$("$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file "$KEY" "desktop/release/$ZIP")"
+          rm -f "$KEY"
+          [ -n "$FIRMA" ] || { echo "::error::sign_update no devolvió la firma."; exit 1; }
+          FECHA="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+          cat > desktop/release/appcast.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Oficina</title>
+              <item>
+                <title>Oficina $VERSION</title>
+                <pubDate>$FECHA</pubDate>
+                <sparkle:version>$BUILD</sparkle:version>
+                <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+                <sparkle:fullReleaseNotesLink>https://github.com/$REPO/releases/tag/$TAG</sparkle:fullReleaseNotesLink>
+                <enclosure url="https://github.com/$REPO/releases/download/$TAG/$ZIP" type="application/octet-stream" $FIRMA/>
+              </item>
+            </channel>
+          </rss>
+          EOF
+          xmllint --noout desktop/release/appcast.xml
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "listo=1" >> "$GITHUB_OUTPUT"
+
+      - name: Guardar como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.dmg.outputs.name }}
+          path: |
+            desktop/release/${{ steps.dmg.outputs.name }}
+            desktop/release/Oficina-*-arm64.zip
+            desktop/release/appcast.xml
+          retention-days: 14
+
+      - name: Adjuntar a la release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          FILE: desktop/release/${{ steps.dmg.outputs.name }}
+          ZIP: desktop/release/${{ steps.zip.outputs.zip }}
+        run: |
+          # el job de Windows corre en paralelo: si el otro ya creó la release, solo se suben los archivos
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "Oficina $VERSION" \
+              --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true
+          fi
+          gh release upload "$TAG" "$FILE" "$ZIP" desktop/release/appcast.xml --clobber
+
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versión
+        id: version
+        run: |
+          VERSION="$(node -p "require('./desktop/package.json').version")"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
             echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de desktop/package.json ($VERSION)."
@@ -79,32 +225,31 @@ jobs:
           (cd backend && npx tsc --noEmit)
           (cd desktop && npx tsc -p .)
 
-      # En Windows y Linux los corre backend.yml en cada cambio; acá, en Mac, antes de publicar.
-      - name: Tests del backend
-        if: matrix.tests
-        working-directory: backend
-        run: npx vitest run
-
       - name: Compilar y empaquetar
         working-directory: desktop
         run: |
           node scripts/build.mjs --recursos
-          npx electron-builder ${{ matrix.builder }} --publish never
+          npx electron-builder --win --x64 --publish never
 
       - name: Instalador
-        id: inst
+        id: exe
         run: |
-          NAME="$(echo '${{ matrix.archivo }}' | sed "s/{v}/${{ steps.version.outputs.version }}/")"
-          [ -f "desktop/release/$NAME" ] || { echo "::error::No se generó desktop/release/$NAME"; exit 1; }
-          SHA="$(node -e "const c=require('crypto'),f=require('fs');console.log(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))" "desktop/release/$NAME")"
+          NAME="Oficina-Setup-${{ steps.version.outputs.version }}.exe"
+          for f in "$NAME" "$NAME.blockmap" latest.yml; do
+            [ -f "desktop/release/$f" ] || { echo "::error::No se generó desktop/release/$f"; exit 1; }
+          done
+          SHA="$(sha256sum "desktop/release/$NAME" | cut -d' ' -f1)"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           { echo "### $NAME"; echo; echo "SHA-256: \`$SHA\`"; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Guardar como artefacto
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.inst.outputs.name }}
-          path: desktop/release/${{ steps.inst.outputs.name }}
+          name: ${{ steps.exe.outputs.name }}
+          path: |
+            desktop/release/${{ steps.exe.outputs.name }}
+            desktop/release/${{ steps.exe.outputs.name }}.blockmap
+            desktop/release/latest.yml
           retention-days: 14
 
       - name: Adjuntar a la release
@@ -113,11 +258,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
-          FILE: desktop/release/${{ steps.inst.outputs.name }}
+          FILE: desktop/release/${{ steps.exe.outputs.name }}
         run: |
-          # los dos instaladores se arman en paralelo: si el otro ya creó la release, solo se sube el archivo
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "Oficina $VERSION" \
               --notes "Borrador generado por el build automático. Completar las notas antes de publicar." || true
           fi
-          gh release upload "$TAG" "$FILE" --clobber
+          # latest.yml y el .blockmap: los lee electron-updater en las apps instaladas
+          gh release upload "$TAG" "$FILE" "$FILE.blockmap" desktop/release/latest.yml --clobber

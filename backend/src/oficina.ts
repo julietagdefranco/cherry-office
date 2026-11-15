@@ -12,7 +12,7 @@ import { esObjeto, type Obj } from './json.js'
 import { jsonSwift } from './json-swift.js'
 import { decodificarFlujo, decodificarRegla, type FlujoDef, type Regla } from './modelo-flujos.js'
 import { decodificarTarea, type TareaProgramada } from './tareas.js'
-import { Slug, Validar, largo } from './validar.js'
+import { Slug, Validar, largo, prefijo } from './validar.js'
 
 export type Avatar = Partial<Record<(typeof clavesAvatar)[number], string>>
 export const clavesAvatar = ['semilla', 'pelo', 'colorPelo', 'cara', 'torso', 'colorTorso', 'colorPiernas', 'colorPiel',
@@ -38,6 +38,9 @@ export type AgenteDef = {
   conectores?: ConectorAsignado[]
   /** Hoy el único valor válido es "coordinador". */
   permisos?: string[]
+  /** Reglas de `--allowedTools` que la persona le dio con «Siempre» al responder un pedido de permiso
+   *  (`Bash(git pull:*)`, `Edit(//ruta/**)`, `Write(//ruta/**)`). Ver permisos-vivos.ts. */
+  reglas?: string[]
 }
 
 /** Quién puede leer una carpeta vinculada: "oficina", {departamentos: [...]} o {agentes: [...]}. */
@@ -104,6 +107,7 @@ function decodificarAgente(v: unknown): AgenteDef {
       return { servidor: str(d.servidor), leer: optStrs(d.leer) ?? [], actuar: optStrs(d.actuar) ?? [] }
     })),
     permisos: optStrs(o.permisos),
+    reglas: optStrs(o.reglas),
   })
 }
 
@@ -187,6 +191,34 @@ export const ValidarAgenteExtra = {
     }
   },
 
+  maxReglas: 40,
+  maxLargoRegla: 300,
+
+  /** Reglas guardadas con «Siempre»: `Bash(<algo>)`, `Edit(/<ruta absoluta>)` o `Write(/<ruta absoluta>)`, sin saltos de
+   *  línea ni caracteres de control. `Bash` solo (sin paréntesis) no vale: sería permitir cualquier comando. */
+  reglas(rs: string[]) {
+    if (rs.length > this.maxReglas) throw new ErrorAPI(400, `Máximo ${this.maxReglas} permisos guardados por agente.`)
+    const vistas = new Set<string>()
+    for (const r of rs) {
+      if (!this.reglaValida(r)) throw new ErrorAPI(400, `Permiso guardado inválido: «${prefijo(r, 80)}».`)
+      if (vistas.has(r)) throw new ErrorAPI(400, `Permiso guardado repetido: «${prefijo(r, 80)}».`)
+      vistas.add(r)
+    }
+  },
+
+  reglaValida(r: string): boolean {
+    if (largo(r) > this.maxLargoRegla || !r.endsWith(')')) return false
+    for (const c of r) { const v = c.codePointAt(0)!; if (v < 0x20 || v === 0x7f) return false }
+    for (const [pref, abs] of [['Bash(', false], ['Edit(', true], ['Write(', true]] as const) {
+      if (!r.startsWith(pref)) continue
+      const dentro = r.slice(pref.length, -1)
+      if (dentro.trim() === '') return false
+      if (abs && (!dentro.startsWith('/') || dentro.includes('..'))) return false
+      return true
+    }
+    return false
+  },
+
   mision(m: string | undefined) {
     if (m !== undefined && largo(m) > this.maxMision) throw new ErrorAPI(400, `La misión es demasiado larga (máximo ${this.maxMision} caracteres).`)
   },
@@ -218,6 +250,7 @@ export function validarOficina(o: Oficina) {
     if (a.limites) ValidarAgenteExtra.limites(a.limites)
     if (a.conectores) ValidarAgenteExtra.conectores(a.conectores)
     if (a.permisos) ValidarAgenteExtra.permisos(a.permisos)
+    if (a.reglas) ValidarAgenteExtra.reglas(a.reglas)
   }
   const vins = new Set<string>()
   for (const v of o.vinculos ?? []) {

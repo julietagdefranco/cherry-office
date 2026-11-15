@@ -68,6 +68,28 @@ La versión sale de `desktop/package.json` (subirla también en `desktop/package
 `.github/workflows/release.yml` corre los tests, arma el `.dmg` y el `.exe` y los adjunta a la release de esa etiqueta.
 Si la release no existe, la crea como borrador para completar las notas.
 
+### Actualizaciones automáticas
+Las apps instaladas se actualizan solas desde las releases **publicadas** (los borradores no cuentan): publicar la
+release es lo que la manda a todos. Las dos buscan al abrir y cada 6 horas, y tienen «Buscar actualizaciones…» en el
+menú (Mac: menú Oficina; Windows: Ayuda). `HQ_SIN_ACTUALIZACIONES=1` las apaga.
+- **Mac (actualizador propio, `desktop/src/actualizaciones-mac.ts`):** lee `appcast.xml` de la última release, baja
+  `Oficina-<versión>-arm64.zip`, verifica la firma EdDSA contra la clave pública del proyecto (esa firma reemplaza al
+  Developer ID que la app no tiene), cambia la .app al salir y, con «Reiniciar ahora», la vuelve a abrir. Como la baja
+  la propia app y no el navegador, macOS no vuelve a pedir «Abrir igualmente». No puede instalarse sola si la app corre
+  desde el `.dmg` o sin permiso de escritura en su carpeta: en ese caso avisa y ofrece bajarla a mano.
+- **Puente desde la 1.0 Swift:** la 1.0.0 de Mac era la app Swift con Sparkle 2, que lee el mismo `appcast.xml` y
+  pasa sola a la app Electron. Para eso la app Electron lleva la misma `SUPublicEDKey` en su `Info.plist`
+  (`build.mac.extendInfo` en `desktop/package.json`) y el workflow le pone un `CFBundleVersion` entero que crece con la
+  versión (1.2.3 → 10203), mayor que el build 10 de la 1.0.
+- **Windows (electron-updater):** lee `latest.yml` de la última release, baja el `.exe` en segundo plano (solo lo que
+  cambió, con el `.blockmap`) y lo instala al salir o con «Reiniciar ahora».
+- El workflow necesita el secret **`SPARKLE_PRIVATE_KEY`** (la clave privada EdDSA). Sin él, una etiqueta falla en vez
+  de sacar una release que las Mac no pueden recibir. Si se pierde la clave, las Mac instaladas no aceptan más
+  actualizaciones y hay que reinstalar a mano: guardala también en un gestor de contraseñas.
+- La primera versión con actualizador hay que instalarla a mano una vez; de ahí en adelante, ya no. En Windows, la
+  1.0.0 se cae al abrir (el import de `electron-updater` quedaba `undefined` con esbuild), así que quien la tenga
+  tiene que instalar a mano la versión siguiente.
+
 ## El equipo de Próspera
 El repo nació como el equipo de agentes de Próspera (Betty, Don Armando, Marce, Doña Catalina, Patricia, Doña Sofía,
 Mario y Nicolás Mora). Siguen en `agentes/`, con su contexto en `contexto/`.

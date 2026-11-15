@@ -1,7 +1,7 @@
 {
   "name": "oficina",
   "productName": "Oficina",
-  "version": "0.7.1",
+  "version": "1.0.1",
   "private": true,
   "description": "Oficina: tu oficina de agentes de Claude (Mac y Windows). De acá salen el .dmg y el .exe de las releases.",
   "main": "dist/main.cjs",
@@ -9,6 +9,7 @@
     "@types/node": "^26.6.6",
     "electron": "^45.3.2",
     "electron-builder": "^26.18.0",
+    "electron-updater": "6.8.11",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
@@ -58,7 +59,10 @@
       "icon": "build/icon.png",
       "identity": "-",
       "minimumSystemVersion": "13.0",
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "SUPublicEDKey": "3lXavZJQZAaLrys0ULu1XQD/vj8CLcyxe4NP+QAWsx8="
+      }
     },
     "dmg": {
       "artifactName": "Oficina-${version}-arm64.dmg"
@@ -83,6 +87,14 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Oficina",
       "language": "3082"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "julietagdefranco",
+        "repo": "cherry-office",
+        "releaseType": "release"
+      }
+    ]
   }
 }

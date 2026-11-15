@@ -77,6 +77,9 @@ export class ActividadRegistro {
     this.version++
   }
 
+  /** Sube la versión sin cambiar nada (p. ej. llegó o se fue un pedido de permiso): el front vuelve a leer todo. */
+  tocar() { this.version++ }
+
   /** Reemplaza el texto de la tarea (cuando llega el resumen). */
   tarea(oficina: string, agente: string, token: string, texto: string) {
     const e = this.corridas.get(ActividadRegistro.clave(oficina, agente))?.get(token)

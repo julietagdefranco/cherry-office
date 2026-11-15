@@ -127,11 +127,11 @@ async function main() {
     fs.appendFileSync(p('url.log'), url + '\n')
     return { url, token }
   }
-  const post = (url, token, body) => new Promise((resolve) => {
+  const post = (url, token, body, espera = 20000) => new Promise((resolve) => {
     let u
     try { u = new URL(url) } catch { return resolve('') }
     const datos = Buffer.from(body)
-    const req = http.request({ host: u.hostname, port: u.port, path: u.pathname, method: 'POST', timeout: 20000,
+    const req = http.request({ host: u.hostname, port: u.port, path: u.pathname, method: 'POST', timeout: espera,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Content-Length': datos.length } }, (res) => {
       const partes = []
       res.on('data', (c) => partes.push(c))
@@ -152,6 +152,16 @@ async function main() {
       fs.appendFileSync(p(`mcp.${agent}.out`), (await post(url, token, body)) + '\n')
     }
     salida('{"type":"result","result":"consulte","is_error":false,"total_cost_usd":0.01}')
+    fin()
+    return 0
+  }
+  if (m.includes('PERMISO:')) {
+    // como claude con --permission-prompt-tool: llama a `pedir_permiso` (Bash con el comando que sigue a PERMISO:) y espera
+    const cmd = m.slice(m.indexOf('PERMISO:') + 'PERMISO:'.length)
+    const { url, token } = mcp()
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'pedir_permiso', arguments: { tool_name: 'Bash', input: { command: cmd, description: 'Prueba' }, tool_use_id: 'toolu_1' } } })
+    fs.appendFileSync(p(`mcp.${agent}.out`), (await post(url, token, body, 30000)) + '\n')
+    salida('{"type":"result","result":"permiso pedido","is_error":false,"total_cost_usd":0.01}')
     fin()
     return 0
   }

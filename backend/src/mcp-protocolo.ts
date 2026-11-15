@@ -95,6 +95,8 @@ export type IdentidadMCP = {
   sid: string
   /** agente | coordinador | creador: decide qué herramientas ofrece el servidor. */
   perfil: string
+  /** Chat con la persona presente: el token ofrece `pedir_permiso` (`--permission-prompt-tool`). */
+  interactivo?: boolean
 }
 
 /** Tokens por corrida: token (32 bytes aleatorios, hex) -> identidad y consultas que le quedan.
@@ -103,10 +105,10 @@ export class MCPTokens {
   static readonly consultasPorMensaje = 3
   private readonly tokens = new Map<string, { identidad: IdentidadMCP; restantes: number; usados: Map<string, number> }>()
 
-  emitir(p: { oficina: string; agente: string; sid: string; perfil?: string; consultas?: number }): string {
+  emitir(p: { oficina: string; agente: string; sid: string; perfil?: string; consultas?: number; interactivo?: boolean }): string {
     const t = randomBytes(32).toString('hex')
     this.tokens.set(t, {
-      identidad: { oficina: p.oficina, agente: p.agente, sid: p.sid, perfil: p.perfil ?? 'agente' },
+      identidad: { oficina: p.oficina, agente: p.agente, sid: p.sid, perfil: p.perfil ?? 'agente', interactivo: p.interactivo ?? false },
       restantes: p.consultas ?? MCPTokens.consultasPorMensaje,
       usados: new Map(),
     })

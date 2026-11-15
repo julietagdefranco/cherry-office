@@ -91,3 +91,32 @@ Apareció en Linux, con una oficina en `/home/…/Oficinas/Luis Inc./`: un paso 
   Code sobre rutas raras (los puntos al final son un truco conocido de Windows) que fuerza a preguntar, y en `-p` no hay a quién.
 - **Para la app:** `Oficinas.carpetaLibre` saca los puntos y espacios del final del nombre de la carpeta (el nombre de la oficina
   en `oficina.json` queda igual). Una oficina que ya existe con esa carpeta hay que renombrarla a mano y volver a abrirla.
+
+## Pedir permiso en vivo: `--permission-prompt-tool` (spike del 15/11/2026, claude 2.1.316, haiku)
+Idea: que el agente pida lo que no tiene (Bash, Edit fuera de sus notas) y la persona lo apruebe desde la app, como en Claude
+Code. Se probó con un servidor MCP stdio mínimo (`pedir_permiso`) que anota cada pedido y responde permitir o rechazar.
+Comando: `-p --tools Read,Bash,Edit,Write --permission-mode manual --permission-prompt-tool mcp__hq__pedir_permiso
+--allowedTools Read mcp__hq__pedir_permiso` (el flag no aparece en `claude --help`, pero anda).
+
+- **CONFIRMADO.** Lo que no está en `--allowedTools` llama a la herramienta con `{tool_name, input, tool_use_id}`: por ejemplo
+  `{"tool_name":"Bash","input":{"command":"touch nuevo.txt","description":"…"}}` o el `Edit` con `file_path`, `old_string` y
+  `new_string`. La herramienta responde con un texto JSON: `{"behavior":"allow","updatedInput":<input>}` o
+  `{"behavior":"deny","message":"…"}`.
+- **CONFIRMADO.** Con `allow`, el comando corre o el archivo se edita. Con `deny`, no pasa nada, el agente recibe el mensaje y
+  el pedido aparece en `permission_denials` de la salida JSON.
+- **CONFIRMADO.** Lo que ya está en `--allowedTools` no pregunta: con `Edit(//<ruta>/a.txt)` en la lista, el Edit pasó sin llamar
+  a la herramienta. O sea que «Siempre» se puede guardar como regla y la próxima vez no pregunta.
+- **CONFIRMADO.** Los comandos de solo lectura (`git status --short`) no preguntan: Claude Code ya los deja pasar.
+- **CONFIRMADO.** Con `--permission-mode dontAsk` la herramienta **no se llama**: todo lo que no está permitido se rechaza solo.
+  Para pedir permiso hay que dejar `dontAsk` y usar `manual` (el modo normal).
+- **CONFIRMADO.** Con el servidor por stdio, Claude esperó 150 s sin problema. **Con el servidor por HTTP (el `hq` de la app)
+  corta a los 60 s**: la herramienta devuelve «The operation timed out» y el agente sigue sin el permiso. Con
+  `MCP_TOOL_TIMEOUT=600000` en el entorno esperó los 90 s de la prueba y el comando corrió. La app pone `MCP_TOOL_TIMEOUT`
+  (15 min) en los chats que piden permiso (`Permisos.entorno`). Probado en la app con el claude real: tarjeta, espera de
+  más de un minuto, «Siempre», el comando corrió y la segunda vez pasó sin preguntar.
+- **NO VERIFICADO.** Que el caso de «carpetas que terminan en punto» (sección anterior), que hoy falla porque Claude Code fuerza a
+  preguntar, se resuelva pidiendo permiso con esta herramienta.
+- **Para la app:** cambiar `dontAsk` por `default` (el nombre viejo de `manual`, que las versiones nuevas también aceptan)
+  + `--permission-prompt-tool mcp__hq__pedir_permiso` en las corridas con persona presente. La herramienta del servidor `hq` muestra la tarjeta (una vez, siempre para este agente, rechazar), no
+  cuenta la espera dentro del timeout del turno y, si nadie responde, rechaza. Las corridas sin persona (tareas
+  programadas, lectura por rol) pueden seguir en `dontAsk`.

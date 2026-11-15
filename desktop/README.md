@@ -6,6 +6,7 @@ La app de Oficina en Mac y Windows: una carcasa Electron alrededor del backend T
 - `src/main.ts`: ventana, esquema `hq://app/` (estáticos + `/api/*` al router, en proceso), mensajes del front
   (`abrir`, `revelar`, `elegirCarpeta`, `elegirArchivo`, `login`…), notificaciones, insignia, bandeja y menú.
 - `src/preload.ts`: expone `window.webkit.messageHandlers.hq.postMessage` (lo que espera el front) y la plataforma.
+- `src/actualizaciones.ts`, `src/actualizaciones-mac.ts`: actualizaciones automáticas (ver el README de la raíz).
 - `src/abrir.ts`, `src/estaticos.ts`: qué se puede abrir y qué se sirve (listas blancas).
 - `src/onboarding.html`: la pantalla de «Falta Claude Code» / «Iniciá sesión».
 - `scripts/build.mjs`: esbuild a `dist/` (el backend va adentro); con `--recursos` arma `build/recursos/oficina`.
@@ -35,6 +36,9 @@ Ni el `.dmg` ni el `.exe` están firmados con un certificado.
   xattr -dr com.apple.quarantine "/Applications/Oficina.app"
   ```
 - **Windows:** SmartScreen avisa la primera vez («Más información» → «Ejecutar de todas formas»).
+
+Para probar el actualizador de Mac con un appcast y una clave propios: `HQ_ACTUALIZACIONES_FEED=<url del appcast>` y
+`HQ_ACTUALIZACIONES_CLAVE=<clave pública EdDSA en base64>`.
 
 Para firmar y notarizar en Mac más adelante, con un certificado Developer ID: sacar `identity` y poner
 `hardenedRuntime: true` en `build.mac` (con un `.plist` de entitlements que permita JIT a Electron), y darle a

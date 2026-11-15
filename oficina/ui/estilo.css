@@ -406,6 +406,28 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .avisos-banner kbd { margin-left: 6px; font: 600 10px/1 inherit; padding: 2px 5px; border: 1px solid var(--linea-fuerte); border-radius: 4px; color: var(--suave); }
 .persona.con-aviso .estado-dot { opacity: 1; background: var(--aviso); animation: none; }
 
+/* pedidos de permiso en vivo (permisos.js): arriba a la derecha de la maqueta */
+.permisos-pila { position: absolute; top: 14px; right: 14px; z-index: 9; display: flex; flex-direction: column; gap: 10px;
+  width: min(380px, calc(100% - 28px)); max-height: calc(100% - 28px); overflow: auto; }
+.permisos-pila:empty { display: none; }
+/* con el panel derecho abierto (chat, reunión…) y lugar de sobra, la pila se corre a su izquierda; si no entra entre la
+   barra lateral y el panel, queda arriba del panel (z-index mayor), que es urgente */
+@media (min-width: 1180px) { .derecho.abierto ~ .permisos-pila { right: calc(var(--derecho) + 14px); } }
+.permiso { background: var(--panel); border: 1px solid var(--linea); border-left: 3px solid var(--aviso); border-radius: 12px;
+  box-shadow: var(--sombra-alta); padding: 12px; display: flex; flex-direction: column; gap: 8px; animation: subir .15s ease; }
+.permiso-cab { display: flex; align-items: center; gap: 10px; }
+.permiso-cab .retrato-mini { width: 32px; height: 32px; border-radius: 50%; flex: none; }
+.permiso-cab div { display: flex; flex-direction: column; min-width: 0; }
+.permiso-cab b { font-weight: 600; }
+.permiso-cab span { color: var(--suave); font-size: 13px; }
+.permiso-desc { color: var(--suave); font-size: 13px; }
+.permiso-det { display: block; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel-2);
+  border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 6px 8px; white-space: pre-wrap; word-break: break-all;
+  max-height: 140px; overflow: auto; color: var(--texto); }
+.permiso-acciones { display: flex; gap: 6px; flex-wrap: wrap; }
+.permiso-regla { font-size: 11px; color: var(--tenue); word-break: break-all; }
+@media (max-width: 720px) { .permisos-pila, .derecho.abierto ~ .permisos-pila { top: auto; bottom: calc(70px + env(safe-area-inset-bottom)); right: 12px; width: calc(100% - 24px); } }
+
 /* paleta ⌘K (clase propia: .cmdk es la fila de colores de contratar/perfil) */
 .cmdk-velo { align-items: flex-start; padding-top: 12vh; }
 .cmdk { width: 560px; max-width: 100%; background: var(--panel); border: 1px solid var(--linea); border-radius: 14px; box-shadow: var(--sombra-alta); overflow: hidden; animation: subir .15s ease; }

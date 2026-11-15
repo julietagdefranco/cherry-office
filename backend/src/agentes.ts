@@ -116,6 +116,8 @@ export type CambiosAgente = {
   nombre?: string; rol?: string; departamento?: string; avatar?: Avatar
   prompt?: string; description?: string; chips?: string[]; modelo?: string; brief?: string
   limites?: LimitesAgente; conectores?: ConectorAsignado[]; permisos?: string[]
+  /** Permisos guardados con «Siempre» (solo se pueden quitar o reemplazar: los agrega `agregarReglas`). */
+  reglas?: string[]
 }
 
 export function cambiosAgenteDesde(d: Obj): CambiosAgente {
@@ -132,6 +134,11 @@ export function cambiosAgenteDesde(d: Obj): CambiosAgente {
   c.limites = limitesValidos(d.limites)
   c.conectores = conectoresValidos(d.conectores)
   c.permisos = permisosValidos(d.permisos)
+  const r = listaTextos(d.reglas, 'reglas')
+  if (r !== undefined) {
+    ValidarAgenteExtra.reglas(r)
+    c.reglas = r
+  }
   return c
 }
 
@@ -309,6 +316,7 @@ export function editarAgente(oficinas: Oficinas, id: string, c: CambiosAgente): 
     if (c.limites !== undefined) { if (vacio(c.limites)) delete ag.limites; else ag.limites = c.limites }
     if (c.conectores !== undefined) { if (c.conectores.length === 0) delete ag.conectores; else ag.conectores = c.conectores }
     if (c.permisos !== undefined) { if (c.permisos.length === 0) delete ag.permisos; else ag.permisos = c.permisos }
+    if (c.reglas !== undefined) { if (c.reglas.length === 0) delete ag.reglas; else ag.reglas = c.reglas }
     if (c.avatar !== undefined) {
       const av = { ...c.avatar }
       if (av.semilla === undefined) av.semilla = ag.avatar?.semilla ?? id
