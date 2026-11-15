@@ -1881,7 +1881,7 @@ App.Oficina3D = (function () {
     ida.push({ x: f.asiento.x, z: f.asiento.z });
     return ida;
   }
-  /* paleta de ping-pong en la mano derecha (en el espacio LDraw del brazo: la mano está en (-1, 19, -8)) */
+  /* paleta de ping-pong en la mano derecha (en el espacio LDraw del brazo: la mano está en (-5, 18.9, -9.9)) */
   var matPaleta = null, matMango = null;
   function paleta(f, ver) {
     var b = f.obj.userData.partes && f.obj.userData.partes.brazoD;
@@ -1895,7 +1895,7 @@ App.Oficina3D = (function () {
     var mango = new T.Mesh(geoCache.mangoPP || (geoCache.mangoPP = new T.BoxGeometry(3, 9, 3)), matMango);
     mango.position.set(0, 4, 0);
     g.add(cara, mango);
-    g.position.set(-1, 22, -12); g.rotation.x = -0.5;
+    g.position.set(-5, 22, -14); g.rotation.x = -0.5;
     b.add(g); f.paleta = g;
   }
   function sentarJuego(f, l) {
