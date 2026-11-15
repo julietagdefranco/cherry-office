@@ -96,6 +96,7 @@ export class Ejecuciones {
         manual INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS ejecuciones_tarea ON ejecuciones(oficina, tarea, id);
+    CREATE INDEX IF NOT EXISTS ejecuciones_sid ON ejecuciones(sid);
     `)
     this.db.run("UPDATE ejecuciones SET estado='error', error=?, fin=? WHERE estado='corriendo'",
       ['Interrumpida: la app se cerró mientras corría.', Date.now() / 1000])
@@ -141,6 +142,17 @@ export class Ejecuciones {
 
   ultima(oficina: string, tarea: string): Ejecucion | undefined { return this.lista(oficina, tarea, 1)[0] }
 
+  /** La corrida que usa (o usó) esa sesión. */
+  porSid(sid: string): Ejecucion | undefined {
+    if (sid === '') return undefined
+    try {
+      const f = this.db.query(`SELECT ${columnas} FROM ejecuciones WHERE sid=? ORDER BY id DESC LIMIT 1`, [sid])[0]
+      return f ? deFila(f) : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   /** Última corrida programada (no manual) de la tarea, en cualquier estado: con ella no se repite la misma programada. */
   ultimaProgramada(oficina: string, tarea: string): number | undefined {
     try {
@@ -172,6 +184,21 @@ export class Ejecuciones {
 export type GanchoTerminar = (e: Ejecucion) => Promise<void> | void
 export type GanchoEntregar = (e: Entrega, ej: Ejecucion | undefined) => Promise<void> | void
 
+/** Qué retoma `Programador.retomar`: la sesión, el pedido que se le suma, y cómo se llama lo que sale. */
+export type ParamsRetomar = {
+  sid: string
+  /** Mensaje que se le manda al agente. */
+  pedido: string
+  /** cambios | espera */
+  origen: string
+  actividad: string
+  titulo: string
+  /** Ref de la entrega nueva. */
+  ref: string
+  /** Clave de reserva (evita dos retomadas a la vez de lo mismo). */
+  clave: string
+}
+
 export type OpcionesProgramador = {
   /** Reloj inyectable (tests). */
   reloj?: () => Date
@@ -188,6 +215,8 @@ export class Programador implements ProgramadorEntregas {
   static readonly prefijoAccion = 'accion:'
   static readonly prefijoCoordinador = 'coord:'
   static readonly prefijoParte = 'parte:'
+  static readonly prefijoPedido = 'pedido:'
+  static readonly prefijoEspera = 'espera:'
 
   readonly ejecuciones: Ejecuciones
   /** Pedidos de permiso de las corridas que esperan a la persona (permisos-tareas.ts). */
@@ -205,6 +234,7 @@ export class Programador implements ProgramadorEntregas {
   /** `oficina \u001f tarea` de las que corren (o están por correr) ahora: evita dos corridas de la misma tarea a la vez. */
   private readonly reservadas = new Set<string>()
   private readonly corridas = new Map<number, Promise<void>>()
+  private contadorRetomadas = 0
 
   /** `env.HQ_PROGRAMADOR === '0'` deja el bucle apagado (los tests llaman a `revisar()` a mano). */
   constructor(private readonly s: Servicios, op: OpcionesProgramador = {}) {
@@ -385,27 +415,43 @@ export class Programador implements ProgramadorEntregas {
    *  terminar bien crea la entrega nueva (`padre` = la anterior, origen `cambios`) y la anterior pasa a `cambios`. Si falla,
    *  la anterior queda como estaba y se deja un aviso de error. Devuelve enseguida. */
   async pedirCambios(act: OficinaActiva, def: AgenteDef, e: Entrega, texto: string): Promise<void> {
+    const duenio = act.oficina.duenio === '' ? 'la persona' : act.oficina.duenio
+    await this.retomarEnSegundoPlano(act, def, e, {
+      sid: e.sid, pedido: `Cambios que te pide ${duenio} sobre lo que entregaste («${e.titulo}»):\n\n${texto}`, origen: 'cambios',
+      actividad: 'Cambios: ' + e.titulo, titulo: e.titulo, ref: e.sid, clave: Programador.claveCambios(e.id),
+    })
+  }
+
+  /** Reserva `p.clave` y retoma la sesión en segundo plano (409 si la app se cierra o la clave ya está en uso). */
+  async retomarEnSegundoPlano(act: OficinaActiva, def: AgenteDef, e: Entrega | undefined, p: ParamsRetomar, alFin?: (r: { entrega?: Entrega; error?: string }) => void): Promise<void> {
     if (this.cerrado) throw new ErrorAPI(409, 'La app se está cerrando.')
     this.verificar(act.carpeta)
-    const clave = Programador.clave(act.carpeta, Programador.claveCambios(e.id))
-    if (this.reservadas.has(clave)) throw new ErrorAPI(409, 'Ya le estás pidiendo cambios a esta entrega.')
+    const clave = Programador.clave(act.carpeta, p.clave)
+    if (this.reservadas.has(clave)) throw new ErrorAPI(409, p.origen === 'cambios' ? 'Ya le estás pidiendo cambios a esta entrega.' : 'Ya hay una corrida en curso para esto.')
     this.reservadas.add(clave)
-    const id = -e.id // las corridas de cambios se guardan con id negativo (no chocan con las ejecuciones)
-    this.corridas.set(id, this.correrCambios(act, def, e, texto).catch(() => {}).finally(() => this.termino(id, clave)))
+    const id = -(++this.contadorRetomadas) // las corridas retomadas se guardan con id negativo (no chocan con las ejecuciones)
+    this.corridas.set(id, this.retomar(act, def, e, p).then(
+      (r) => { try { alFin?.(r) } catch {} },
+      () => { try { alFin?.({ error: 'No pude retomar la conversación.' }) } catch {} },
+    ).finally(() => this.termino(id, clave)))
   }
+
+  /** ¿Hay una retomada en curso con esa clave de reserva (`cambios:<entrega>` o `espera:<id>`)? */
+  estaRetomando(oficina: string, clave: string): boolean { return this.reservadas.has(Programador.clave(oficina, clave)) }
 
   cambiandoEntrega(oficina: string, id: number): boolean { return this.reservadas.has(Programador.clave(oficina, Programador.claveCambios(id))) }
 
-  private async correrCambios(act: OficinaActiva, def: AgenteDef, e: Entrega, texto: string) {
+  /** Retoma la conversación `p.sid` (la de la entrega `e`, si hay) con `p.pedido`. Al terminar bien registra la entrega
+   *  nueva (`padre` = `e`); si falla deja un aviso de error. */
+  async retomar(act: OficinaActiva, def: AgenteDef, e: Entrega | undefined, p: ParamsRetomar): Promise<{ entrega?: Entrega; error?: string }> {
     const { store, runner, config, avisos, entregas } = this.s
     const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: this.s.catalogo?.() })
     const mcp = this.s.mcp?.()
     const mcpUrl = mcp ? await mcp.url() : undefined
     if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
-    const carpeta = act.carpeta, agente = def.id, sid = e.sid
+    const carpeta = act.carpeta, agente = def.id, sid = p.sid
     const caja = new CajaCosto(), escritos = new CajaArchivos()
-    const duenio = act.oficina.duenio === '' ? 'la persona' : act.oficina.duenio
-    const pedido = `Cambios que te pide ${duenio} sobre lo que entregaste («${e.titulo}»):\n\n${texto}`
+    const pedido = p.pedido
     const r = await runner.conCarrilDe(carpeta, agente, async (): Promise<{ texto?: string; error?: string }> => {
       const envExtra: Record<string, string> = { ...entorno(ctx) }
       if (mcpUrl !== undefined && mcp) envExtra[variableTokenMCP] = mcp.emitir({ oficina: carpeta, agente, sid, perfil: ctx.perfilMCP })
@@ -413,8 +459,8 @@ export class Programador implements ProgramadorEntregas {
         store.asegurarSesion(sid, agente, carpeta)
         store.agregar(sid, 'u', pedido)
         const activa = store.estaActiva(sid)
-        const t = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'cambios', tarea: 'Cambios: ' + e.titulo, extra: caja.observador(escritos.observador()) },
-          (obs) => runner.ejecutarChat({ agente, mensaje: pedido, sid, activa, carpeta, obs, envExtra, armar: (p) => argumentos(config, ctx, p) }))
+        const t = await runner.actividad.seguir({ oficina: carpeta, agente, origen: p.origen, tarea: p.actividad, extra: caja.observador(escritos.observador()) },
+          (obs) => runner.ejecutarChat({ agente, mensaje: pedido, sid, activa, carpeta, obs, envExtra, armar: (x) => argumentos(config, ctx, x) }))
         store.marcarActiva(sid)
         const guardado = t === '' ? '(sin respuesta)' : t
         store.agregar(sid, 'a', guardado)
@@ -430,21 +476,26 @@ export class Programador implements ProgramadorEntregas {
         if (tok !== undefined) mcp?.revocar(tok)
       }
     })
-    store.registrarCosto({ oficina: carpeta, agente, origen: 'cambios', ref: String(e.id), costo: caja.valor })
+    store.registrarCosto({ oficina: carpeta, agente, origen: p.origen, ref: p.origen === 'cambios' && e ? String(e.id) : p.ref, costo: caja.valor })
     if (r.texto !== undefined) {
       const nuevos = ArchivosEntrega.relativos(escritos.valor, carpeta)
-      const arch = nuevos.length === 0 ? e.archivos : [...nuevos, ...e.archivos.filter((x) => !nuevos.includes(x))]
-      const nueva = entregas.registrar({ oficina: carpeta, agente, nombre: def.nombre, origen: 'cambios', ref: sid, titulo: e.titulo, texto: r.texto, sid, archivos: arch, padre: e.id, costo: caja.valor })
+      const previos = e?.archivos ?? []
+      const arch = nuevos.length === 0 ? previos : [...nuevos, ...previos.filter((x) => !nuevos.includes(x))]
+      const nueva = entregas.registrar({ oficina: carpeta, agente, nombre: def.nombre, origen: p.origen, ref: p.ref, titulo: p.titulo, texto: r.texto, sid, archivos: arch, padre: e?.id, costo: caja.valor })
       if (nueva) {
-        entregas.marcar(carpeta, e.id, 'cambios')
+        // con «espera», una versión que la persona ya revisó se queda revisada
+        if (e && (p.origen === 'cambios' || e.estado === 'sin_revisar')) entregas.marcar(carpeta, e.id, 'cambios')
         for (const g of this.ganchosEntregar) await this.llamar(() => g(nueva, undefined))
       }
-      this.s.log.info(`cambios entrega=${e.id} agente=${agente} estado=ok`)
-    } else {
-      const av = avisos.crear({ oficina: carpeta, tipo: 'error', agente, texto: `No pudo hacer los cambios de «${e.titulo}»: ` + (r.error ?? 'error'), ref: sid })
-      if (av) avisos.emitir(av, def.nombre)
-      this.s.log.info(`cambios entrega=${e.id} agente=${agente} estado=error`)
+      this.s.log.info(`${p.origen} entrega=${e?.id ?? '-'} agente=${agente} estado=ok`)
+      return nueva ? { entrega: nueva } : {}
     }
+    const error = r.error ?? 'error'
+    const que = p.origen === 'cambios' ? 'los cambios' : 'la versión completa'
+    const av = avisos.crear({ oficina: carpeta, tipo: 'error', agente, texto: `No pudo hacer ${que} de «${p.titulo}»: ` + error, ref: sid })
+    if (av) avisos.emitir(av, def.nombre)
+    this.s.log.info(`${p.origen} entrega=${e?.id ?? '-'} agente=${agente} estado=error`)
+    return { error }
   }
 
   // MARK: ids de corridas
@@ -455,6 +506,8 @@ export class Programador implements ProgramadorEntregas {
     if (id.startsWith(Programador.prefijoFlujo)) return 'flujo'
     if (id.startsWith(Programador.prefijoAccion)) return 'accion'
     if (id.startsWith(Programador.prefijoParte)) return 'parte'
+    if (id.startsWith(Programador.prefijoPedido)) return 'pedido'
+    if (id.startsWith(Programador.prefijoEspera)) return 'espera'
     return 'tarea'
   }
 
@@ -697,6 +750,8 @@ export function nombreCorrida(id: string): string {
   if (id.startsWith(Programador.prefijoAccion)) return 'Acción aprobada'
   if (id.startsWith(Programador.prefijoCoordinador)) return 'Encargo del coordinador'
   if (id.startsWith(Programador.prefijoParte)) return 'Parte del día'
+  if (id.startsWith(Programador.prefijoPedido)) return 'Pedido de un colega'
+  if (id.startsWith(Programador.prefijoEspera)) return 'Versión completa'
   return id
 }
 

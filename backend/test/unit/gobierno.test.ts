@@ -52,6 +52,11 @@ describe('Instrucciones', () => {
 
   test('undefined si no hay nada; sin dueño dice «la persona»; la frase de salida va con límites, actuar o reglas', () => {
     expect(Instrucciones.para(oficinaDe(), agente())).toBeUndefined()
+    // con el servidor MCP de la oficina, siempre va el párrafo de cómo pedirle algo a un colega
+    const mcp = Instrucciones.para(oficinaDe(), agente(), { conMCP: true })!
+    expect(mcp).toContain('## Si te falta algo de un colega')
+    expect(mcp).toContain('pedíselo con pedir')
+    expect(mcp).toContain('quedo_esperando')
     // solo leer: ni límites ni frase de salida
     const leer = Instrucciones.para(oficinaDe(), agente({ conectores: [con('G', [leerCal])] }))!
     expect(leer).toContain('## Conectores')
@@ -175,8 +180,8 @@ describe('Acciones (en proceso)', () => {
     expect(HerramientasMCPAgente.lista(act.oficina, nico)).not.toContain('mcp__hq__proponer_accion')
     const mcp = mcpDe(s)!
     const id = (a: string) => ({ oficina: carpeta, agente: a, sid: U.a, perfil: 'agente' })
-    expect(nombres(mcp.consultas.herramientas('t', id('marce')))).toEqual(['colegas', 'consultar', 'proponer_accion'])
-    expect(nombres(mcp.consultas.herramientas('t', id('nico')))).toEqual(['colegas', 'consultar'])
+    expect(nombres(mcp.consultas.herramientas('t', id('marce')))).toEqual(['colegas', 'consultar', 'proponer_accion', 'pedir', 'quedo_esperando', 'cancelar_espera'])
+    expect(nombres(mcp.consultas.herramientas('t', id('nico')))).toEqual(['colegas', 'consultar', 'pedir', 'quedo_esperando', 'cancelar_espera'])
     // y sin asignación nico no puede proponer aunque llame por nombre
     expect(await mcp.consultas.herramientas('t', id('nico')).llamar('proponer_accion', { herramienta: crearCal, resumen: 'x' })).toBeUndefined()
   })

@@ -6,6 +6,7 @@ App.Avisos = (function () {
   'use strict';
   var h = function () { return App.h.apply(null, arguments); };
   var lista = [], indice = 0, banner = null, firma = '';
+  /* los de tipo espera (entre agentes) también se calculan en el servidor: «visto» solo los apaga como aviso */
   var TITULO = { respuesta: ' te respondió', error: ' no pudo responder', tarea: ' terminó una tarea', permiso: ' necesita tu permiso' };
 
   function nombre(a) { var ag = a.agente && App.agente(a.agente); return ag ? ag.nombre : ''; }
@@ -14,6 +15,7 @@ App.Avisos = (function () {
     if (a.tipo === 'propuestas') return 'Biblioteca';
     if (a.tipo === 'pendiente') return 'Pendientes para vos';
     if (a.tipo === 'flujo') return 'Te toca en un flujo';
+    if (a.tipo === 'espera') return 'Algo trabado';
     return (nombre(a) || 'Un agente') + (TITULO[a.tipo] || '');
   }
   function guardado(a) { return /^a\d+$/.test(a.id) || /^flujo:/.test(a.id); }
@@ -66,7 +68,7 @@ App.Avisos = (function () {
     banner.appendChild(h('div.avisos-txt', h('b', titulo(a)), h('span', a.texto), h('small', App.hace(a.creado))));
     banner.appendChild(h('button.btn.chico.primario', { onclick: function () { abrir(a.id); } }, 'Ver'));
     if (lista.length > 1) banner.appendChild(h('button.btn.chico', { title: 'Siguiente (N)', onclick: siguiente }, (indice + 1) + ' de ' + lista.length, h('kbd', 'N')));
-    if (guardado(a)) banner.appendChild(h('button.btn.fantasma.icono', { title: 'Descartar', onclick: function () { visto({ id: a.id }); } }, App.icono('cerrar')));
+    if (guardado(a) || a.tipo === 'espera') banner.appendChild(h('button.btn.fantasma.icono', { title: 'Descartar', onclick: function () { visto({ id: a.id }); } }, App.icono('cerrar')));
   }
 
   function visto(d) {
@@ -85,6 +87,7 @@ App.Avisos = (function () {
     if (a.tipo === 'reunion') { if (a.ref && App.Reunion.ver) App.Reunion.ver(a.ref); else App.Reunion.abrir(); if (App.Oficina3D.enfocarLugar) App.Oficina3D.enfocarLugar('reunion'); return; }
     if (a.tipo === 'propuestas') { App.Biblioteca.abrir(); return; }
     if (a.tipo === 'flujo') { visto({ id: a.id }); if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(a.ref); return; }
+    if (a.tipo === 'espera') { visto({ id: a.id }); if (App.Parte && App.Parte.abrirEspera) App.Parte.abrirEspera(a.ref); return; }
     if (a.tipo === 'pendiente') { visto({ id: a.id }); if (App.Reunion.ver && a.ref) App.Reunion.ver(a.ref); else App.Reunion.abrir(); return; }
     if (a.agente && App.agente(a.agente)) {
       App.Agente.abrir(a.agente, 'chat');

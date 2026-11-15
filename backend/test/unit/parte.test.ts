@@ -54,6 +54,15 @@ describe('Bloqueos.calcular', () => {
     expect(Bloqueos.calcular([], [], [], ahora)).toEqual([])
   })
 
+  test('esperas entre agentes vencidas: «<agente>» espera a <B> («<que>») hace n días; las que no pasaron el plazo no cuentan', () => {
+    const e = (id: number, haceDias: number, plazo = 2) => ({ id, agente: 'marce', agenteNombre: 'Marce', esperaANombre: 'Arqui', que: 'el mapeo', creada: ahora.getTime() / 1000 - haceDias * dia, plazo })
+    const b = Bloqueos.calcular([corrida(1, 'esperando_persona', 3)], [], [], ahora, [e(7, 4), e(8, 1), e(9, 6, 7)])
+    expect(b.map((x) => `${x.tipo}:${x.ref}`)).toEqual(['espera:7', 'corrida:1'])
+    expect(b[0]).toEqual({ tipo: 'espera', texto: '«Marce» espera a Arqui («el mapeo») hace 4 días.', ref: '7', dias: 4.0 })
+    // el parámetro es opcional
+    expect(Bloqueos.calcular([], [], [], ahora)).toEqual([])
+  })
+
   test('justo en el plazo no cuenta; textoDias', () => {
     expect(Bloqueos.calcular([corrida(1, 'trabada', 2)], [entrega(1, 3)], [], ahora)).toEqual([])
     expect(Bloqueos.textoDias(0.4)).toBe('menos de un día')

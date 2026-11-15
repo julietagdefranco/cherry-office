@@ -13,6 +13,7 @@ import type { Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
 import { programadorDe, ejecucionJSON, Programador, type Ejecucion } from './programador.js'
 import { esCoordinador } from './permisos.js'
+import { dependenciasDe, esperasVencidas, type EsperaVencida } from './dependencias.js'
 import { atrapar, no405, type Query, type Resp, type SubRouter } from './router.js'
 import { registrarModulo, type Servicios } from './servicios.js'
 import { num } from './sqlite.js'
@@ -90,7 +91,7 @@ export const Bloqueos = {
 
   /** Lo que está trabado, del más viejo al más nuevo: corridas en espera (o trabadas) más allá de su plazo, entregas sin revisar
    *  hace más de 3 días y tareas activas cuya última ejecución falló. Cada uno es `{tipo, texto, ref, dias}`. */
-  calcular(corridas: Corrida[], entregasSinRevisar: Entrega[], tareasConError: TareaConError[], ahora: Date): Obj[] {
+  calcular(corridas: Corrida[], entregasSinRevisar: Entrega[], tareasConError: TareaConError[], ahora: Date, esperas: EsperaVencida[] = []): Obj[] {
     const t = ahora.getTime() / 1000
     const dias = (desde: number) => Math.max(0, (t - desde) / 86400)
     const redondo = (d: number) => Math.round(d * 10) / 10
@@ -125,6 +126,11 @@ export const Bloqueos = {
         ref: x.id, dias: redondo(d),
       }])
     }
+    for (const x of esperas) {
+      const d = dias(x.creada)
+      if (!(d > x.plazo)) continue
+      out.push([d, { tipo: 'espera', texto: `«${x.agenteNombre}» espera a ${x.esperaANombre} («${x.que}») hace ${this.textoDias(d)}.`, ref: String(x.id), dias: redondo(d) }])
+    }
     return out.sort((a, b) => b[0] - a[0]).map((x) => x[1])
   },
 }
@@ -156,7 +162,7 @@ export const Parte = {
       if (!e || e.estado !== 'error') continue
       conError.push({ id: t.id, nombre: t.nombre, agente: t.agente, error: e.error ?? '', desde: e.fin ?? e.inicio })
     }
-    return Bloqueos.calcular(abiertas, sin, conError, ahora)
+    return Bloqueos.calcular(abiertas, sin, conError, ahora, esperasVencidas(s, act.carpeta, ahora))
   },
 
   /** El JSON de §10. */
@@ -204,7 +210,8 @@ export const Parte = {
 
     return {
       desde: Programacion.iso(ini), hasta: Programacion.iso(ahora), teNecesita: avisos,
-      paraRevisar: { total, entregas: paraRevisar }, flujos, paso, bloqueos: Parte.bloqueos(s, act, ahora), proximas: prox, narrado,
+      paraRevisar: { total, entregas: paraRevisar }, flujos, esperas: dependenciasDe(s)?.abiertasJSON(carpeta, 20) ?? [], paso,
+      bloqueos: Parte.bloqueos(s, act, ahora), proximas: prox, narrado,
     }
   },
 

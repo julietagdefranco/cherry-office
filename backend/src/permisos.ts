@@ -58,6 +58,12 @@ export const Coordinador = {
   herramientasMCP: (_o: Oficina, a: AgenteDef) => (esCoordinador(a) ? Coordinador.nombresMCP.map((n) => 'mcp__hq__' + n) : []),
 }
 
+/** Herramientas de dependencias entre agentes (`pedir`, …): las ve todo agente, no solo un perfil. */
+export const Dependencias = {
+  nombresMCP: ['pedir', 'quedo_esperando', 'cancelar_espera'],
+  herramientasMCP: () => Dependencias.nombresMCP.map((n) => 'mcp__hq__' + n),
+}
+
 export const Acciones = {
   herramientaPropuesta: 'mcp__hq__proponer_accion',
   /** Herramientas de actuar que el agente tiene asignadas (nombres completos). */
@@ -72,7 +78,7 @@ export const Acciones = {
 export const HerramientasMCPAgente = {
   lista(o: Oficina, a: AgenteDef): string[] {
     const out: string[] = []
-    for (const h of [...herramientasMCP, ...Coordinador.herramientasMCP(o, a), ...Acciones.herramientasMCP(o, a)]) if (!out.includes(h)) out.push(h)
+    for (const h of [...herramientasMCP, ...Dependencias.herramientasMCP(), ...Coordinador.herramientasMCP(o, a), ...Acciones.herramientasMCP(o, a)]) if (!out.includes(h)) out.push(h)
     return out
   },
 }
@@ -107,7 +113,8 @@ export const ConectoresAgente = {
 /** Instrucciones inyectadas con `--append-system-prompt`: reglas, límites, conectores y rol de coordinador. */
 export const Instrucciones = {
   maxCaracteres: 8000,
-  para(o: Oficina, a: AgenteDef): string | undefined {
+  /** `conMCP`: el agente corre con el servidor MCP de la oficina (chat, tareas, encargos): se le explica cómo pedirle algo a un colega. */
+  para(o: Oficina, a: AgenteDef, { conMCP = false }: { conMCP?: boolean } = {}): string | undefined {
     const d = o.duenio.trim()
     const jefe = d === '' ? 'la persona' : d
     const secciones: string[] = []
@@ -141,6 +148,10 @@ export const Instrucciones = {
     if (esCoordinador(a)) {
       secciones.push('## Sos coordinador/a de la oficina\n'
         + 'Ves entregas, flujos y bloqueos de todos (herramientas estado_oficina, entregas, corridas, bloqueos) y podés repartir encargos (encargar). No hacés el trabajo de otros: lo pedís.')
+    }
+    if (conMCP) {
+      secciones.push('## Si te falta algo de un colega\n'
+        + 'Consultalo (consultar); si no lo tiene, pedíselo con pedir. Entregá lo que puedas marcando lo que falta y llamá a quedo_esperando: cuando tu colega entregue, la oficina te vuelve a encargar la versión completa.')
     }
     if (secciones.length === 0) return undefined
     const texto = secciones.join('\n\n')
@@ -187,7 +198,7 @@ export function contexto(a: OficinaActiva, agente: AgenteDef, { dirsExtra = [], 
   const { permitidas, vedadas } = ConectoresAgente.herramientas(a.oficina, agente, catalogo, actuar)
   return {
     carpeta: a.carpeta, escritura: rutas, dirsExtra: [...dirsExtra, ...dirsVinculos(a.oficina, agente)],
-    instrucciones: Instrucciones.para(a.oficina, agente), permitidas, vedadas,
+    instrucciones: Instrucciones.para(a.oficina, agente, { conMCP: true }), permitidas, vedadas,
     herramientasMCP: HerramientasMCPAgente.lista(a.oficina, agente), perfilMCP: Coordinador.perfil(a.oficina, agente),
     reglas: agente.reglas ?? [], preguntar: false,
   }

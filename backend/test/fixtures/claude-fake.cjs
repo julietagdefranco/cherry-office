@@ -143,6 +143,20 @@ async function main() {
     req.end(datos)
   })
 
+  if (m.includes('MCP_LLAMAR') && fs.existsSync(p(`llamadas.${agent}`))) {
+    // hace las llamadas de llamadas.<agente> (una línea JSON de `params` de tools/call por línea) con el token del
+    // entorno, guarda las respuestas en mcp.<agente>.out y renombra el archivo a .usado (la v2 no las repite). Después
+    // sigue con el resto del mensaje (por ejemplo, un ENTREGA:).
+    const { url, token } = mcp()
+    const lineas = fs.readFileSync(p(`llamadas.${agent}`), 'utf8').split('\n').filter((x) => x !== '')
+    fs.renameSync(p(`llamadas.${agent}`), p(`llamadas.${agent}.usado`))
+    let i = 0
+    for (const linea of lineas) {
+      i++
+      const body = `{"jsonrpc":"2.0","id":${i},"method":"tools/call","params":${linea}}`
+      fs.appendFileSync(p(`mcp.${agent}.out`), (await post(url, token, body)) + '\n')
+    }
+  }
   if (m.includes('CONSULTAR:')) {
     // llama a `consultar` del servidor MCP con el token del entorno, como haría claude (x4: cuatro veces)
     const colega = m.slice(m.indexOf('CONSULTAR:') + 'CONSULTAR:'.length).split(' ')[0]

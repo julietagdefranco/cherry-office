@@ -11,12 +11,14 @@ import { randomUUID } from 'node:crypto'
 import { ClaudeError } from './claude-runner.js'
 import { iso, TextoEntrega, type Entrega } from './entregas.js'
 import { ErrorAPI } from './errores.js'
-import { esObjeto, objeto, type Obj } from './json.js'
+import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
 import { escribirAtomico, OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
 import { dirsVinculos, Instrucciones, turnoConPermiso } from './permisos.js'
 import type { TurnoConPermiso } from './claude-runner.js'
 import { anexarDecisiones } from './plantillas.js'
+import { dependenciasDe } from './dependencias.js'
+import { flujoDesde, flujoJSON } from './modelo-flujos.js'
 import { Programador, programadorDe } from './programador.js'
 import { atrapar, no404, no405, type Query, type Resp, type SubRouter } from './router.js'
 import { entregasRouterDe } from './rutas-entregas.js'
@@ -41,10 +43,18 @@ export type Pendiente = {
   que: string
   /** El responsable no lo puede hacer solo (correr programas, mandar mensajes…): necesita a la persona. */
   usuario: boolean
+  /** Índices (0-based, en la lista de pendientes) de los pendientes que tienen que estar hechos antes de este. */
+  dependeDe?: number[]
 }
 
-export const pendienteJSON = (p: Pendiente): Obj => ({ quien: p.quien, que: p.que, necesita_usuario: p.usuario })
+/** `depende_de` va 0-based dentro del JSON de la síntesis (el prompt lo pide 1-based) y solo si no está vacío. */
+export const pendienteJSON = (p: Pendiente): Obj => {
+  const o: Obj = { quien: p.quien, que: p.que, necesita_usuario: p.usuario }
+  if (p.dependeDe && p.dependeDe.length > 0) o.depende_de = p.dependeDe
+  return o
+}
 export const lineaMD = (p: Pendiente) => (p.quien === '' ? `- ${p.que}` : `- **${p.quien}:** ${p.que}`) + (p.usuario ? ' _(necesita a la persona)_' : '')
+  + (p.dependeDe && p.dependeDe.length > 0 ? ` _(después de ${p.dependeDe.map((i) => i + 1).join(', ')})_` : '')
 
 export type SintesisReunion = { resumen: string; decisiones: string[]; pendientes: Pendiente[] }
 export const sintesisJSON = (s: SintesisReunion): Obj => ({ resumen: s.resumen, decisiones: s.decisiones, pendientes: s.pendientes.map(pendienteJSON) })
@@ -69,7 +79,13 @@ export type ReunionFila = {
   /** {"a":[ids],"b":[ids]} solo en red/blue. */
   bandos?: Record<string, string[]>
   salida?: string
+  /** JSON del último resumen pedido sin cerrar (`resumenParcialJSON`). */
+  resumenParcial?: string
 }
+
+/** Resumen de lo dicho hasta ahora, sin cerrar: no deja acta ni toca decisiones ni pendientes. */
+export type ResumenParcial = SintesisReunion & { abiertas: string[]; turnos: number; ts: number }
+export const resumenParcialJSON = (r: ResumenParcial): Obj => ({ ...sintesisJSON(r), abiertas: r.abiertas, turnos: r.turnos, ts: iso(r.ts) })
 
 export const patrones = ['debate', 'lider', 'mapreduce', 'redblue', 'revision'] as const
 export type PatronReunion = (typeof patrones)[number]
@@ -88,7 +104,7 @@ export type PasoTurno = { agente: string; fase: FaseTurno }
 
 // MARK: - SQLite (tablas `reuniones` y `turnos`, con clave de oficina)
 
-const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida'
+const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida,resumen_parcial'
 
 const opt = (v: SQLValor | undefined) => (v === null || v === undefined ? undefined : txt(v))
 
@@ -116,7 +132,7 @@ function filaReunion(r: Fila): ReunionFila {
   }
   if (r.cerrada !== null && r.cerrada !== undefined) f.cerrada = num(r.cerrada)
   f.sintesis = opt(r.sintesis); f.errorSintesis = opt(r.error_sintesis); f.acta = opt(r.acta); f.error = opt(r.error)
-  f.lider = opt(r.lider); f.bandos = bandos; f.salida = opt(r.salida)
+  f.lider = opt(r.lider); f.bandos = bandos; f.salida = opt(r.salida); f.resumenParcial = opt(r.resumen_parcial)
   for (const k of Object.keys(f) as (keyof ReunionFila)[]) if (f[k] === undefined) delete f[k]
   return f
 }
@@ -156,7 +172,7 @@ export class ReunionesDB {
     `)
     const cols = this.db.query('PRAGMA table_info(reuniones)').map((f) => txt(f.name))
     if (!cols.includes('documentos')) this.db.exec('ALTER TABLE reuniones ADD COLUMN documentos TEXT')
-    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT']]) {
+    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT'], ['resumen_parcial', 'TEXT']]) {
       if (!cols.includes(c!)) this.db.exec(`ALTER TABLE reuniones ADD COLUMN ${c} ${tipo}`)
     }
     this.prepararVista()
@@ -180,6 +196,8 @@ export class ReunionesDB {
 
   /** Ruta final del archivo de salida (puede diferir de la pedida si ya existía una con ese nombre). */
   salida(id: string, salida: string) { this.db.run('UPDATE reuniones SET salida=? WHERE id=?', [salida, id]) }
+
+  resumenParcial(id: string, json: string) { this.db.run('UPDATE reuniones SET resumen_parcial=? WHERE id=?', [json, id]) }
 
   una(id: string, oficina: string): ReunionFila | undefined {
     try {
@@ -385,7 +403,10 @@ export function sinResponder(turnos: TurnoReunion[], quien: string, oficina: Ofi
 export function promptSintesis(p: {
   oficina: Oficina; tema: string; participantes: AgenteDef[]; turnos: TurnoReunion[]
   patron?: PatronReunion; lider?: AgenteDef; bandoA?: AgenteDef[]; bandoB?: AgenteDef[]
+  /** La reunión sigue abierta: resumen de lo dicho hasta ahora para que la persona piense qué contestar. */
+  parcial?: boolean
 }): string {
+  if (p.parcial) return promptResumenParcial(p)
   return `Sos el secretario de actas de la oficina «${p.oficina.nombre}». Tema de la reunión: ${p.tema}
 Participantes: ${gente(p.participantes)}
 
@@ -393,12 +414,49 @@ Transcripción:
 ${transcripcion(p.turnos, p.oficina, maxTranscripcionActa, true)}
 
 Devolvé SOLO un objeto JSON estricto (sin texto antes ni después, sin bloques de código) con esta forma:
-{"resumen": "resumen de la reunión en 3-6 oraciones", "decisiones": ["decisión concreta confirmada por la conversación"], "pendientes": [{"quien": "nombre de quien se encarga", "que": "tarea concreta", "necesita_usuario": false}]}
-Incluí en "decisiones" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "pendientes" los próximos pasos con responsable.${PendientesReunion.consignaSecretario(p.oficina.duenio)}${ReunionPatron.varianteSintesis(p.patron ?? 'debate', p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
+{"resumen": "resumen de la reunión en 3-6 oraciones", "decisiones": ["decisión concreta confirmada por la conversación"], "pendientes": [{"quien": "nombre de quien se encarga", "que": "tarea concreta", "necesita_usuario": false, "depende_de": []}]}
+Incluí en "decisiones" solo lo que quedó razonablemente acordado (puede ser una lista vacía) y en "pendientes" los próximos pasos con responsable. En "depende_de" poné los números (empezando en 1, en el orden de la lista) de otros pendientes que tienen que estar hechos antes de poder hacer este; si no depende de ninguno, lista vacía.${PendientesReunion.consignaSecretario(p.oficina.duenio)}${ReunionPatron.varianteSintesis(p.patron ?? 'debate', p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
 }
 
-/** Extrae el objeto JSON de la respuesta (con o sin ```json) y lo normaliza. undefined si no hay forma de leerlo. */
-export function parsearSintesis(t: string): SintesisReunion | undefined {
+function promptResumenParcial(p: {
+  oficina: Oficina; tema: string; participantes: AgenteDef[]; turnos: TurnoReunion[]
+  patron?: PatronReunion; lider?: AgenteDef; bandoA?: AgenteDef[]; bandoB?: AgenteDef[]
+}): string {
+  const n = nombreDe('usuario', p.oficina)
+  return `Sos el secretario de actas de la oficina «${p.oficina.nombre}». Tema de la reunión: ${p.tema}
+Participantes: ${gente(p.participantes)}
+
+La reunión TODAVÍA NO TERMINÓ. ${n} te pide un resumen de lo dicho hasta ahora para pensar qué contestar antes de seguir.
+
+Transcripción hasta el momento:
+${transcripcion(p.turnos, p.oficina, maxTranscripcionActa, true)}
+
+Devolvé SOLO un objeto JSON estricto (sin texto antes ni después, sin bloques de código) con esta forma:
+{"resumen": "en qué está la conversación, en 3-6 oraciones: posturas de cada uno, coincidencias y diferencias", "decisiones": ["lo que ya parece acordado"], "abiertas": ["pregunta o punto abierto que espera la opinión o la decisión de ${n}"], "pendientes": [{"quien": "nombre", "que": "próximo paso propuesto", "necesita_usuario": false}]}
+Sé fiel a la transcripción: no inventes acuerdos. «abiertas» es lo más importante: qué le preguntaron a ${n}, qué tiene que decidir y en qué no se ponen de acuerdo (puede ser una lista vacía).${ReunionPatron.varianteSintesis(p.patron ?? 'debate', p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
+}
+
+/** Como `parsearSintesis`, más «abiertas». */
+export function parsearResumenParcial(t: string): (SintesisReunion & { abiertas: string[] }) | undefined {
+  const a = t.indexOf('{')
+  const b = t.lastIndexOf('}')
+  let abiertas: string[] = []
+  if (a >= 0 && b > a) {
+    try {
+      const o = JSON.parse(t.slice(a, b + 1))
+      if (esObjeto(o) && Array.isArray(o.abiertas)) abiertas = o.abiertas.map((x) => (typeof x === 'string' ? recortarEspacios(x) : '')).filter((x) => x !== '')
+    } catch {}
+  }
+  const s = parsearSintesis(t)
+  if (!s) return abiertas.length > 0 ? { resumen: '', decisiones: [], pendientes: [], abiertas } : undefined
+  return { ...s, abiertas }
+}
+
+/** Extrae el objeto JSON de la respuesta (con o sin ```json) y lo normaliza. undefined si no hay forma de leerlo.
+ *  `base`: de dónde cuentan los números de `depende_de` (1 en lo que escribe el secretario; 0 en la síntesis ya guardada).
+ *  Las dependencias que no son enteros, caen fuera de rango, son del propio pendiente o forman un ciclo se descartan
+ *  (se avisa por `descartado`, no es un error). */
+export function parsearSintesis(t: string, base: 0 | 1 = 1, descartado?: (motivo: string) => void): SintesisReunion | undefined {
   const a = t.indexOf('{')
   const b = t.lastIndexOf('}')
   if (a < 0 || b < 0 || a >= b) return undefined
@@ -409,14 +467,54 @@ export function parsearSintesis(t: string): SintesisReunion | undefined {
   const resumen = cadena(o.resumen)
   const decs = (Array.isArray(o.decisiones) ? o.decisiones : []).map(cadena).filter((x) => x !== '')
   const pend: Pendiente[] = []
+  const crudas: unknown[][] = []   // depende_de tal como vino, por pendiente que quedó
+  const nuevoIndice = new Map<number, number>()   // lugar en la lista original -> lugar entre los que quedaron
+  let lugar = -1
   for (const p of Array.isArray(o.pendientes) ? o.pendientes : []) {
+    lugar++
     if (esObjeto(p)) {
       const q = cadena(p.quien)
       const k = cadena(p.que)
-      if (k !== '') pend.push({ quien: q, que: k, usuario: p.necesita_usuario === true || p.necesita_usuario === 1 })
-    } else if (typeof p === 'string' && cadena(p) !== '') pend.push({ quien: '', que: cadena(p), usuario: false })
+      if (k === '') continue
+      nuevoIndice.set(lugar, pend.length)
+      pend.push({ quien: q, que: k, usuario: p.necesita_usuario === true || p.necesita_usuario === 1 })
+      crudas.push(Array.isArray(p.depende_de) ? p.depende_de : [])
+    } else if (typeof p === 'string' && cadena(p) !== '') {
+      nuevoIndice.set(lugar, pend.length)
+      pend.push({ quien: '', que: cadena(p), usuario: false })
+      crudas.push([])
+    }
   }
   if (resumen === '' && decs.length === 0 && pend.length === 0) return undefined
+
+  // dependencias: enteros (también en texto), dentro de la lista y que no sean el propio pendiente
+  pend.forEach((p, i) => {
+    const ok = new Set<number>()
+    for (const v of crudas[i]!) {
+      const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : NaN
+      if (!Number.isInteger(n)) { descartado?.(`pendiente ${i + 1}: «${String(v)}» no es un número de pendiente`); continue }
+      const j = nuevoIndice.get(n - base)
+      if (j === undefined) { descartado?.(`pendiente ${i + 1}: depende de ${n}, que no existe`); continue }
+      if (j === i) { descartado?.(`pendiente ${i + 1}: depende de sí mismo`); continue }
+      ok.add(j)
+    }
+    if (ok.size > 0) p.dependeDe = [...ok].sort((x, y) => x - y)
+  })
+  // ciclos: se podan (Kahn) los que no tienen dependencias sin resolver y los que nadie espera; lo que queda está en un ciclo
+  const vivos = new Set(pend.map((_, i) => i))
+  const deps = (i: number) => (pend[i]!.dependeDe ?? []).filter((d) => vivos.has(d))
+  for (let cambio = true; cambio && vivos.size > 0;) {
+    cambio = false
+    for (const i of [...vivos]) {
+      // sin dependencias sin resolver se puede hacer; sin nadie que lo espere no puede cerrar un ciclo
+      const esperado = [...vivos].some((j) => deps(j).includes(i))
+      if (deps(i).length === 0 || !esperado) { vivos.delete(i); cambio = true }
+    }
+  }
+  for (const i of vivos) {
+    descartado?.(`pendiente ${i + 1}: forma parte de un ciclo de dependencias`)
+    delete pend[i]!.dependeDe
+  }
   return { resumen, decisiones: decs, pendientes: pend }
 }
 
@@ -687,7 +785,7 @@ export const PendientesReunion = {
     const [reu, n] = enc
     const f = db.una(reu, act.carpeta)
     if (!f || f.sintesis === undefined) return
-    const s = parsearSintesis(f.sintesis)
+    const s = parsearSintesis(f.sintesis, 0)
     if (!s || n < 0 || n >= s.pendientes.length) return
     const p = s.pendientes[n]!
     const a = this.agente(p.quien, act.oficina)
@@ -719,6 +817,7 @@ export class ReunionesRouter implements SubRouter {
   /** `reunion:agente` → cuántos turnos había al armar su último prompt (para saber qué mensajes del usuario no vio). */
   private readonly leidos = new Map<string, number>()
   private readonly cerrando = new Set<string>()
+  private readonly resumiendo = new Set<string>()
 
   constructor(private readonly s: Servicios) {
     this.db = new ReunionesDB(s.store.db)
@@ -751,22 +850,29 @@ export class ReunionesRouter implements SubRouter {
         if (!uuidValido(partes[2]!)) return no404
         return m === 'GET' ? [200, this.detalle(partes[2]!.toLowerCase())] : no405
       case 6: {
-        // POST /api/reuniones/:id/pendientes/:n/encargar
+        // POST /api/reuniones/:id/pendientes/:n/encargar | hecho
         const n = entero(partes[4]!)
-        if (!uuidValido(partes[2]!) || partes[3] !== 'pendientes' || n === undefined || n < 0 || partes[5] !== 'encargar') return no404
+        if (!uuidValido(partes[2]!) || partes[3] !== 'pendientes' || n === undefined || n < 0 || (partes[5] !== 'encargar' && partes[5] !== 'hecho')) return no404
         if (m !== 'POST') return no405
-        return [202, await this.encargar(partes[2]!.toLowerCase(), n)]
+        if (partes[5] === 'hecho') return [200, this.hecho(partes[2]!.toLowerCase(), n, body)]
+        return [202, await this.encargar(partes[2]!.toLowerCase(), n, body)]
       }
-      case 5:
-        return no404
+      case 5: {
+        // POST /api/reuniones/:id/pendientes/encargar-todos
+        if (!uuidValido(partes[2]!) || partes[3] !== 'pendientes' || partes[4] !== 'encargar-todos') return no404
+        if (m !== 'POST') return no405
+        return [202, await this.encargarTodos(partes[2]!.toLowerCase())]
+      }
       default: {
         if (!uuidValido(partes[2]!)) return no404
         const id = partes[2]!.toLowerCase()
         if (m !== 'POST') return no405
         switch (partes[3]) {
+          case 'flujo': return [200, this.borradorFlujo(id)]
           case 'intervencion': return [200, this.intervenir(id, body)]
           case 'ronda': return [200, this.otraRonda(id)]
           case 'cerrar': return [200, await this.cerrar(id)]
+          case 'resumen': return [200, await this.resumir(id)]
           default: return no404
         }
       }
@@ -805,6 +911,8 @@ export class ReunionesRouter implements SubRouter {
     if (f.error !== undefined) o.error = f.error
     if (f.estado === 'cerrada' && f.salida !== undefined && fs.existsSync(path.join(f.oficina, f.salida))) o.salidaRuta = path.join(f.oficina, f.salida)
     if (f.documentos.length > 0) o.documentos = f.documentos
+    if (f.estado !== 'cerrada' && f.resumenParcial !== undefined) { try { o.resumenParcial = JSON.parse(f.resumenParcial) } catch {} }
+    if (this.resumiendo.has(f.id)) o.resumiendo = true
     return o
   }
 
@@ -942,6 +1050,42 @@ export class ReunionesRouter implements SubRouter {
     }
   }
 
+  /** Resumen de lo dicho hasta ahora sin cerrar: no escribe acta ni toca decisiones, pendientes ni avisos.
+   *  Se puede pedir con una ronda en curso (resume los turnos que ya están). */
+  private async resumir(id: string): Promise<Obj> {
+    const a = this.s.oficinas.requerirActiva()
+    const f = this.fila(id, a)
+    if (f.estado === 'cerrada' || this.cerrando.has(id)) throw new ErrorAPI(409, 'La reunión ya está cerrada.')
+    if (this.resumiendo.has(id)) throw new ErrorAPI(409, 'Ya estoy armando un resumen de esta reunión.')
+    const turnos = this.db.turnosDe(id)
+    if (!turnos.some((t) => !t.error && t.agente !== 'usuario')) throw new ErrorAPI(409, 'Todavía no hay opiniones para resumir.')
+    const of = a.oficina
+    const parts = f.agentes.map((x) => agenteDe(of, x)).filter((x): x is AgenteDef => x !== undefined)
+    const patron: PatronReunion = esPatron(f.patron) ? f.patron : 'debate'
+    const { lider, bandoA, bandoB } = rolesDe(f, of)
+    this.resumiendo.add(id)
+    const caja = new CajaCosto()
+    try {
+      let t: string
+      try {
+        t = await this.s.runner.correrSinAgente(promptSintesis({ oficina: of, tema: f.tema, participantes: parts, turnos, patron, lider, bandoA, bandoB, parcial: true }),
+          { timeout: this.timeoutSintesis, cwd: a.carpeta, obs: caja.observador() })
+      } catch (e) {
+        throw new ErrorAPI(500, e instanceof ClaudeError ? e.mensaje : 'No pude armar el resumen.')
+      } finally {
+        this.s.store.registrarCosto({ oficina: a.carpeta, origen: 'sintesis', ref: id, costo: caja.valor })
+      }
+      const s = parsearResumenParcial(t)
+      if (!s) throw new ErrorAPI(500, 'El resumen no vino en el formato esperado.')
+      const r: ResumenParcial = { ...s, turnos: turnos.length, ts: Date.now() / 1000 }
+      // si mientras tanto se cerró, el acta manda: no se guarda
+      if (this.db.una(id, a.carpeta)?.estado !== 'cerrada') this.db.resumenParcial(id, JSON.stringify(resumenParcialJSON(r)))
+    } finally {
+      this.resumiendo.delete(id)
+    }
+    return this.respuesta(id, a)
+  }
+
   private async cerrarReunion(id: string, a: OficinaActiva, f: ReunionFila): Promise<Obj> {
     const { store, runner, log } = this.s
     const turnos = this.db.turnosDe(id)
@@ -958,7 +1102,7 @@ export class ReunionesRouter implements SubRouter {
       try {
         const t = await runner.correrSinAgente(promptSintesis({ oficina: of, tema: f.tema, participantes: parts, turnos, patron, lider, bandoA, bandoB }),
           { timeout: this.timeoutSintesis, cwd: a.carpeta, obs: caja.observador() })
-        const s = parsearSintesis(t)
+        const s = parsearSintesis(t, 1, (m) => log.info(`reuniones: dependencia descartada: ${m}`))
         if (s) sintesis = s
         else errSint = 'La síntesis no vino en el formato esperado.'
       } catch (e) {
@@ -1183,7 +1327,7 @@ export class ReunionesRouter implements SubRouter {
   /** Pendientes de la síntesis de una reunión cerrada (undefined si no está cerrada o no tiene). */
   static pendientes(f: ReunionFila): Pendiente[] | undefined {
     if (f.estado !== 'cerrada' || f.sintesis === undefined) return undefined
-    const s = parsearSintesis(f.sintesis)
+    const s = parsearSintesis(f.sintesis, 0)
     return s && s.pendientes.length > 0 ? s.pendientes : undefined
   }
 
@@ -1193,10 +1337,24 @@ export class ReunionesRouter implements SubRouter {
     const ps = ReunionesRouter.pendientes(f)
     if (!ps) return undefined
     const prog = programadorDe(this.s)
+    const dep = dependenciasDe(this.s)
     return ps.map((p, i) => {
       const ag = PendientesReunion.agente(p.quien, a.oficina)
-      const o: Obj = { pendiente: i, agente: ag ? ag.id : null, encargable: ag !== undefined && !p.usuario && prog !== undefined }
+      const o: Obj = { pendiente: i, agente: ag ? ag.id : null, encargable: ag !== undefined && !p.usuario && prog !== undefined, dependeDe: p.dependeDe ?? [] }
       const idEnc = Programador.idEncargo(f.id, i)
+      // esperando a sus dependencias (mientras alguna espera del grupo siga abierta)
+      const es = dep?.abiertasDeGrupo(a.carpeta, `reunion:${f.id}:${i}`) ?? []
+      if (es.length > 0) {
+        o.espera = {
+          estado: es.some((x) => x.estado === 'esperando') ? 'esperando' : es.some((x) => x.estado === 'lista') ? 'lista' : 'relanzada',
+          esperaA: [...new Set(es.map((x) => x.esperaA))],
+          esperando: es.filter((x) => x.estado === 'esperando').map((x) => Number(x.ref.split(':')[2])),
+          ids: es.map((x) => x.id), desde: iso(Math.min(...es.map((x) => x.creada))),
+        }
+      }
+      // un pendiente de la persona que ya marcó como hecho
+      const hecho = this.s.entregas.porRef(a.carpeta, idEnc)
+      if (hecho && hecho.origen === 'persona') o.hecho = hecho.id
       const ej = prog?.ejecuciones.ultima(a.carpeta, idEnc)
       if (ej) {
         const enc: Obj = { estado: ej.estado, ejecucion: ej.id }
@@ -1210,24 +1368,148 @@ export class ReunionesRouter implements SubRouter {
     })
   }
 
-  /** «Hacelo ahora»: valida el pendiente y lanza el encargo. 202 con la reunión (y su `pendientesEstado` actualizado). */
-  private async encargar(id: string, n: number): Promise<Obj> {
-    const prog = programadorDe(this.s)
-    if (!prog) throw new ErrorAPI(404, 'no')
+  /** La reunión cerrada con pendientes (o 404/409), en la oficina activa. */
+  private conPendientes(id: string): { a: OficinaActiva; f: ReunionFila; ps: Pendiente[] } {
     const a = this.s.oficinas.requerirActiva()
     const f = this.db.una(id, a.carpeta)
     if (!f) throw new ErrorAPI(404, 'No encontré esa reunión.')
     const ps = ReunionesRouter.pendientes(f)
     if (!ps) throw new ErrorAPI(409, 'La reunión todavía no tiene pendientes (se cierran con el acta).')
+    return { a, f, ps }
+  }
+
+  private respuestaPendientes(id: string, a: OficinaActiva): Obj {
+    const g = this.db.una(id, a.carpeta)
+    if (!g) throw new ErrorAPI(404, 'No encontré esa reunión.')
+    return { id: g.id, pendientesEstado: this.estadoPendientes(g, a) ?? [] }
+  }
+
+  /** `POST /api/reuniones/:id/flujo`: borrador (sin guardar nada) de un flujo con los pendientes como pasos, en orden
+   *  topológico: cada uno recibe de las dependencias que tiene. La persona lo ajusta en el editor de flujos y lo guarda. */
+  private borradorFlujo(id: string): Obj {
+    const { a, f, ps } = this.conPendientes(id)
+    if (!ps.some((p) => (p.dependeDe?.length ?? 0) > 0)) throw new ErrorAPI(409, 'Ningún pendiente de esta reunión depende de otro: no hay una cadena para pasar a flujo.')
+    // Kahn estable por índice: siempre sale el de menor índice entre los que ya tienen todo lo que esperan
+    const orden: number[] = []
+    const listos = new Set<number>()
+    while (orden.length < ps.length) {
+      const i = ps.findIndex((p, k) => !listos.has(k) && (p.dependeDe ?? []).every((d) => listos.has(d)))
+      if (i < 0) throw new ErrorAPI(409, 'Los pendientes dependen unos de otros en círculo: no se puede armar el flujo.')
+      orden.push(i)
+      listos.add(i)
+    }
+    const pasos = orden.map((i) => {
+      const p = ps[i]!
+      const ag = PendientesReunion.agente(p.quien, a.oficina)
+      return {
+        id: `p${i + 1}`, nombre: prefijo(TextoEntrega.titulo(p.que), 80), quien: p.usuario || !ag ? 'persona' : ag.id, consigna: p.que,
+        // `[]` explícito: sin él, un paso raíz que queda en segundo lugar recibiría del anterior
+        recibeDe: (p.dependeDe ?? []).map((d) => `p${d + 1}`), entrega: 'Lo que pide el pendiente', aprobacion: false,
+      }
+    })
+    const usados = new Set((a.oficina.flujos ?? []).map((x) => x.id))
+    const flujo = flujoDesde({ nombre: prefijo(f.tema, 80), descripcion: prefijo(`Armado desde la reunión «${f.tema}»`, 600), origen: `reunion:${f.id}`, pasos }, usados)
+    return { borrador: flujoJSON(flujo) }
+  }
+
+  /** «Hacelo ahora»: valida el pendiente y lanza el encargo (o lo deja esperando a sus dependencias). 202 con la reunión (y
+   *  su `pendientesEstado` actualizado). `{forzar: true}` arranca igual, sin esperar a las dependencias. */
+  private async encargar(id: string, n: number, body?: Buffer): Promise<Obj> {
+    if (!programadorDe(this.s)) throw new ErrorAPI(404, 'no')
+    const { a, f, ps } = this.conPendientes(id)
     if (n >= ps.length) throw new ErrorAPI(404, 'No existe ese pendiente.')
+    const forzar = objetoOpcional(body).forzar === true
+    await this.encargarUno(a, f, ps, n, forzar, new Set())
+    return this.respuestaPendientes(id, a)
+  }
+
+  /** Lanza el pendiente `n`, o lo deja en espera de las dependencias que todavía no entregaron (encargando en cascada las que
+   *  son de un agente y todavía no corren; las de la persona quedan esperándola). */
+  private async encargarUno(a: OficinaActiva, f: ReunionFila, ps: Pendiente[], n: number, forzar: boolean, visitando: Set<number>): Promise<void> {
+    const prog = programadorDe(this.s)!
     const p = ps[n]!
     if (p.usuario) throw new ErrorAPI(409, 'Ese pendiente necesita tu parte: el agente no lo puede hacer solo.')
     const def = PendientesReunion.agente(p.quien, a.oficina)
     if (!def) throw new ErrorAPI(409, 'Ese pendiente no es de un agente de la oficina.')
-    await prog.encargar(a, def, { reunion: id, pendiente: n, nombre: TextoEntrega.titulo(p.que), consigna: consignaEncargo({ tema: f.tema, acta: f.acta, pendiente: p }) })
-    const g = this.db.una(id, a.carpeta)
-    if (!g) throw new ErrorAPI(404, 'No encontré esa reunión.')
-    return { id: g.id, pendientesEstado: this.estadoPendientes(g, a) ?? [] }
+    const consigna = consignaEncargo({ tema: f.tema, acta: f.acta, pendiente: p })
+    const nombre = TextoEntrega.titulo(p.que)
+    const dep = dependenciasDe(this.s)
+    const grupo = `reunion:${f.id}:${n}`
+    if (dep && forzar) dep.cancelarGrupo(a.carpeta, grupo, 'Arrancó igual, sin esperar')
+    else if (dep && (p.dependeDe?.length ?? 0) > 0) {
+      if (dep.abiertasDeGrupo(a.carpeta, grupo).length > 0) return // ya está esperando (o rehaciéndose): nada más que hacer
+      const faltan: { indice: number; quien: string; que: string; lanzar: boolean }[] = []
+      for (const m of p.dependeDe!) {
+        const pm = ps[m]
+        if (!pm) continue
+        const defM = PendientesReunion.agente(pm.quien, a.oficina)
+        const persona = pm.usuario || !defM
+        const quien = persona ? 'persona' : defM!.id
+        const ref = Programador.idEncargo(f.id, m)
+        if (dep.entregaDe(a.carpeta, ref, quien)) continue // ya está hecha
+        // un encargo que corre, que ya entregó algo parcial o que está esperando lo suyo no se vuelve a lanzar
+        const enCurso = prog.estaCorriendo(a.carpeta, ref) || dep.abiertasDeGrupo(a.carpeta, `reunion:${f.id}:${m}`).length > 0 || this.s.entregas.porRef(a.carpeta, ref) !== undefined
+        faltan.push({ indice: m, quien, que: TextoEntrega.titulo(pm.que), lanzar: !persona && !enCurso })
+      }
+      if (faltan.length > 0 && !visitando.has(n)) {
+        // las esperas se crean antes de lanzar nada: si una dependencia entrega enseguida, no se pierde
+        dep.esperarPendientes({ act: a, reunion: f.id, pendiente: n, def, nombre, consigna, dependencias: faltan })
+        try {
+          for (const x of faltan.filter((y) => y.lanzar)) await this.encargarUno(a, f, ps, x.indice, false, new Set([...visitando, n]))
+        } catch (e) {
+          dep.cancelarGrupo(a.carpeta, grupo, 'No se pudo arrancar una de las dependencias')
+          throw e
+        }
+        return
+      }
+    }
+    await prog.encargar(a, def, { reunion: f.id, pendiente: n, nombre, consigna })
+  }
+
+  /** Encarga cada pendiente encargable que todavía no tiene encargo: los que no dependen de nadie arrancan y los demás quedan esperando. */
+  private async encargarTodos(id: string): Promise<Obj> {
+    const prog = programadorDe(this.s)
+    if (!prog) throw new ErrorAPI(404, 'no')
+    const { a, f, ps } = this.conPendientes(id)
+    const dep = dependenciasDe(this.s)
+    for (let n = 0; n < ps.length; n++) {
+      const p = ps[n]!
+      const def = PendientesReunion.agente(p.quien, a.oficina)
+      if (p.usuario || !def) continue
+      const idEnc = Programador.idEncargo(id, n)
+      // sin encargo previo (ni corrida, ni entrega, ni esperas abiertas): lo que una cascada ya lanzó no se repite
+      if (prog.ejecuciones.ultima(a.carpeta, idEnc) || prog.estaCorriendo(a.carpeta, idEnc) || this.s.entregas.porRef(a.carpeta, idEnc)) continue
+      if (dep && dep.abiertasDeGrupo(a.carpeta, `reunion:${id}:${n}`).length > 0) continue
+      try {
+        await this.encargarUno(a, f, ps, n, false, new Set())
+      } catch (e) {
+        if (!(e instanceof ErrorAPI)) throw e
+        this.s.log.info(`reuniones: encargar-todos: pendiente ${n + 1}: ${e.mensaje}`)
+      }
+    }
+    return this.respuestaPendientes(id, a)
+  }
+
+  /** «Ya lo hice» de un pendiente de la persona: deja una entrega suya (ya revisada) con la ref del encargo, que libera a quien
+   *  lo esperaba. 409 si el pendiente es de un agente y se puede encargar. */
+  private hecho(id: string, n: number, body?: Buffer): Obj {
+    const { a, ps } = this.conPendientes(id)
+    if (n >= ps.length) throw new ErrorAPI(404, 'No existe ese pendiente.')
+    const p = ps[n]!
+    const def = PendientesReunion.agente(p.quien, a.oficina)
+    if (def && !p.usuario) throw new ErrorAPI(409, 'Ese pendiente es de un agente: usá «Hacelo ahora».')
+    const nota = Validar.texto(objetoOpcional(body).nota, 'nota', 4000, false) ?? ''
+    const e = this.s.entregas.registrar({
+      oficina: a.carpeta, agente: '', nombre: '', origen: 'persona', ref: Programador.idEncargo(id, n), titulo: TextoEntrega.titulo(p.que),
+      texto: nota === '' ? 'Hecho.' : nota, silenciosa: true,
+    })
+    if (!e) throw new ErrorAPI(500, 'No pude guardar la entrega.')
+    this.s.entregas.marcar(a.carpeta, e.id, 'revisada')
+    // si ya no queda ningún pendiente de la persona sin hacer, se apaga el aviso «necesita tu parte» de la reunión
+    const quedan = ps.some((q, i) => (q.usuario || PendientesReunion.agente(q.quien, a.oficina) === undefined)
+      && this.s.entregas.porRef(a.carpeta, Programador.idEncargo(id, i))?.origen !== 'persona')
+    if (!quedan) this.s.avisos.vistosPorRef(a.carpeta, 'pendiente', id)
+    return this.respuestaPendientes(id, a)
   }
 }
 
