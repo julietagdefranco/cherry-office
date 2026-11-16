@@ -60,8 +60,22 @@
 .entrega-accion pre { font: 12px ui-monospace, Menlo, monospace; background: var(--panel); border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 8px; margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
 
 /* departamentos: misión bajo cada fila */
-.dep-bloque { margin-bottom: 8px; }
-.dep-bloque textarea.campo { min-height: 44px; margin-top: 4px; font-size: 12px; }
+/* departamentos: una tarjeta por sala; nombre y misión se leen como texto y se editan en el lugar */
+.dep-tarjeta { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start; padding: 12px 12px 12px 14px; border: 1px solid var(--linea); border-radius: var(--radio); background: var(--panel); position: relative; overflow: hidden; }
+.dep-tarjeta::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dep-color); }
+.dep-tarjeta .muestra { width: 22px; height: 22px; border-radius: 50%; margin-top: 3px; box-shadow: 0 0 0 3px var(--panel), 0 0 0 4px var(--linea); border: 0; }
+.dep-tarjeta .muestra:hover { box-shadow: 0 0 0 3px var(--panel), 0 0 0 4px var(--suave); }
+.dep-cuerpo { min-width: 0; display: grid; gap: 1px; }
+.dep-nombre, .dep-mision { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; padding: 2px 6px; margin-left: -6px; border-radius: 6px; outline: none; }
+.dep-nombre { font-size: 14px; font-weight: 600; height: 28px; }
+.dep-mision { font-size: 13px; line-height: 1.45; color: var(--suave); resize: none; overflow: hidden; min-height: 24px; }
+.dep-mision::placeholder { color: var(--tenue); font-style: italic; }
+.dep-nombre:hover, .dep-mision:hover { background: var(--panel-2); }
+.dep-nombre:focus, .dep-mision:focus { background: var(--panel); box-shadow: 0 0 0 1px var(--linea-fuerte), 0 0 0 3px var(--foco); color: var(--texto); }
+.dep-acciones { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.dep-borrar { color: var(--suave); opacity: .55; }
+.dep-tarjeta:hover .dep-borrar, .dep-borrar:focus-visible { opacity: 1; }
+.dep-borrar:hover { color: var(--peligro); }
 
 /* insignia clicable (flujo del detalle de una entrega) */
 .insignia-link { cursor: pointer; font: inherit; font-size: 11px; gap: 5px; }
