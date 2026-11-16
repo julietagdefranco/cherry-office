@@ -245,7 +245,10 @@
         h('button.btn.primario', { onclick: function () { App.cerrarDerecho(); nueva(); } }, 'Nueva reunión')));
     } else {
       /* chat: lo que escribís lo toman los turnos que siguen; si no queda ninguna ronda, arranca (o se suma) una más */
-      var enfocado = document.activeElement && document.activeElement.classList.contains('reunion-txt');
+      /* se repinta todo con cada turno nuevo: si estabas escribiendo, el foco y el cursor vuelven en el acto
+         (sin setTimeout: en ese hueco las teclas caían en el body y disparaban atajos globales) */
+      var previo = document.activeElement && document.activeElement.classList.contains('reunion-txt') ? document.activeElement : null;
+      var sel = previo ? { ini: previo.selectionStart, fin: previo.selectionEnd, dir: previo.selectionDirection, top: previo.scrollTop } : null;
       var txt = h('textarea.campo.reunion-txt', { rows: 1, maxlength: 5000,
         placeholder: r.estado === 'en_curso' ? 'Escribile a la reunión: lo van a tener en cuenta en lo que sigue…' : 'Escribile a la reunión: responden en una ronda más…' });
       txt.value = borrador[r.id] || '';
@@ -273,8 +276,13 @@
           api.post('/api/reuniones/' + r.id + '/ronda').then(function (d) { E.reunion = d; sincronizar(); pintarPanel(d); vigilar(d.id); }).catch(App.fallo);
         } }, 'Otra ronda'),
         h('button.btn.primario', { disabled: ocupado, onclick: function () { cerrar(r); } }, cerrando ? [h('span.giro'), 'Armando el acta…'] : 'Cerrar y resumir')));
-      if (txt.value) setTimeout(alto, 0);
-      if (enfocado) setTimeout(function () { txt.focus(); txt.setSelectionRange(txt.value.length, txt.value.length); }, 0);
+      if (txt.value) alto();
+      if (sel) {
+        txt.focus({ preventScroll: true });
+        var n = txt.value.length;
+        txt.setSelectionRange(Math.min(sel.ini, n), Math.min(sel.fin, n), sel.dir || 'none');
+        txt.scrollTop = sel.top;
+      }
     }
     if (scrollAbajo) cuerpo.scrollTop = cuerpo.scrollHeight;
   }
