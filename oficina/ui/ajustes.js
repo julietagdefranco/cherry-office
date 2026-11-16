@@ -243,7 +243,7 @@ App.Ajustes = (function () {
     App.add(hj.cuerpo,
       h('div.ayuda', { style: { marginTop: 0 } }, 'Vale para todas tus oficinas. Los agentes corren comandos y escriben archivos en tu compu: elegí cuánto querés que te pregunten.'),
       h('div.aj-fila', h('div', h('div', 'Modo actual'), h('div.ayuda', { style: { margin: '2px 0 0' } }, modoPermisos() || 'Sin elegir')),
-        h('button.btn.chico', { onclick: function () { App.Permisos.abrirModo(); } }, 'Cambiar…')));
+        h('button.btn.chico', { onclick: function () { App.Permisos.abrirModo(function () { hj.cerrar(); }); } }, 'Cambiar…')));
   }
 
   function abrir(id) {
@@ -266,7 +266,7 @@ App.Ajustes = (function () {
       ss.forEach(function (s) {
         var nota = s.nota ? s.nota() : '';
         nav.appendChild(h('button.aj-item', { 'data-id': s.id, onclick: function () { ir(s.id); } }, App.icono(s.icono), h('span', s.texto),
-          nota ? h('small', nota) : null, h('span.aj-flecha', App.icono('flecha'))));
+          s.nota ? h('small', nota) : null, h('span.aj-flecha', App.icono('flecha'))));
       });
     }
     grupo('oficina', App.E.oficina.nombre);
@@ -288,7 +288,12 @@ App.Ajustes = (function () {
     function ir(sid) {
       var s = visibles.filter(function (x) { return x.id === sid; })[0] || visibles[0];
       idActual = s.id;
-      nav.querySelectorAll('.aj-item[data-id]').forEach(function (b) { b.classList.toggle('sel', b.getAttribute('data-id') === s.id); });
+      nav.querySelectorAll('.aj-item[data-id]').forEach(function (b) {
+        b.classList.toggle('sel', b.getAttribute('data-id') === s.id);
+        /* la nota (p. ej. el modo de permisos) puede haber cambiado desde otra hoja */
+        var x = visibles.filter(function (y) { return y.id === b.getAttribute('data-id'); })[0], small = b.querySelector('small');
+        if (x && x.nota && small) small.textContent = x.nota();
+      });
       caja.classList.add('aj-dentro');
       s.pintar(crear);
       pie.classList.toggle('oculto', !pie.children.length);

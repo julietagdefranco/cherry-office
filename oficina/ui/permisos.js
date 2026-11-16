@@ -76,7 +76,8 @@ App.Permisos = (function () {
       bajada: 'Cada comando o archivo que el agente no tenga permitido te llega como tarjeta para aprobar.' },
   ];
 
-  function elegirModo(actual, primeraVez) {
+  /* `alGuardar(modo)` (opcional): avisa a quien la abrió, p. ej. la sección de Ajustes para mostrar el modo nuevo */
+  function elegirModo(actual, primeraVez, alGuardar) {
     var elegido = actual || 'auto';
     var hj = App.hoja({ titulo: primeraVez ? 'Antes de empezar: los permisos' : 'Permisos de los agentes', ancho: 520, modal: !!primeraVez });
     var err = h('div.error-txt');
@@ -106,6 +107,7 @@ App.Permisos = (function () {
         if (App.E && App.E.estado) App.E.estado.modo_permisos = elegido;
         hj.cerrar();
         App.aviso(elegido === 'auto' ? 'Modo automático activado.' : 'Te vamos a preguntar cada permiso.');
+        if (alGuardar) alGuardar(elegido);
       }).catch(function (e) { guardar.disabled = false; err.textContent = e.message; });
     } }, primeraVez ? 'Empezar' : 'Guardar');
     if (!primeraVez) hj.pie.appendChild(h('button.btn', { onclick: hj.cerrar }, 'Cancelar'));
@@ -113,8 +115,8 @@ App.Permisos = (function () {
   }
 
   /** Desde el menú: lee lo guardado y abre la hoja. */
-  function abrirModo() {
-    App.api.get('/api/preferencias').then(function (r) { elegirModo(r.modo_permisos, false); }).catch(App.fallo);
+  function abrirModo(alGuardar) {
+    App.api.get('/api/preferencias').then(function (r) { elegirModo(r.modo_permisos, false, alGuardar); }).catch(App.fallo);
   }
 
   if (App.on) App.on('actividad', function (r) { aplicar(r.permisos || []); });
