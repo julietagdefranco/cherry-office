@@ -139,6 +139,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     escudo: 'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6zM9 12l2 2 4-4',
     parte: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
     lapiz: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
+    candado: 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z',
     ok: 'M5 12.5l4.5 4.5L19 7',
     bandeja: 'M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z',
     clip: 'M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7.1'
@@ -172,12 +173,16 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
 
   /* ---------------- avisos ---------------- */
   var tostadas = null;
-  App.aviso = function (texto, error) {
+  /* `accion` (opcional): {texto, fn} — un botón en la tostada, p. ej. «Deshacer» */
+  App.aviso = function (texto, error, accion) {
     if (!tostadas) { tostadas = h('div.tostadas'); document.body.appendChild(tostadas); }
-    var t = h('div.tostada' + (error ? '.error' : ''), texto);
+    var t = h('div.tostada' + (error ? '.error' : ''), h('span', texto),
+      accion ? h('button.tostada-accion', { onclick: function () { t.remove(); accion.fn(); } }, accion.texto) : null);
     tostadas.appendChild(t);
-    setTimeout(function () { t.remove(); }, error ? 6500 : 3200);
+    setTimeout(function () { t.remove(); }, error ? 6500 : accion ? 6000 : 3200);
   };
+  /* ajustes que se guardan solos: «Guardado» con «Deshacer» */
+  App.guardado = function (texto, deshacer) { App.aviso(texto || 'Guardado.', false, deshacer ? { texto: 'Deshacer', fn: deshacer } : null); };
   App.fallo = function (e) { App.aviso((e && e.message) || String(e), true); };
 
   /* ---------------- hojas modales (apiladas; Esc cierra la de arriba) ---------------- */
@@ -242,6 +247,152 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     return h('div.nav-vacio', icono ? App.icono(icono) : null, titulo ? h('b', titulo) : null, texto ? h('p', texto) : null,
       botones ? h('div.acciones', { style: { justifyContent: 'center' } }, botones) : null);
   };
+  /* Fila de ajuste: título y ayuda a la izquierda (la ayuda ANTES del control), el control a la derecha */
+  App.ajuste = function (titulo, ayuda, control) {
+    return h('div.ajuste', h('div', h('div.ajuste-tit', titulo), ayuda ? h('div.ajuste-ayuda', ayuda) : null), h('div.ajuste-control', control));
+  };
+
+  /* Cargando con palabras: qué se está trayendo, no un giro suelto */
+  App.cargando = function (texto) { return h('div.vacio.cargando', h('span.giro'), texto ? h('span', texto) : null); };
+
+  /* Opciones a la vista (en vez de <select> o de una hoja para elegir).
+     op: {opciones: [{valor, titulo, sub?, icono?, retrato?: agente, color?}], valor, alCambiar(valor), forma: 'chips'|'lista',
+          multiple?: bool (valor = array), etiqueta?: texto para lectores}. Devuelve el elemento con .valor() y .poner(v). */
+  App.elegir = function (op) {
+    var forma = op.forma || (op.opciones.some(function (o) { return o.sub; }) ? 'lista' : 'chips');
+    var valor = op.multiple ? (op.valor || []).slice() : op.valor;
+    var es = function (v) { return op.multiple ? valor.indexOf(v) >= 0 : valor === v; };
+    var bs = op.opciones.map(function (o) {
+      var marca = o.retrato ? App.retratoImg(o.retrato, 'retrato-mini', 48) : o.color ? h('span.punto', { style: { background: o.color } }) : o.icono ? App.icono(o.icono) : null;
+      var b = forma === 'lista'
+        ? h('button.opcion-ui', { type: 'button' }, marca, h('span.opcion-txt', h('b', o.titulo), o.sub ? h('span', o.sub) : null))
+        : h('button.chip', { type: 'button', title: o.sub || '' }, marca, o.titulo);
+      b.addEventListener('click', function () {
+        if (op.multiple) { var i = valor.indexOf(o.valor); if (i >= 0) valor.splice(i, 1); else valor.push(o.valor); }
+        else valor = o.valor;
+        pintar();
+        if (op.alCambiar) op.alCambiar(op.multiple ? valor.slice() : valor);
+      });
+      return b;
+    });
+    function pintar() {
+      bs.forEach(function (b, i) { var si = es(op.opciones[i].valor); b.classList.toggle('sel', si); b.setAttribute('aria-pressed', si ? 'true' : 'false'); });
+    }
+    pintar();
+    var el = h('div.elegir.' + (forma === 'lista' ? 'elegir-lista' : 'elegir-chips'), { role: 'group', 'aria-label': op.etiqueta || '' }, bs);
+    el.valor = function () { return op.multiple ? valor.slice() : valor; };
+    el.poner = function (v) { valor = op.multiple ? (v || []).slice() : v; pintar(); };
+    return el;
+  };
+
+  /* Fila de algo que espera una decisión: marca (agente, icono o nodo) · título · bajada · estado · UN botón principal · «⋯».
+     op: {marca, titulo, sub?, estado?: nodo, principal?: nodo, mas?: [ítems de App.menu], alTocar?, clase?} */
+  App.filaDecision = function (op) {
+    var marca = op.marca && op.marca.nodeType ? op.marca
+      : op.marca && typeof op.marca === 'object' ? App.retratoImg(op.marca, 'retrato', 64)
+      : h('div.fila-ico', App.icono(op.marca || 'chispa'));
+    var mas = op.mas && op.mas.filter(Boolean).length ? h('button.btn.fantasma.icono.chico', { title: 'Más opciones', onclick: function (ev) { ev.stopPropagation(); App.menu(ev.currentTarget, op.mas.filter(Boolean)); } }, App.icono('puntos')) : null;
+    return h('div.fila-dec' + (op.clase ? '.' + op.clase : '') + (op.alTocar ? '.tocable' : ''), op.alTocar ? { onclick: op.alTocar } : null,
+      marca,
+      h('div.fila-txt', h('div.fila-tit', op.titulo), op.sub ? h('div.fila-sub', op.sub) : null),
+      op.estado || null,
+      op.principal ? h('div.fila-acc', { onclick: function (ev) { ev.stopPropagation(); } }, op.principal) : null,
+      mas);
+  };
+  /* Sección con título, cuenta y una acción para todas (p. ej. «Encargar todo») */
+  App.seccion = function (titulo, hijos, op) {
+    op = op || {};
+    return h('section.seccion-ui',
+      h('h4.seccion-tit', h('span', titulo), op.cuenta ? h('span.cuenta', op.cuenta) : null, op.accion ? h('span.seccion-acc', op.accion) : null),
+      op.ayuda ? h('div.seccion-ayuda', op.ayuda) : null,
+      hijos);
+  };
+
+  /* Lista de textos cortos como chips: «×» para quitar y «+ Agregar» que se vuelve campo.
+     op: {fijos?: [{texto, title?, icono?, accion?}], placeholder, alCambiar(items), max?}. `items` (array de strings) se modifica. */
+  App.chipsEditables = function (items, op) {
+    op = op || {};
+    var caja = h('div.chips-ed');
+    function pintar() {
+      App.vaciar(caja);
+      (op.fijos || []).forEach(function (f) {
+        caja.appendChild(h(f.accion ? 'button.chip.fijo' : 'span.chip.fijo', { title: f.title || '', onclick: f.accion || null }, App.icono(f.icono || 'candado'), f.texto));
+      });
+      items.forEach(function (t, i) {
+        caja.appendChild(h('span.chip', { title: op.titulo ? op.titulo(t) : t }, h('span.chip-txt', op.mostrar ? op.mostrar(t) : t),
+          h('button.chip-x', { type: 'button', title: 'Quitar', onclick: function () {
+            var quitado = items.splice(i, 1)[0]; pintar(); if (op.alCambiar) op.alCambiar(items, { quitado: quitado, pos: i });
+          } }, '×')));
+      });
+      if (op.agregar !== false && (!op.max || items.length < op.max)) {
+        var mas = h('button.chip.agregar', { type: 'button' }, App.icono('mas'), op.textoAgregar || 'Agregar');
+        mas.addEventListener('click', function () {
+          var inp = h('input.campo.chico.chip-campo', { placeholder: op.placeholder || '', maxlength: op.largo || 160 });
+          caja.replaceChild(inp, mas); inp.focus();
+          function listo(guardar) {
+            var v = inp.value.trim();
+            if (guardar && v && items.indexOf(v) < 0) { items.push(v); if (op.alCambiar) op.alCambiar(items, { agregado: v }); }
+            pintar();
+          }
+          inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); listo(true); } if (e.key === 'Escape') { e.stopPropagation(); listo(false); } });
+          inp.addEventListener('blur', function () { listo(true); });
+        });
+        caja.appendChild(mas);
+      }
+    }
+    pintar();
+    caja.repintar = pintar;
+    return caja;
+  };
+
+  /* Traductor único de lo interno a lo humano (reglas de permiso, herramientas, rutas, ids). Lo crudo va solo en el title. */
+  App.humano = (function () {
+    var VERBOS = { Bash: 'correr', Edit: 'editar', Write: 'crear', MultiEdit: 'editar', NotebookEdit: 'editar notebooks', Read: 'leer', WebFetch: 'abrir páginas', WebSearch: 'buscar en la web' };
+    function carpeta(p) {
+      var c = String(p || '').replace(/^\/\//, '/').replace(/\/\*\*$/, '').replace(/\/\*$/, '');
+      var of = App.E && App.E.carpeta ? App.E.carpeta.replace(/\/$/, '') : '';
+      if (of && c.indexOf(of) === 0) c = c.slice(of.length).replace(/^\//, '') || 'la carpeta de la oficina';
+      var home = (c.match(/^\/Users\/[^/]+|^\/home\/[^/]+/) || [])[0];
+      if (home) c = '~' + c.slice(home.length);
+      return c;
+    }
+    /* «Bash(git pull:*)» → {tipo:'correr', texto:'git pull'}; «Edit(//x/**)» → {tipo:'escribir', texto:'x'} */
+    function regla(r) {
+      var m = /^([A-Za-z]+)\((.*)\)$/.exec(r || '');
+      if (!m) {
+        if (/^mcp__/.test(r)) return { tipo: 'conector', texto: herramienta(r), crudo: r };
+        return { tipo: 'otro', texto: VERBOS[r] ? 'Puede ' + VERBOS[r] : 'Otro permiso', crudo: r };
+      }
+      if (m[1] === 'Bash') { var cmd = m[2].replace(/:\*$/, ''); return { tipo: 'correr', texto: cmd.length > 40 ? cmd.slice(0, 39) + '…' : cmd, crudo: r }; }
+      if (m[1] === 'Edit' || m[1] === 'Write' || m[1] === 'MultiEdit') return { tipo: 'escribir', texto: carpeta(m[2]), crudo: r };
+      return { tipo: 'otro', texto: (VERBOS[m[1]] ? 'Puede ' + VERBOS[m[1]] : m[1]) + ' ' + carpeta(m[2]), crudo: r };
+    }
+    /* agrupa: Edit y Write de la misma carpeta son un solo ítem; devuelve [{tipo, texto, reglas:[crudas]}] */
+    function reglas(lista) {
+      var out = [], por = {};
+      (lista || []).forEach(function (r) {
+        var x = regla(r), k = x.tipo + '|' + x.texto;
+        if (por[k]) por[k].reglas.push(r);
+        else { por[k] = { tipo: x.tipo, texto: x.texto, reglas: [r] }; out.push(por[k]); }
+      });
+      return out;
+    }
+    function titulo(s) { s = String(s || '').replace(/[_-]+/g, ' ').trim(); return s.charAt(0).toUpperCase() + s.slice(1); }
+    /* «mcp__claude_ai_Gmail__send_message» → «Gmail: send message» */
+    function herramienta(n) {
+      n = String(n || '');
+      var m = /^mcp__(.+?)__(.+)$/.exec(n);
+      if (!m) return VERBOS[n] ? titulo(VERBOS[n]) : titulo(n);
+      var srv = m[1].replace(/^claude_ai_/, '').replace(/^plugin_[^_]+_/, '');
+      return titulo(srv) + ': ' + m[2].replace(/_/g, ' ');
+    }
+    function conector(n) { var m = /^mcp__(.+?)__/.exec(String(n || '')); return m ? titulo(m[1].replace(/^claude_ai_/, '')) : herramienta(n); }
+    /* ruta → nombre corto (el resto va en el title) */
+    function ruta(p) { var s = String(p || '').replace(/\/$/, ''); return { corta: s.split('/').pop() || s, completa: carpeta(s) }; }
+    function quien(id) { var a = id && App.agente && App.agente(id); return a ? a.nombre : id === 'persona' || id === 'usuario' ? 'Vos' : 'alguien que ya no está'; }
+    return { regla: regla, reglas: reglas, herramienta: herramienta, conector: conector, ruta: ruta, carpeta: carpeta, quien: quien };
+  })();
+
   /* Barra de acciones (pies de panel y de hoja): `izq` a la izquierda, el resto a la derecha; la última es la principal. */
   App.acciones = function (izq, der) {
     return h('div.acciones', izq && izq.length ? h('div.izq', izq) : null, der || null);
@@ -311,12 +462,36 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     }, 0);
     return { cerrar: cerrarEmergente };
   };
+  /* Menú: con tope de alto y scroll, ↑↓ y Enter, y un filtro arriba cuando pasa de 8 opciones.
+     Ítems: '-' (separador), {titulo}, {texto, icono?, nota?, accion, peligro?, retrato?: agente} */
   App.menu = function (ancla, items) {
-    var m = App.emergente(ancla, h('div', items.map(function (it) {
+    var botones = [];
+    var cuerpo = h('div.menu-cuerpo', items.map(function (it) {
       if (it === '-') return h('div.menu-sep');
       if (it.titulo) return h('div.menu-tit', it.titulo);
-      return h('button.menu-item', { onclick: function () { m.cerrar(); it.accion(); } }, it.icono ? App.icono(it.icono) : null, it.texto, it.nota ? h('small', it.nota) : null);
-    })), 'menu');
+      var b = h('button.menu-item' + (it.peligro ? '.peligro' : ''), { onclick: function () { m.cerrar(); it.accion(); } },
+        it.retrato ? App.retratoImg(it.retrato, 'retrato-mini', 48) : it.icono ? App.icono(it.icono) : null, h('span.menu-txt', it.texto), it.nota ? h('small', it.nota) : null);
+      b._buscar = ((it.texto || '') + ' ' + (it.nota || '')).toLowerCase();
+      botones.push(b);
+      return b;
+    }));
+    var filtro = botones.length > 8 ? h('input.campo.chico.menu-filtro', { placeholder: 'Filtrar…' }) : null;
+    var m = App.emergente(ancla, h('div', filtro, cuerpo), 'menu');
+    function visibles() { return botones.filter(function (b) { return !b.classList.contains('oculto'); }); }
+    if (filtro) {
+      filtro.addEventListener('input', function () {
+        var q = filtro.value.trim().toLowerCase();
+        botones.forEach(function (b) { b.classList.toggle('oculto', !!q && b._buscar.indexOf(q) < 0); });
+      });
+      setTimeout(function () { filtro.focus(); }, 0);
+    } else if (botones[0]) setTimeout(function () { botones[0].focus(); }, 0);
+    var caja = cuerpo.parentNode;
+    caja.addEventListener('keydown', function (e) {
+      var vs = visibles(), i = vs.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); (vs[i + 1] || vs[0] || {}).focus && (vs[i + 1] || vs[0]).focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (i <= 0) { if (filtro) filtro.focus(); else if (vs.length) vs[vs.length - 1].focus(); } else vs[i - 1].focus(); }
+      else if (e.key === 'Enter' && document.activeElement === filtro && vs[0]) { e.preventDefault(); vs[0].click(); }
+    });
     return m;
   };
 

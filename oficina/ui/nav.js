@@ -24,7 +24,8 @@ App.Nav = (function () {
   var LUGAR = {
     reunion: ['charlas'],
     entregables: ['bandeja', 'revisar'], permisos: ['bandeja', 'permisos'], parte: ['bandeja', 'hoy'],
-    deptos: ['equipo', 'departamentos'],
+    deptos: ['equipo', 'departamentos'], contratar: ['equipo', 'contratar'], creador: ['equipo', 'creador'],
+    'reunion-nueva': ['charlas'], 'flujos-editor': ['trabajo', 'flujos'],
     biblioteca: ['archivos', 'biblioteca'], conocimiento: ['archivos', 'conocimiento'], carpeta: ['archivos', 'carpeta'],
     tareas: ['trabajo', 'tareas'], flujos: ['trabajo', 'flujos']
   };
@@ -156,15 +157,18 @@ App.Nav = (function () {
         else if (r.a === 'hoy' || r.a === 'parte') { if (m !== 'parte') App.Parte.abrir(); }
         else vacio();
       } else if (r.sec === 'equipo') {
-        ponerSeccion('equipo', r.a === 'departamentos' ? 'departamentos' : null);
+        ponerSeccion('equipo', ['departamentos', 'contratar', 'creador'].indexOf(r.a) >= 0 ? r.a : null);
         if (r.a === 'departamentos') { if (m !== 'deptos') abrirDeptos(); }
+        else if (r.a === 'contratar') { if (m !== 'contratar') App.Contratar.abrir(); }
+        else if (r.a === 'creador') { if (m !== 'creador') App.Creador.abrir(); }
         else if (r.a && App.agente(r.a)) {
           var pest = r.b || 'perfil';
           if (!(m === 'agente' && App.Agente.actual() === r.a && App.Agente.pestana() === pest)) App.Agente.abrir(r.a, pest);
         } else vacio();
       } else if (r.sec === 'charlas') {
         ponerSeccion('charlas');
-        if (r.a && App.agente(r.a)) {
+        if (r.a === 'nueva-reunion') { if (m !== 'reunion-nueva') App.Reunion.nueva(); }
+        else if (r.a && App.agente(r.a)) {
           if (r.b) { if (!(enChat && App.Agente.actual() === r.a && App.Agente.sesion(r.a) === r.b)) App.Agente.abrirSesion(r.a, r.b); }
           else if (!(enChat && App.Agente.actual() === r.a)) App.Agente.abrir(r.a, 'chat');
         } else if (!esMovil() && sesiones && sesiones.length && !enChat) {
@@ -186,7 +190,10 @@ App.Nav = (function () {
         else vacio();
       } else if (r.sec === 'trabajo') {
         ponerSeccion('trabajo', r.a);
-        if (r.a === 'flujos') {
+        if (r.a === 'flujos' && r.b === 'editar') {
+          var ed = m === 'flujos-editor' && App.Flujos.editando ? App.Flujos.editando() : undefined;
+          if (m !== 'flujos-editor' || String(ed || '') !== (r.resto.split('/')[1] || '')) App.Flujos.editor(r.resto.split('/')[1] || null);
+        } else if (r.a === 'flujos') {
           var co = m === 'flujos' && App.Flujos.corridaAbierta ? App.Flujos.corridaAbierta() : undefined;
           if (r.b) { if (co !== +r.b) App.Flujos.verCorrida(r.b); }
           else if (m !== 'flujos' || co) App.Flujos.abrir();
@@ -211,6 +218,10 @@ App.Nav = (function () {
     if (modo === 'permisos') return '#/bandeja/permisos';
     if (modo === 'parte') return '#/bandeja/hoy';
     if (modo === 'deptos') return '#/equipo/departamentos';
+    if (modo === 'contratar') return '#/equipo/contratar';
+    if (modo === 'creador') return '#/equipo/creador';
+    if (modo === 'reunion-nueva') return '#/charlas/nueva-reunion';
+    if (modo === 'flujos-editor') { var fe = App.Flujos.editando && App.Flujos.editando(); return '#/trabajo/flujos/editar' + (fe ? '/' + encodeURIComponent(fe) : ''); }
     if (modo === 'biblioteca') return '#/archivos/biblioteca';
     if (modo === 'conocimiento') return '#/archivos/conocimiento';
     if (modo === 'carpeta') { var c = App.Carpeta.ruta(); return '#/archivos/carpeta' + (c ? '/' + c.split('/').map(encodeURIComponent).join('/') : ''); }

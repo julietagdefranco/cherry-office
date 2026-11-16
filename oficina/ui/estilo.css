@@ -856,3 +856,69 @@ button.adjunto:hover { background: var(--panel-2); }
 @media (hover: none) { .agente-lapiz { opacity: 1; } }
 .agente-cab.ficha .retrato { width: 40px; height: 40px; border-radius: 10px; }
 .agente-cab .volver { flex: none; }
+
+/* ================= piezas comunes de presentación (base.js) ================= */
+.tostada { display: flex; align-items: center; gap: 12px; }
+.tostada-accion { border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; padding: 0; }
+.menu-cuerpo { max-height: min(60vh, 420px); overflow-y: auto; }
+.menu-filtro { width: 100%; margin: 0 0 5px; }
+.menu-item.peligro { color: var(--peligro); }
+.menu-item .retrato-mini { width: 20px; height: 20px; border-radius: 5px; flex: none; }
+.menu-item .menu-txt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu-item:focus-visible { outline: none; background: var(--panel-2); box-shadow: inset 0 0 0 2px var(--acento); }
+.vacio.cargando { display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* elegir: chips de una elección o lista de opciones con bajada */
+.elegir-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.elegir-chips .chip .punto { width: 8px; height: 8px; }
+.elegir-chips .chip .retrato-mini { width: 18px; height: 18px; border-radius: 5px; margin-left: -4px; }
+.elegir-lista { display: grid; gap: 6px; }
+.opcion-ui { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 9px 12px; border: 1px solid var(--linea); border-radius: var(--radio); background: var(--panel); cursor: pointer; font: inherit; color: inherit; }
+.opcion-ui:hover { border-color: var(--linea-fuerte); }
+.opcion-ui.sel { border-color: var(--acento); box-shadow: inset 0 0 0 1px var(--acento); }
+.opcion-ui > svg { width: 17px; height: 17px; color: var(--suave); margin-top: 1px; flex: none; }
+.opcion-ui .retrato-mini { width: 24px; height: 24px; border-radius: 6px; flex: none; }
+.opcion-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.opcion-txt b { font-weight: 600; }
+.opcion-txt span { color: var(--suave); font-size: 12px; }
+
+/* fila de decisión */
+.fila-dec { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-top: 1px solid var(--linea); }
+.fila-dec:first-child { border-top: 0; }
+.fila-dec.tocable { cursor: pointer; border-radius: var(--radio-chico); }
+.fila-dec.tocable:hover { background: var(--panel-2); }
+.fila-dec > .retrato { width: 32px; height: 32px; border-radius: 8px; flex: none; }
+.fila-ico { width: 32px; height: 32px; border-radius: 8px; background: var(--fondo); border: 1px solid var(--linea); display: flex; align-items: center; justify-content: center; color: var(--suave); flex: none; }
+.fila-ico svg { width: 16px; height: 16px; }
+.fila-txt { flex: 1; min-width: 0; }
+.fila-tit { font-weight: 500; overflow-wrap: anywhere; }
+.fila-sub { color: var(--suave); font-size: 12px; margin-top: 1px; overflow-wrap: anywhere; }
+.fila-acc { display: flex; gap: 6px; flex: none; }
+.fila-dec > .insignia { flex: none; }
+
+/* sección con título, cuenta y acción */
+.seccion-ui { margin: 14px 0 4px; }
+.seccion-tit { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: var(--tenue); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 4px; min-height: 26px; }
+.seccion-tit .cuenta { font-weight: 500; }
+.seccion-acc { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.seccion-ayuda { color: var(--suave); font-size: 12px; margin: -2px 0 6px; }
+
+/* chips editables */
+.chips-ed { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chips-ed .chip { height: 28px; max-width: 100%; }
+.chips-ed .chip-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips-ed .chip.fijo { background: var(--panel-2); color: var(--suave); }
+.chips-ed .chip.fijo svg { width: 13px; height: 13px; }
+.chips-ed .chip.agregar { border-style: dashed; color: var(--suave); }
+.chips-ed .chip.agregar svg { width: 13px; height: 13px; }
+.chip-x { border: 0; background: none; color: var(--tenue); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 0 0 2px; margin-right: -4px; }
+.chip-x:hover { color: var(--peligro); }
+.chip-campo { width: 220px; height: 28px; }
+
+/* fila de ajuste: título y ayuda a la izquierda, control a la derecha (o debajo en angosto) */
+.ajuste { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); gap: 6px 16px; padding: 12px 0; border-top: 1px solid var(--linea); align-items: start; }
+.ajuste:first-child { border-top: 0; }
+.ajuste-tit { font-weight: 500; }
+.ajuste-ayuda { color: var(--suave); font-size: 12px; margin-top: 2px; }
+.resumen-ui { background: var(--panel-2); border: 1px solid var(--linea); border-radius: var(--radio); padding: 9px 12px; color: var(--suave); font-size: 12.5px; margin: 4px 0 8px; }
+@media (max-width: 720px) { .ajuste { grid-template-columns: minmax(0, 1fr); } }
