@@ -104,6 +104,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
   /* íconos de trazo fino (SVG inline) */
   var ICONOS = {
     mas: 'M12 5v14M5 12h14',
+    copiar: 'M9 9h10v11H9zM5 15V4h10',
     puntos: 'M6 12h.01M12 12h.01M18 12h.01',
     abajo: 'M7 10l5 5 5-5',
     deslizadores: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
@@ -256,6 +257,23 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     })), 'menu');
     return m;
   };
+
+  /* clic derecho sobre un mensaje del chat (tuyo o del agente): copiar la selección o el mensaje entero.
+     El texto del mensaje sale de data-texto (el original, con su markdown) si lo hay; si no, del texto visible. */
+  App.copiarTexto = function (texto) {
+    (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
+  };
+  document.addEventListener('contextmenu', function (e) {
+    var msg = e.target.closest && e.target.closest('.msg');
+    if (!msg) return;
+    e.preventDefault();
+    var sel = window.getSelection(), elegido = sel && !sel.isCollapsed && msg.contains(sel.anchorNode) ? sel.toString() : '';
+    var punto = { getBoundingClientRect: function () { return { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY - 6 }; } };
+    var items = [];
+    if (elegido.trim()) items.push({ texto: 'Copiar selección', icono: 'copiar', accion: function () { App.copiarTexto(elegido); } });
+    items.push({ texto: 'Copiar mensaje', icono: 'copiar', accion: function () { App.copiarTexto(msg.dataset.texto || msg.innerText.trim()); } });
+    App.menu(punto, items);
+  });
 
   /* ---------------- utilidades ---------------- */
   App.uuid = function () {

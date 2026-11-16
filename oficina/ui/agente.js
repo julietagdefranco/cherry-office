@@ -113,12 +113,13 @@
           var sp = App.Adjuntos.separar(m.t);
           var chipsAdj = sp.rutas.length ? App.Adjuntos.chips(sp.rutas)
             : (m.adj && m.adj.length ? h('div.adjuntos', m.adj.map(function (n) { return h('div.adjunto', App.icono('clip'), h('span', n)); })) : null);
-          lista.appendChild(h('div.msg.u', sp.texto, chipsAdj));
+          lista.appendChild(h('div.msg.u', sp.texto, chipsAdj)).dataset.texto = sp.texto;
         }
         else {
           var plegados = m.pasos ? App.ChatRico.pasosPlegados(m.pasos) : null;
           if (plegados) lista.appendChild(plegados);
           var burbuja = App.htmlSeguro(h('div.msg.a' + (m.e ? '.e' : '')), App.markdown(m.t));
+          burbuja.dataset.texto = m.t || '';
           var arch = m.pasos ? App.ChatRico.tarjetasArchivos(m.pasos) : null;
           if (arch) burbuja.appendChild(arch);
           lista.appendChild(burbuja);

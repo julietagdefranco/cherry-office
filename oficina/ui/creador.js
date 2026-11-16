@@ -186,8 +186,9 @@ window.App = window.App || {};
       App.vaciar(lista);
       if (!mensajes.length) lista.appendChild(App.htmlSeguro(h('div.msg.a'), App.markdown(INTRO)));
       mensajes.forEach(function (m) {
-        if (m.rol === 'u') lista.appendChild(h('div.msg.u', m.texto));
-        else lista.appendChild(App.htmlSeguro(h('div.msg.a' + (m.error ? '.e' : '')), App.markdown(m.texto)));
+        var b = m.rol === 'u' ? h('div.msg.u', m.texto) : App.htmlSeguro(h('div.msg.a' + (m.error ? '.e' : '')), App.markdown(m.texto));
+        b.dataset.texto = m.texto || '';
+        lista.appendChild(b);
       });
       if (corriendo || enviando) lista.appendChild(h('div.escribiendo', h('span.puntos', h('i'), h('i'), h('i')), 'El Creador está armando…'));
       cuerpoChat.scrollTop = cuerpoChat.scrollHeight;
