@@ -1,6 +1,6 @@
 // Rutas del núcleo para oficinas (Router.despachar de Swift): estado, oficinas, oficina, perfil, departamentos y la
 // lista de agentes. Contratar/editar/despedir agentes, chat e historial se suman al portar sus módulos.
-import type { Config } from './config.js'
+import { esModoPermisos, type Config } from './config.js'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
 import { ValidarAgenteExtra, agenteJSON, departamentoJSON, oficinaJSON } from './oficina.js'
@@ -41,7 +41,7 @@ export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada 
       app: 'prospera-hq', version: config.version, claude: bin !== undefined,
       agentes: (act?.oficina.agentes.map((x) => x.id) ?? []).sort(), auth: a,
       claudePath: bin ?? null, oficina: act ? act.resumen : null,
-      perfil: perfilJSON(oficinas.perfilActual()),
+      perfil: perfilJSON(oficinas.perfilActual()), modo_permisos: config.modoPermisos ?? null,
     }
   }
 
@@ -74,6 +74,16 @@ export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada 
         const nombre = Validar.texto(d.nombre, 'nombre', 80, false) ?? ''
         const [p, a] = oficinas.guardarPerfil({ nombre, avatar: avatarValido(d.avatar) })
         return [200, { perfil: perfilJSON(p), oficina: oficinaJSON(a.oficina) }]
+      }
+      return no405
+    }
+    if (seccion === 'preferencias' && n === 2) {
+      if (method === 'GET') return [200, { modo_permisos: config.modoPermisos ?? null }]
+      if (method === 'PUT') {
+        const d = objeto(body)
+        if (!esModoPermisos(d.modo_permisos)) throw new ErrorAPI(400, '«modo_permisos» tiene que ser "auto" o "preguntar".')
+        oficinas.guardarModoPermisos(d.modo_permisos)
+        return [200, { modo_permisos: d.modo_permisos }]
       }
       return no405
     }

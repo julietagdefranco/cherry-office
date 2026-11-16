@@ -10,6 +10,8 @@
   function arrancar() {
     api.get('/api/estado').then(function (st) {
       E.estado = st;
+      // primera vez que se abre la app: elegir cómo piden permiso los agentes (se ve encima de lo que se monte)
+      if (st.modo_permisos === null && !arrancar.modoPreguntado) { arrancar.modoPreguntado = true; App.Permisos.elegirModo(null, true); }
       if (st.oficina) return api.get('/api/oficina').then(function (r) { montar(r.carpeta, r.oficina); });
       inicio();
     }).catch(function (e) {
@@ -379,6 +381,7 @@
       opcionesOficina().forEach(function (o) { items.push({ texto: o.texto + '…', icono: o.icono, accion: o.accion }); });
       items.push('-');
       items.push({ texto: 'Conectores…', icono: 'enchufe', accion: function () { App.Ajustes.conectores(); } });
+      items.push({ texto: 'Permisos de los agentes…', icono: 'escudo', accion: function () { App.Permisos.abrirModo(); } });
       items.push('-');
       items.push({ texto: 'Nombre de la oficina…', icono: 'edificio', accion: editarOficina });
       items.push({ texto: 'Quién dirige…', icono: 'personas', accion: function () { App.Yo.abrir(); } });
