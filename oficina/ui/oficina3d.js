@@ -126,10 +126,13 @@ App.Oficina3D = !window.THREE ? (function () {
   /* ---------------- init ---------------- */
   function iniciar(contenedor) {
     cont = contenedor;
-    try { renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' }); } catch (e) { return false; }
+    /* con WebGL2 la escena se dibuja en un buffer multisample propio (ver crearPost): el antialias del canvas sería un
+       segundo MSAA a pantalla completa que nadie usa. 'default' deja elegir la GPU integrada en Macs con dos GPU. */
+    var conPost = typeof WebGL2RenderingContext !== 'undefined' && !!T.WebGLMultisampleRenderTarget;
+    try { renderer = new T.WebGLRenderer({ antialias: !conPost, powerPreference: 'default' }); } catch (e) { return false; }
     P.prepararRenderer(renderer);
     renderer.toneMappingExposure = 0.9;            // un poco menos de exposición: colores más plenos, menos lavados
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));   // tope 1.5: el desenfoque miniatura disimula la diferencia y son ~44 % menos píxeles en retina
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = T.PCFSoftShadowMap;
     renderer.shadowMap.autoUpdate = false;
@@ -144,7 +147,7 @@ App.Oficina3D = !window.THREE ? (function () {
     cam = new T.PerspectiveCamera(26, 1, 0.5, 2000);
     var hemi = new T.HemisphereLight(0xffffff, 0xd8d2c8, 0.42); escena.add(hemi);
     sol = new T.DirectionalLight(0xffe2b8, 3.1);            // sol de tarde: cálido y con sombras más largas
-    sol.castShadow = true; sol.shadow.mapSize.set(2048, 2048); sol.shadow.bias = -0.0004; sol.shadow.normalBias = 0.02; sol.shadow.radius = 3;
+    sol.castShadow = true; sol.shadow.mapSize.set(1024, 1024); sol.shadow.bias = -0.0004; sol.shadow.normalBias = 0.02; sol.shadow.radius = 3;
     escena.add(sol, sol.target);
     /* mesa infinita debajo de la maqueta */
     var mesa = new T.Mesh(new T.PlaneGeometry(4000, 4000), new T.MeshStandardMaterial({ color: P.lineal('#e7e4de'), roughness: 0.9, metalness: 0 }));
