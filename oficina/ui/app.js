@@ -273,6 +273,7 @@
       dom.navBib = h('span.insignia.oculto');
       dom.navEnt = h('span.insignia.aviso.oculto');
       dom.navParte = h('span.insignia.oculto');
+      dom.navTar = h('span.insignia.oculto');
       dom.navFlu = h('span.insignia.info.oculto');
       dom.navCon = h('span.insignia.oculto');
       dom.lienzo = h('div.lienzo');
@@ -285,6 +286,7 @@
           /* solo lo del día a día, ordenado por uso; la configuración vive en el menú de la oficina */
           h('button.nav-item', { onclick: function () { App.Yo.irAlDespacho(); App.Entregables.abrir(); } }, App.icono('bandeja'), 'Tu bandeja', dom.navEnt),
           h('button.nav-item', { onclick: function () { App.Parte.abrir(); } }, App.icono('parte'), 'Parte del día', dom.navParte),
+          h('button.nav-item', { onclick: function () { App.Tareas.abrir(); } }, App.icono('reloj'), 'Tareas', dom.navTar),
           h('button.nav-item', { onclick: function () { App.Reunion.abrir(); } }, App.icono('reunion'), 'Reuniones', dom.navReu),
           h('button.nav-item', { onclick: function () { App.Flujos.abrir(); } }, App.icono('flujo'), 'Flujos', dom.navFlu),
           h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib),
@@ -322,6 +324,7 @@
     App.Reunion.retomar();
     App.Biblioteca.vigilarEstado();
     if (App.Conocimiento) App.Conocimiento.vigilarEstado();
+    if (App.Tareas) App.Tareas.vigilar();
     /* el parte del día se abre solo la primera vez de la sesión */
     var yaAbierto = false;
     try { yaAbierto = !!sessionStorage.getItem('oficina.parte'); sessionStorage.setItem('oficina.parte', '1'); } catch (e) {}
@@ -447,6 +450,7 @@
     if (m === 'agente') App.Agente.alCerrar(); else if (m === 'reunion') App.Reunion.alCerrarPanel();
     else if (m === 'entregables' && App.Entregables) App.Entregables.alCerrarPanel();
     else if (m === 'parte' && App.Parte && App.Parte.alCerrarPanel) App.Parte.alCerrarPanel();
+    else if (m === 'tareas' && App.Tareas) App.Tareas.alCerrarPanel();
     else if (m === 'flujos' && App.Flujos && App.Flujos.alCerrarPanel) App.Flujos.alCerrarPanel();
   };
   App.modoDerecho = function () { return dom.derecho && dom.derecho.classList.contains('abierto') ? dom.derecho.getAttribute('data-modo') : null; };

@@ -17,6 +17,11 @@
 .parte-lista { margin: 0; padding-left: 18px; }
 .parte-sec .btn.chico { margin-top: 6px; }
 
+/* Tareas (panel global, tareas.js): filas del parte con botones a la derecha */
+.tarea-fila .insignia .giro { width: 10px; height: 10px; margin-right: 4px; }
+.tarea-acciones { display: flex; gap: 4px; flex: none; }
+.parte-sec .tarea-acciones .btn.chico { margin-top: 0; }
+
 /* reglas */
 .regla-fila { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
 .regla-fila .regla-cuerpo { flex: 1; min-width: 0; }

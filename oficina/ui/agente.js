@@ -696,7 +696,13 @@
     hojaTarea(a, null, alGuardar, pre);
   }
 
-  App.Agente = { abrir: abrir, cerrar: cerrar, alCerrar: alCerrar, actual: function () { return actual; }, nuevaTarea: nuevaTarea,
+  /* abre la hoja de «Editar tarea» desde fuera de la ficha (el panel global de Tareas) */
+  function editarTarea(t, alGuardar) {
+    var a = App.agente(t.agente); if (!a) return;
+    hojaTarea(a, t, alGuardar);
+  }
+
+  App.Agente = { abrir: abrir, cerrar: cerrar, alCerrar: alCerrar, actual: function () { return actual; }, nuevaTarea: nuevaTarea, editarTarea: editarTarea,
     /* abre una conversación concreta del agente (p. ej. la de una entrega) en su pestaña de chat */
     abrirSesion: function (id, sid) {
       var a = App.agente(id); if (!a) return;

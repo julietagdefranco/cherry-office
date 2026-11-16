@@ -42,6 +42,7 @@ App.Paleta = (function () {
       out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Ajustes.abrir('departamentos'); } });
     });
     [['Parte del día', 'parte', function () { App.Parte.abrir(); }],
+     ['Tareas programadas y pendientes', 'reloj', function () { App.Tareas.abrir(); }],
      ['Flujos', 'flujo', function () { App.Flujos.abrir(); }],
      ['Nueva corrida', 'flujo', function () { App.Flujos.abrir(); App.Flujos.nueva(); }],
      ['Armar con el Creador', 'chispa', function () { App.Creador.abrir(); }],
