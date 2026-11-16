@@ -281,12 +281,21 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
      código, separadores, negrita, cursiva, tachado y enlaces. */
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function enlace(u, texto) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + texto + '</a>'; }
+  /* `![alt](src)`: imágenes de la web, `data:image/…` o rutas de archivos (de la oficina: las carga chat-rico.js).
+     Cualquier otro esquema (javascript:, file:…) no es imagen y queda como texto. */
+  function imagen(u, alt) {
+    var a = ' alt="' + esc(alt) + '"';
+    if (/^https?:\/\//i.test(u) || /^data:image\/[\w.+-]+[;,]/i.test(u)) return '<img class="md-img" src="' + esc(u) + '"' + a + ' loading="lazy">';
+    if (/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^[a-z]:[\\/]/i.test(u)) return null;
+    return '<img class="md-img" data-ruta="' + esc(u) + '"' + a + '>';
+  }
   function enLinea(s) {
     var guardado = [];
     function guardar(html) { guardado.push(html); return '\u0000' + (guardado.length - 1) + '\u0000'; }
     s = String(s).replace(/\u0000/g, '')
       .replace(/`([^`\n]{1,500})`/g, function (_, c) { return guardar('<code>' + esc(c) + '</code>'); })
-      .replace(/!?\[([^\]\n]{1,300})\]\(\s*<?((?:https?:\/\/|mailto:)[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/g, function (_, t, u) { return guardar('<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">') + t + guardar('</a>'); })
+      .replace(/!\[([^\]\n]{0,300})\]\(\s*<?([^\s)>]{1,4000})>?(?:\s+"[^"\n]*")?\s*\)/g, function (m, t, u) { var img = imagen(u, t); return img ? guardar(img) : m; })
+      .replace(/\[([^\]\n]{1,300})\]\(\s*<?((?:https?:\/\/|mailto:)[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/g, function (_, t, u) { return guardar('<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">') + t + guardar('</a>'); })
       .replace(/<((?:https?:\/\/|mailto:)[^\s<>]+)>/g, function (_, u) { return guardar(enlace(u, esc(u))); })
       .replace(/(^|[\s(])(https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"*_])/g, function (_, a, u) { return a + guardar(enlace(u, esc(u))); });
     return esc(s)
@@ -327,11 +336,11 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     }
     for (var i = 0; i < lineas.length; i++) {
       var l = lineas[i], m;
-      if ((m = /^\s*(```+|~~~+)/.exec(l))) {
+      if ((m = /^\s*(```+|~~~+)\s*([\w+#.-]{0,30})/.exec(l))) {
         cerrarTodo();
         var cerca = m[1], cod = [];
         for (i++; i < lineas.length && lineas[i].trim().indexOf(cerca) !== 0; i++) cod.push(lineas[i]);
-        out.push('<pre><code>' + esc(cod.join('\n')) + '</code></pre>');
+        out.push('<div class="md-codigo" data-lang="' + esc(m[2].toLowerCase()) + '"><pre><code>' + esc(cod.join('\n')) + '</code></pre></div>');
         continue;
       }
       if (!l.trim()) { cerrarP(); if (listas.length && !(i + 1 < lineas.length && (RE_ITEM.test(lineas[i + 1]) || /^\s{2,}\S/.test(lineas[i + 1])))) cerrarL(); continue; }
@@ -364,7 +373,11 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     cerrarTodo();
     return out.join('');
   };
-  App.htmlSeguro = function (el, html) { el.innerHTML = html; el.classList.add('md'); return el; };   // solo con salida de App.markdown
+  App.htmlSeguro = function (el, html) {   // solo con salida de App.markdown
+    el.innerHTML = html; el.classList.add('md');
+    if (App.ChatRico) App.ChatRico.hidratar(el);   // imágenes de la oficina, botones de código y artefactos
+    return el;
+  };
 
   /* visor de documentos dentro de la app: markdown formateado (con opción de ver el texto) o texto plano */
   App.esMarkdown = function (nombre) { return /\.(md|markdown|mdown|mkd)$/i.test(nombre || ''); };

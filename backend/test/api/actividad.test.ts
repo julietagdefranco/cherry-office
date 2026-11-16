@@ -50,6 +50,29 @@ describe('Actividad en vivo (API)', () => {
     expect(Math.abs(((dict(c.obj.origenes).chat as number | undefined) ?? 0) - 0.25)).toBeLessThan(1e-9)
   })
 
+  test('chat en vivo: /api/chat/vivo muestra el texto y las herramientas mientras escribe (sin resultados) y la respuesta trae los pasos', async () => {
+    const f = await Fix.crear({ agentes: [{ id: 'marce', depto: 'direccion' }] })
+    expect((await f.get('/api/chat/vivo', { agent: 'marce' })).obj).toEqual({ activo: false })
+    const r = chat(f.b, { agent: 'marce', message: 'STREAM PAUSA armame el plan', session: U.b })
+    const ok = await esperar(async () => {
+      const v = await f.get('/api/chat/vivo', { agent: 'marce' })
+      return Array.isArray(v.obj.pasos) && (v.obj.pasos as unknown[]).length >= 2
+    })
+    expect(ok).toBe(true)
+    const v = await f.get('/api/chat/vivo', { agent: 'marce' })
+    expect(v.obj.activo).toBe(true)
+    expect(v.obj.session).toBe(U.b)
+    expect(v.obj.pasos).toEqual([{ t: 'texto', c: 'Voy a mirar el plan.' }, { t: 'herramienta', nombre: 'Read', objetivo: 'oficina.md' }])
+    expect(JSON.stringify(v.obj).includes('secreto')).toBe(false)
+    f.sb.abrirPuerta()
+    const resp = await r
+    expect(resp.obj.reply).toBe('stream marce')
+    // «listo» (después de la última herramienta) es la respuesta: no se repite en los pasos
+    expect(resp.obj.pasos).toEqual([{ t: 'texto', c: 'Voy a mirar el plan.' }, { t: 'herramienta', nombre: 'Read', objetivo: 'oficina.md' }])
+    expect((await f.get('/api/chat/vivo', { agent: 'marce' })).obj).toEqual({ activo: false })
+    expect((await f.get('/api/chat/vivo', { agent: 'nadie' })).status).toBe(400)
+  })
+
   test('cartel: un pedido largo se resume con haiku y el resumen reemplaza al mensaje recortado; uno corto no se resume', async () => {
     const f = await Fix.crear({ agentes: [{ id: 'marce', depto: 'direccion' }] })
     const r = chat(f.b, { agent: 'marce', message: 'STREAM PAUSA necesito que me armes el plan completo de reels para diciembre', session: U.c })

@@ -140,6 +140,10 @@ async function crearVentana() {
     e.preventDefault()
     abrirAfuera(url)
   })
+  // Los artefactos del chat corren en iframes sandbox (chat-rico.js): ningún iframe puede cargar la app (hq://) adentro.
+  w.webContents.on('will-frame-navigate', (e) => {
+    if (!e.isMainFrame && e.url.startsWith(ORIGEN)) e.preventDefault()
+  })
   w.webContents.setWindowOpenHandler(({ url }) => {
     abrirAfuera(url)
     return { action: 'deny' }

@@ -32,8 +32,9 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 | PATCH | `/api/agentes/:id` | cualquiera de `{nombre, rol, departamento, avatar, prompt, description, chips, modelo, brief}` | `{agente, oficina}`; reescribe el `.md` solo si cambia `prompt`, `description` o `modelo` |
 | DELETE | `/api/agentes/:id` | | `{ok, archivado: ".claude/agents/.archivados/<id>-<fecha>.md"\|null, oficina}`; `conocimiento/` queda |
 | GET | `/api/agentes/:id/conocimiento` | | `{id, ruta, texto}` |
-| POST | `/api/chat` | `{agent, message, session}` | `{reply}`; cwd = carpeta de la oficina; escritura solo en `conocimiento/agentes/<id>.md` (más `escritura` del agente en `oficina.json`, que solo pone el importador) |
+| POST | `/api/chat` | `{agent, message, session}` | `{reply, pasos?}` (`pasos`: textos intermedios, herramientas y archivos escritos, como en `/api/chat/vivo`, sin los textos finales que ya están en `reply`); cwd = carpeta de la oficina; escritura solo en `conocimiento/agentes/<id>.md` (más `escritura` del agente en `oficina.json`, que solo pone el importador) |
 | GET | `/api/historial?agent=&session=` | | igual que antes; las sesiones tienen clave por oficina |
+| GET | `/api/chat/vivo?agent=` | | Mientras el agente responde: `{activo:true, session, version, pasos:[{t:'texto',c} \| {t:'herramienta',nombre,objetivo?} \| {t:'archivo',rel?,nombre}]}` (`rel` relativa a la oficina; sin `rel` si el archivo cae afuera). Nunca trae resultados de herramientas ni contenido de archivos. Sin chat en curso: `{activo:false}`. El front lo consulta cada ~0,7 s (`oficina/ui/agente.js`) y lo pinta con `oficina/ui/chat-rico.js` |
 
 Los ids son slugs (`^[a-z0-9][a-z0-9-]{0,40}$`). Los chats guardados antes de las oficinas quedan con oficina vacía y pasan a «Próspera HQ» al importarla (o al abrir una carpeta con la marca `.importada-prospera`).
 

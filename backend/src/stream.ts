@@ -1,5 +1,7 @@
 // Eventos de `claude -p --output-format stream-json --verbose`, reducidos a lo que la oficina muestra (Stream.swift).
-// Nunca llevan contenido de mensajes ni de archivos: solo nombres de herramientas y un objetivo corto.
+// Nunca llevan contenido de archivos ni resultados de herramientas: solo nombres de herramientas y un objetivo corto.
+// El único contenido es el texto que el agente le escribe a la persona (`texto.contenido`), que solo usa la vista en
+// vivo del chat (CajaVivo); la actividad de la oficina lo ignora.
 import path from 'node:path'
 import { esObjeto } from './json.js'
 import { largo, prefijo } from './validar.js'
@@ -10,7 +12,8 @@ export type EventoClaude =
   | { tipo: 'herramienta'; nombre: string; objetivo?: string }
   /** Ruta de un archivo que el agente escribió (Write, Edit, NotebookEdit). Llega después de su `herramienta`. */
   | { tipo: 'archivo'; ruta: string }
-  | { tipo: 'texto' }
+  /** Un bloque de texto de la respuesta. `contenido` solo lo lee el chat en vivo; nunca va a /api/actividad. */
+  | { tipo: 'texto'; contenido?: string }
   | { tipo: 'resultado'; costo?: number; error: boolean }
 
 /** Recibe los eventos de una corrida, en orden. */
@@ -36,7 +39,7 @@ export function parsearEvento(linea: string): EventoClaude[] {
       const bloques = Array.isArray(msg.content) ? msg.content.filter(esObjeto) : []
       return bloques.flatMap((b): EventoClaude[] => {
         if (b.type === 'thinking') return [{ tipo: 'pensando' }]
-        if (b.type === 'text') return [{ tipo: 'texto' }]
+        if (b.type === 'text') return [typeof b.text === 'string' && b.text !== '' ? { tipo: 'texto', contenido: b.text } : { tipo: 'texto' }]
         if (b.type !== 'tool_use' || typeof b.name !== 'string') return []
         const input = esObjeto(b.input) ? b.input : {}
         const out: EventoClaude[] = [{ tipo: 'herramienta', nombre: b.name, objetivo: objetivo(input) }]
@@ -116,6 +119,35 @@ export class CajaArchivos {
   observador(siguiente?: Observador): Observador {
     return (e) => {
       if (e.tipo === 'archivo') this.agregar(e.ruta)
+      siguiente?.(e)
+    }
+  }
+}
+
+/** Un paso de la respuesta en vivo del chat: un bloque de texto, una herramienta o un archivo escrito. */
+export type PasoVivo =
+  | { t: 'texto'; c: string }
+  | { t: 'herramienta'; nombre: string; objetivo?: string }
+  | { t: 'archivo'; ruta: string }
+
+/** Lo que el agente va haciendo en un chat, en orden, para mostrarlo mientras escribe (como Claude Code).
+ *  Guarda el texto que le escribe a la persona y los nombres de herramientas con su objetivo corto, nunca resultados. */
+export class CajaVivo {
+  static readonly maxPasos = 400
+  private pasos: PasoVivo[] = []
+  /** Sube con cada cambio: el front pide de nuevo solo si cambió. */
+  version = 0
+  get valor(): PasoVivo[] { return [...this.pasos] }
+  agregar(p: PasoVivo) {
+    if (this.pasos.length >= CajaVivo.maxPasos) this.pasos.splice(0, 1)
+    this.pasos.push(p)
+    this.version++
+  }
+  observador(siguiente?: Observador): Observador {
+    return (e) => {
+      if (e.tipo === 'texto' && e.contenido !== undefined) this.agregar({ t: 'texto', c: e.contenido })
+      else if (e.tipo === 'herramienta') this.agregar(e.objetivo !== undefined ? { t: 'herramienta', nombre: e.nombre, objetivo: e.objetivo } : { t: 'herramienta', nombre: e.nombre })
+      else if (e.tipo === 'archivo') this.agregar({ t: 'archivo', ruta: e.ruta })
       siguiente?.(e)
     }
   }

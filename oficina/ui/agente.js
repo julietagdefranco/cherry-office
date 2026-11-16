@@ -6,6 +6,23 @@
   var sesiones = {};      // id -> session uuid
   var chats = {};         // id -> [{r, t, e}]  (cache en memoria)
   var enCurso = {};       // id -> true mientras espera respuesta
+  var vivos = {};         // id -> pasos de la respuesta que se está escribiendo (/api/chat/vivo)
+  var refrescarVivo = null;   // {id, fn}: repinta la burbuja en vivo del chat abierto
+
+  /* Mientras el agente responde, cada ~0,7 s trae lo que va escribiendo y haciendo (textos y herramientas), como Claude Code. */
+  function seguirVivo(id) {
+    var version = -1;
+    function paso() {
+      if (!enCurso[id]) return;
+      api.get('/api/chat/vivo', { agent: id }).then(function (r) {
+        if (!enCurso[id] || !r.activo || r.version === version) return;
+        version = r.version;
+        vivos[id] = r.pasos || [];
+        if (refrescarVivo && refrescarVivo.id === id && actual === id && pestana === 'chat') refrescarVivo.fn();
+      }).catch(function () {}).then(function () { if (enCurso[id]) setTimeout(paso, 700); });
+    }
+    setTimeout(paso, 300);
+  }
 
   /* Consultas a colegas (Fase 4): /api/consultas?session= trae lo que el agente consultó en esa conversación; cada una trae
      `pos` = índice, en el historial, de la respuesta del agente que la hizo. Se cuelgan de esa respuesta como `m.consultas`. */
@@ -96,11 +113,26 @@
           lista.appendChild(h('div.msg.u', sp.texto, chipsAdj));
         }
         else {
-          lista.appendChild(App.htmlSeguro(h('div.msg.a' + (m.e ? '.e' : '')), App.markdown(m.t)));
+          var plegados = m.pasos ? App.ChatRico.pasosPlegados(m.pasos) : null;
+          if (plegados) lista.appendChild(plegados);
+          var burbuja = App.htmlSeguro(h('div.msg.a' + (m.e ? '.e' : '')), App.markdown(m.t));
+          var arch = m.pasos ? App.ChatRico.tarjetasArchivos(m.pasos) : null;
+          if (arch) burbuja.appendChild(arch);
+          lista.appendChild(burbuja);
           if (m.consultas && m.consultas.length) lista.appendChild(bloqueConsultas(m.consultas));
         }
       });
-      if (enCurso[a.id]) lista.appendChild(h('div.escribiendo', h('span.puntos', h('i'), h('i'), h('i')), a.nombre + ' está escribiendo…'));
+      refrescarVivo = null;
+      if (enCurso[a.id]) {
+        var vivoEl = lista.appendChild(App.ChatRico.burbujaVivo(vivos[a.id], a.nombre));
+        refrescarVivo = { id: a.id, fn: function () {
+          if (!vivoEl.isConnected) return;
+          var abajo = cuerpo.scrollHeight - cuerpo.scrollTop - cuerpo.clientHeight < 80;
+          var nuevo = App.ChatRico.burbujaVivo(vivos[a.id], a.nombre);
+          vivoEl.replaceWith(nuevo); vivoEl = nuevo;
+          if (abajo) cuerpo.scrollTop = cuerpo.scrollHeight;
+        } };
+      }
       cuerpo.scrollTop = cuerpo.scrollHeight;
       enviar.disabled = !!enCurso[a.id];
     }
@@ -111,6 +143,8 @@
       if (!sesiones[a.id]) sesiones[a.id] = App.uuid();
       var id = a.id, nombres = adj.nombres(), leidos = [];
       ocupado(id, true);
+      delete vivos[id];
+      seguirVivo(id);
       adj.leer().then(function (archivos) {
         leidos = archivos;
         (chats[id] = chats[id] || []).push({ r: 'u', t: t, adj: nombres });
@@ -123,11 +157,12 @@
         return api.post('/api/chat', cuerpo);
       }).then(function (r) {
         if (App.Actividad) App.Actividad.ya();
-        (chats[id] = chats[id] || []).push({ r: 'a', t: r.reply || '(sin respuesta)' });
+        (chats[id] = chats[id] || []).push({ r: 'a', t: r.reply || '(sin respuesta)', pasos: r.pasos });
         adj.guardarEnBiblioteca(leidos);
       }).catch(function (e) {
         (chats[id] = chats[id] || []).push({ r: 'a', t: 'No pude responder: ' + e.message, e: true });
       }).then(function () { return cargarConsultas(id); }).then(function () {
+        delete vivos[id];
         ocupado(id, false);
         if (actual === id && pestana === 'chat') pintar();   // si no, el aviso llega por /api/actividad (banner y faro)
       });
