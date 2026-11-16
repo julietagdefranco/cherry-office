@@ -78,7 +78,11 @@ async function arrancar() {
   armarMenu()
   armarBandeja()
   await crearVentana()
-  actualizaciones.iniciar({ ventana: () => ventana, alCambiar: () => { armarMenu(); void refrescarBandeja?.() } })
+  actualizaciones.iniciar({
+    ventana: () => ventana,
+    alCambiar: () => { armarMenu(); void refrescarBandeja?.() },
+    alAvisar: (texto) => ejecutarEnPagina(`window.App && App.aviso && App.aviso(${JSON.stringify(texto)})`),
+  })
 
   app.on('activate', () => mostrar()) // clic en el Dock
   app.on('window-all-closed', () => { /* la app sigue viva en la bandeja / el Dock */ })
@@ -344,7 +348,7 @@ function itemActualizacion(): MenuItemConstructorOptions[] {
   if (!actualizaciones.disponible()) return []
   const e = actualizaciones.estadoActual()
   if (e.tipo === 'lista') return [{ label: `Reiniciar para actualizar a ${e.version}`, click: () => actualizaciones.reiniciar() }]
-  if (e.tipo === 'bajando') return [{ label: `Bajando la versión ${e.version}…`, enabled: false }]
+  if (e.tipo === 'bajando') return [{ label: `Bajando la versión ${e.version}… ${e.pct} %`, enabled: false }]
   if (e.tipo === 'buscando') return [{ label: 'Buscando actualizaciones…', enabled: false }]
   if (e.tipo === 'manual') return [{ label: `Bajar la versión ${e.version}…`, click: () => void shell.openExternal(e.url) }]
   return [{ label: 'Buscar actualizaciones…', click: () => void actualizaciones.buscar(true) }]
@@ -428,7 +432,7 @@ async function menuBandeja(): Promise<Menu> {
   const act = itemActualizacion()
   items.push(
     { type: 'separator' },
-    ...(act.length && ['lista', 'manual'].includes(actualizaciones.estadoActual().tipo) ? act : []),
+    ...(act.length && ['lista', 'manual', 'bajando'].includes(actualizaciones.estadoActual().tipo) ? act : []),
     { label: 'Abrir al iniciar sesión', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
       click: (it) => app.setLoginItemSettings({ openAtLogin: it.checked }) },
     { label: 'Salir de Oficina', click: () => app.quit() },

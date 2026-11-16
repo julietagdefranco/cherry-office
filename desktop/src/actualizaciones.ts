@@ -24,6 +24,8 @@ export type EstadoActualizacion =
 
 let estado: EstadoActualizacion = { tipo: 'nada' }
 let alCambiar: () => void = () => {}
+/** Tostada en la ventana de la oficina (si está abierta): que se vea que algo pasa mientras baja. */
+let alAvisar: (texto: string) => void = () => {}
 let ventana: () => BrowserWindow | undefined = () => undefined
 /** Si el usuario eligió reiniciar ya, al terminar de cerrar se relanza la app. */
 let reiniciarAlSalir = false
@@ -38,14 +40,26 @@ export const disponible = () =>
 export const estadoActual = () => estado
 
 function cambiar(e: EstadoActualizacion) {
+  const antes = estado
+  if (e.tipo === 'bajando' && antes.tipo === 'bajando' && antes.pct === e.pct && antes.version === e.version) return
   estado = e
+  if (e.tipo === 'bajando' && antes.tipo !== 'bajando') {
+    alAvisar(`Hay una versión nueva de Oficina (${e.version}). La estoy bajando; te aviso cuando esté lista para instalar.`)
+  }
+  // barra de progreso en el ícono del Dock (Mac) o de la barra de tareas (Windows)
+  try { ventana()?.setProgressBar(e.tipo === 'bajando' ? Math.max(0.01, e.pct / 100) : -1) } catch {}
   alCambiar()
 }
 
-export function iniciar(opciones: { ventana: () => BrowserWindow | undefined; alCambiar: () => void }) {
+export function iniciar(opciones: {
+  ventana: () => BrowserWindow | undefined
+  alCambiar: () => void
+  alAvisar?: (texto: string) => void
+}) {
   if (!disponible()) return
   ventana = opciones.ventana
   alCambiar = opciones.alCambiar
+  if (opciones.alAvisar) alAvisar = opciones.alAvisar
   if (esMac) {
     const b = mac.bundleActual(app.getPath('exe'))
     if (b && !mac.impedimento(b)) mac.limpiar(b) // restos de una actualización anterior
@@ -96,6 +110,7 @@ export async function buscar(esManual: boolean) {
     return
   }
   if (estado.tipo === 'buscando') return
+  if (esManual) alAvisar('Buscando actualizaciones…')
   if (esMac) return buscarMac(esManual)
   manual = esManual
   try {
