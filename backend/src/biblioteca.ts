@@ -45,8 +45,10 @@ export type ArchivoFila = {
   slug: string
   oficina: string
   nombre: string
-  /** "compartido", id de departamento o "vinculo". */
+  /** "compartido", id de departamento o "vinculo": la carpeta donde está el original (el primero de `departamentos`). */
   departamento: string
+  /** Departamentos a los que está asignado (uno o más; `["compartido"]` = toda la oficina). */
+  departamentos: string[]
   /** Relativa a la oficina (`archivos/...`) si se subió; absoluta si viene de una carpeta vinculada. */
   ruta: string
   /** "subido" | "vinculo" */
@@ -72,7 +74,7 @@ export type ArchivoFila = {
 
 /** ArchivoFila con los valores por omisión de Swift. */
 export function nuevaFila(p: Pick<ArchivoFila, 'slug' | 'oficina' | 'nombre' | 'departamento' | 'ruta' | 'origen' | 'tipo' | 'tam' | 'hash' | 'estado' | 'creado' | 'actualizado'> & Partial<ArchivoFila>): ArchivoFila {
-  return { leer: [], lectura: {}, papelera: false, leerPedido: false, ...p }
+  return { leer: [], lectura: {}, papelera: false, leerPedido: false, departamentos: [p.departamento], ...p }
 }
 
 export type PropuestaFila = {
@@ -120,7 +122,7 @@ export function fichaDesde(o: Obj): Ficha {
 
 // MARK: - SQLite
 
-const colsArchivo = 'slug,oficina,nombre,departamento,ruta,origen,vinculo,tipo,tam,hash,estado,error,aviso,ficha,leer,lectura,creado,actualizado,papelera,leer_pedido'
+const colsArchivo = 'slug,oficina,nombre,departamento,ruta,origen,vinculo,tipo,tam,hash,estado,error,aviso,ficha,leer,lectura,creado,actualizado,papelera,leer_pedido,departamentos'
 const colsPropuesta = 'id,oficina,archivo,titulo,actual,nuevo,sugerencia,estado,creada,resuelta'
 
 const jsonA = (o: unknown) => JSON.stringify(o)
@@ -131,8 +133,10 @@ function archivoDe(r: Fila): ArchivoFila {
   const fi = r.ficha === null ? undefined : analizar(txt(r.ficha))
   const le = r.leer === null ? undefined : analizar(txt(r.leer))
   const lec = r.lectura === null ? undefined : analizar(txt(r.lectura))
+  const deps = r.departamentos === null || r.departamentos === undefined ? undefined : analizar(txt(r.departamentos))
   const f: ArchivoFila = {
     slug: txt(r.slug), oficina: txt(r.oficina), nombre: txt(r.nombre), departamento: txt(r.departamento), ruta: txt(r.ruta),
+    departamentos: Array.isArray(deps) && deps.length > 0 && deps.every((x) => typeof x === 'string') ? (deps as string[]) : [txt(r.departamento)],
     origen: txt(r.origen), tipo: txt(r.tipo), tam: num(r.tam), hash: txt(r.hash), estado: txt(r.estado),
     leer: Array.isArray(le) && le.every((x) => typeof x === 'string') ? (le as string[]) : [],
     lectura: esObjeto(lec) && Object.values(lec).every((x) => typeof x === 'string') ? (lec as Record<string, string>) : {},
@@ -205,6 +209,10 @@ export class BibliotecaDatos {
         );
         CREATE INDEX IF NOT EXISTS propuestas_oficina ON propuestas(oficina, estado);
         `)
+    // asignación a varios departamentos (bases viejas no tienen la columna: NULL = solo `departamento`)
+    if (!db.query("SELECT name FROM pragma_table_info('archivos')").some((f) => txt(f.name) === 'departamentos')) {
+      db.exec('ALTER TABLE archivos ADD COLUMN departamentos TEXT')
+    }
     const hay = db.query("SELECT 1 AS x FROM sqlite_master WHERE name='archivos_fts'").length > 0
     if (!hay) {
       const comun = 'CREATE TABLE archivos_fts (slug TEXT, oficina TEXT, titulo TEXT, resumen TEXT, temas TEXT, texto TEXT, norm TEXT)'
@@ -240,11 +248,12 @@ export class BibliotecaDatos {
   }
 
   archivoGuardar(f: ArchivoFila) {
-    this.db.run(`INSERT OR REPLACE INTO archivos(${colsArchivo}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    this.db.run(`INSERT OR REPLACE INTO archivos(${colsArchivo}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       f.slug, f.oficina, f.nombre, f.departamento, f.ruta, f.origen, f.vinculo ?? null, f.tipo, f.tam, f.hash, f.estado,
       f.error ?? null, f.aviso ?? null, f.ficha ? jsonA(fichaJSON(f.ficha)) : null,
       f.leer.length === 0 ? null : jsonA(f.leer), Object.keys(f.lectura).length === 0 ? null : jsonA(f.lectura),
       f.creado, f.actualizado, f.papelera ? 1 : 0, f.leerPedido ? 1 : 0,
+      f.departamentos.length > 1 || f.departamentos[0] !== f.departamento ? jsonA(f.departamentos) : null,
     ])
   }
 
@@ -294,6 +303,12 @@ export class BibliotecaDatos {
   archivoPedirLectura(slug: string, oficina: string, agentes: string[]) {
     this.db.run("UPDATE archivos SET estado='leyendo', leer=?, lectura=NULL, error=NULL, actualizado=? WHERE oficina=? AND slug=? AND papelera=0",
       [jsonA(agentes), ahora(), oficina, slug])
+  }
+
+  /** Cambia los departamentos a los que está asignado (el primero es la carpeta) y la ruta, si el original se movió. */
+  archivoAsignar(slug: string, oficina: string, departamentos: string[], ruta: string, nombre: string) {
+    this.db.run('UPDATE archivos SET departamento=?, departamentos=?, ruta=?, nombre=?, actualizado=? WHERE oficina=? AND slug=? AND papelera=0',
+      [departamentos[0]!, departamentos.length > 1 ? jsonA(departamentos) : null, ruta, nombre, ahora(), oficina, slug])
   }
 
   archivoPapelera(slug: string, oficina: string, ruta: string) {
@@ -413,6 +428,12 @@ export function nombreDepartamento(id: string, oficina: Oficina): string {
   return oficina.departamentos.find((d) => d.id === id)?.nombre ?? id
 }
 
+/** «Ventas», «Ventas y Redes», «Dirección, Ventas y Redes». */
+export function nombresDepartamentos(ids: string[], oficina: Oficina): string {
+  const n = ids.map((id) => nombreDepartamento(id, oficina))
+  return n.length <= 1 ? (n[0] ?? '') : n.slice(0, -1).join(', ') + ' y ' + n[n.length - 1]
+}
+
 export function tamTexto(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${Math.floor(n / 1024)} KB`
@@ -422,14 +443,14 @@ export function tamTexto(n: number): string {
 const leerTexto = (p: string): string => { try { return fs.readFileSync(p, 'utf8') } catch { return '' } }
 const soloEspacios = (s: string) => s.replace(/^[\s\u0085\u2028\u2029]+|[\s\u0085\u2028\u2029]+$/g, '')
 
-export function promptFicha(p: { oficina: Oficina; carpeta: string; nombre: string; tipo: string; departamento: string; texto: string }): string {
+export function promptFicha(p: { oficina: Oficina; carpeta: string; nombre: string; tipo: string; departamento: string; departamentos?: string[]; texto: string }): string {
   const { oficina } = p
   const deps = oficina.departamentos.map((d) => `- ${d.id}: ${d.nombre}`).join('\n')
   const memoria = recortar(soloEspacios(leerTexto(path.join(p.carpeta, 'conocimiento/oficina.md'))), maxMemoriaPrompt)
   const dec = decisiones(p.carpeta)
   return `Sos el bibliotecario de la oficina «${oficina.nombre}». Llegó un documento nuevo y tenés que fichar.
 
-Documento: ${p.nombre} (tipo: ${p.tipo}; carpeta: ${nombreDepartamento(p.departamento, oficina)})
+Documento: ${p.nombre} (tipo: ${p.tipo}; carpeta: ${nombresDepartamentos(p.departamentos ?? [p.departamento], oficina)})
 
 Departamentos de la oficina (id: nombre):
 ${deps === '' ? '(ninguno)' : deps}
@@ -487,7 +508,7 @@ export function fichaMD(f: ArchivoFila, ficha: Ficha, oficina: Oficina): string 
   let s = `# ${ficha.titulo === '' ? f.nombre : ficha.titulo}\n\n`
   s += `- **Archivo:** ${f.nombre}\n`
   s += `- **Tipo:** ${f.tipo} · ${tamTexto(f.tam)}\n`
-  s += `- **Carpeta:** ${nombreDepartamento(f.departamento, oficina)}\n`
+  s += `- **Carpeta:** ${nombresDepartamentos(f.departamentos, oficina)}\n`
   s += `- **Origen:** ${origen}\n`
   s += `- **Ubicación del original:** ${f.ruta}\n`
   s += `- **Texto completo:** archivos/.texto/${f.slug}.md\n`
@@ -509,7 +530,7 @@ export function catalogoMD(filas: ArchivoFila[], oficina: Oficina): string {
   if (vivas.length === 0) return s + '(Todavía no hay documentos.)\n'
   let out = s
   for (const f of vivas) {
-    const dep = nombreDepartamento(f.departamento, oficina)
+    const dep = nombresDepartamentos(f.departamentos, oficina)
     const fi = f.ficha
     if (fi) {
       let resumen = fi.resumen.split(/\r\n|[\n\r\u000b\u000c\u0085\u2028\u2029]/).filter((x) => x !== '').join(' ')
@@ -734,7 +755,7 @@ export class Biblioteca {
     let errorFicha: string | undefined
     const caja = new CajaCosto()
     try {
-      const p = promptFicha({ oficina: a.oficina, carpeta, nombre: f.nombre, tipo: f.tipo, departamento: f.departamento, texto })
+      const p = promptFicha({ oficina: a.oficina, carpeta, nombre: f.nombre, tipo: f.tipo, departamento: f.departamento, departamentos: f.departamentos, texto })
       const t = await s.runner.correrSinAgente(p, { timeout: this.timeoutFicha, cwd: carpeta, obs: caja.observador() })
       const parsed = parsearFicha(t, f.nombre, a.oficina)
       if (parsed) [ficha, contradicciones] = parsed
@@ -775,12 +796,12 @@ export class Biblioteca {
     sinError(() => datos.archivoEstado(slug, carpeta, 'listo'))
   }
 
-  /** Agentes a los que les sirve: los de los departamentos de `util_para` (si no hay, los del departamento donde está
-   *  el archivo), limitados por el alcance de la carpeta vinculada. */
+  /** Agentes a los que les sirve: primero los de los departamentos a los que está asignado el archivo y después los de
+   *  los departamentos de `util_para`, limitados por el alcance de la carpeta vinculada. */
   lectoresPorDefecto(f: ArchivoFila, o: Oficina): string[] {
-    let deps = f.ficha?.utilPara ?? []
-    if (deps.length === 0 && o.departamentos.some((d) => d.id === f.departamento)) deps = [f.departamento]
-    let ags = o.agentes.filter((ag) => deps.includes(ag.departamento))
+    const deps: string[] = f.departamentos.filter((id) => o.departamentos.some((d) => d.id === id))
+    for (const d of f.ficha?.utilPara ?? []) if (!deps.includes(d)) deps.push(d)
+    let ags = deps.flatMap((d) => o.agentes.filter((ag) => ag.departamento === d))
     const vin = f.vinculo === undefined ? undefined : o.vinculos?.find((v) => v.id === f.vinculo)
     if (vin) ags = ags.filter((ag) => alcanceIncluye(vin.alcance, ag))
     return ags.slice(0, maxLectores).map((ag) => ag.id)
@@ -886,6 +907,7 @@ export class BibliotecaRouter implements SubRouter {
         if (!Slug.valido(slug)) return no404
         if (n === 3) {
           if (m === 'GET') return [200, this.detalle(slug)]
+          if (m === 'PATCH') return [200, this.asignar(slug, body)]
           if (m === 'DELETE') return [200, this.quitar(slug)]
           return no405
         }
@@ -905,7 +927,11 @@ export class BibliotecaRouter implements SubRouter {
         }
         const id = partes[2]!
         if (!Slug.valido(id)) return no404
-        if (n === 3) return m === 'DELETE' ? [200, this.quitarVinculo(id)] : no405
+        if (n === 3) {
+          if (m === 'PATCH') return [200, this.cambiarVinculo(id, body)]
+          if (m === 'DELETE') return [200, this.quitarVinculo(id)]
+          return no405
+        }
         if (n === 4 && partes[3] === 'escanear') return m === 'POST' ? [200, await this.escanearVinculo(id)] : no405
         return no404
       }
@@ -935,7 +961,7 @@ export class BibliotecaRouter implements SubRouter {
   private vista(f: ArchivoFila, snippet?: string): Obj {
     const o: Obj = {
       slug: f.slug, nombre: f.nombre, titulo: f.ficha && f.ficha.titulo !== '' ? f.ficha.titulo : f.nombre,
-      departamento: f.departamento, tipo: f.tipo, tam: f.tam, hash: f.hash, estado: f.estado, origen: f.origen, ruta: f.ruta,
+      departamento: f.departamento, departamentos: f.departamentos, tipo: f.tipo, tam: f.tam, hash: f.hash, estado: f.estado, origen: f.origen, ruta: f.ruta,
       creado: iso(f.creado), actualizado: iso(f.actualizado),
       fichaRuta: `conocimiento/fuentes/${f.slug}.md`, textoRuta: `archivos/.texto/${f.slug}.md`,
     }
@@ -970,7 +996,7 @@ export class BibliotecaRouter implements SubRouter {
       filas = filas.filter((f) => orden.has(f.slug)).sort((x, y) => orden.get(x.slug)! - orden.get(y.slug)!)
     }
     const d = q.departamento
-    if (d !== undefined && d !== '') filas = filas.filter((f) => f.departamento === d)
+    if (d !== undefined && d !== '') filas = filas.filter((f) => f.departamentos.includes(d))
     const o: Obj = { archivos: filas.map((f) => this.vista(f, snippets.get(f.slug))) }
     if (busqueda !== '') o.q = busqueda
     return o
@@ -1053,6 +1079,49 @@ export class BibliotecaRouter implements SubRouter {
     this.b.despertar()
     this.b.log.info(`biblioteca: archivo subido tipo=${ext} tam=${data.length}`)
     return { archivo: this.vista(f) }
+  }
+
+  /** Asigna un archivo subido a uno o más departamentos (o a «compartido», toda la oficina): el original queda en la
+   *  carpeta del primero (`archivos/<departamento>/`); se actualizan la ficha y el catálogo. Los de carpetas vinculadas no
+   *  se asignan uno por uno: se cambia el acceso de la carpeta. */
+  private asignar(slug: string, body?: Buffer): Obj {
+    const a = this.oficinas.requerirActiva()
+    const f = this.fila(slug, a)
+    const d = objeto(body, maxBodyChico)
+    let pedidos: unknown[]
+    if (Array.isArray(d.departamentos)) pedidos = d.departamentos
+    else if (typeof d.departamento === 'string') pedidos = [d.departamento]
+    else throw new ErrorAPI(400, 'Falta «departamentos» (lista de ids; "compartido" = toda la oficina).')
+    let deps: string[] = []
+    for (const x of pedidos) {
+      if (typeof x !== 'string') throw new ErrorAPI(400, '«departamentos» tiene que ser una lista de ids.')
+      if (x !== carpetaCompartido && !a.oficina.departamentos.some((y) => y.id === x)) throw new ErrorAPI(400, `El departamento «${x}» no existe.`)
+      if (!deps.includes(x)) deps.push(x)
+    }
+    // «toda la oficina» no se combina con departamentos; sin ninguno, es de toda la oficina
+    if (deps.length === 0 || deps.includes(carpetaCompartido)) deps = [carpetaCompartido]
+    if (f.origen !== 'subido') throw new ErrorAPI(409, 'Los archivos de una carpeta vinculada se asignan desde la carpeta (cambiá a quién le da acceso).')
+    if (deps.join(',') === f.departamentos.join(',')) return { archivo: this.vista(f) }
+    let ruta = f.ruta
+    let nombre = f.nombre
+    if (deps[0] !== f.departamento) {
+      const relBase = `archivos/${deps[0]}`
+      const destino = Extraccion.rutaLibre(a.ruta(relBase), f.nombre)
+      try {
+        fs.mkdirSync(a.ruta(relBase), { recursive: true })
+        fs.renameSync(a.ruta(f.ruta), destino)
+      } catch {
+        throw new ErrorAPI(500, 'No pude mover el archivo a la carpeta del departamento.')
+      }
+      nombre = path.basename(destino)
+      ruta = `${relBase}/${nombre}`
+    }
+    try { this.datos.archivoAsignar(slug, a.carpeta, deps, ruta, nombre) } catch { throw new ErrorAPI(500, 'No pude guardar el cambio.') }
+    const nueva = this.datos.archivo(slug, a.carpeta) ?? f
+    if (nueva.ficha) { const fi = nueva.ficha; try { this.b.escribir(fichaMD(nueva, fi, a.oficina), a.ruta(`conocimiento/fuentes/${slug}.md`)) } catch {} }
+    this.b.regenerarCatalogo(a)
+    this.b.log.info(`biblioteca: archivo asignado a ${deps.join(',')}`)
+    return { archivo: this.vista(nueva) }
   }
 
   private quitar(slug: string): Obj {
@@ -1316,6 +1385,19 @@ export class BibliotecaRouter implements SubRouter {
     this.oficinas.modificar((o) => { o.vinculos = [...(o.vinculos ?? []), v] })
     this.b.log.info(`biblioteca: carpeta vinculada id=${id}`)
     return { vinculo: this.vistaVinculo(v, this.datos.archivos(a.carpeta)) }
+  }
+
+  /** Cambia a quién le da acceso una carpeta vinculada (`alcance`). */
+  private cambiarVinculo(id: string, body?: Buffer): Obj {
+    const a = this.oficinas.requerirActiva()
+    const v = (a.oficina.vinculos ?? []).find((x) => x.id === id)
+    if (!v) throw new ErrorAPI(404, 'No existe esa carpeta vinculada.')
+    const alcance = this.alcanceDe(objeto(body, maxBodyChico).alcance, a.oficina)
+    const [, nueva] = this.oficinas.modificar((o) => {
+      o.vinculos = (o.vinculos ?? []).map((x) => (x.id === id ? { ...x, alcance } : x))
+    })
+    const v2 = (nueva.oficina.vinculos ?? []).find((x) => x.id === id) ?? { ...v, alcance }
+    return { vinculo: this.vistaVinculo(v2, this.datos.archivos(a.carpeta)) }
   }
 
   private quitarVinculo(id: string): Obj {
