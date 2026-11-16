@@ -10,6 +10,8 @@
   function arrancar() {
     api.get('/api/estado').then(function (st) {
       E.estado = st;
+      // primera vez que se abre la app: elegir cómo piden permiso los agentes (se ve encima de lo que se monte)
+      if (st.modo_permisos === null && !arrancar.modoPreguntado) { arrancar.modoPreguntado = true; App.Permisos.elegirModo(null, true); }
       if (st.oficina) return api.get('/api/oficina').then(function (r) { montar(r.carpeta, r.oficina); });
       inicio();
     }).catch(function (e) {

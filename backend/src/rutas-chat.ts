@@ -15,7 +15,8 @@ import { argumentos, contexto, entorno, variableTokenMCP, type FuenteCatalogo } 
 import { no405, type Resp, type RutaNucleo } from './router.js'
 import type { InfoClaude } from './rutas-oficinas.js'
 import type { Store } from './store.js'
-import { CajaArchivos, CajaCosto } from './stream.js'
+import path from 'node:path'
+import { CajaArchivos, CajaCosto, CajaVivo, type PasoVivo } from './stream.js'
 import { largo, uuidValido } from './validar.js'
 
 export const maxMensaje = 100_000
@@ -78,9 +79,29 @@ export function infoClaude(runner: ClaudeRunner): InfoClaude {
   return { claudePath: () => runner.claudePath, auth: () => cache.valor() }
 }
 
+/** Un paso en vivo para el front: los archivos van relativos a la oficina (`rel`) o, si caen afuera, solo con su nombre. */
+export function pasoJSON(p: PasoVivo, carpeta: string): Obj {
+  if (p.t !== 'archivo') return { ...p }
+  const rel = ArchivosEntrega.relativos([p.ruta], carpeta)[0]
+  return rel !== undefined ? { t: 'archivo', rel, nombre: path.posix.basename(rel) } : { t: 'archivo', nombre: path.basename(p.ruta.replace(/\\/g, '/')) }
+}
+
 export function rutasChat(d: DepsChat): RutaNucleo {
   const { config, store, runner, oficinas, avisos, entregas, log } = d
   const invalido: Resp = [400, { error: 'pedido inválido' }]
+  /** Chats en curso (oficina + agente): lo que el agente va escribiendo y haciendo, para `GET /api/chat/vivo`. */
+  const vivos = new Map<string, { sid: string; caja: CajaVivo }>()
+  const claveVivo = (oficina: string, agente: string) => oficina + '\u001f' + agente
+
+  /** `GET /api/chat/vivo?agent=<id>`: la respuesta que se está escribiendo. `{activo:false}` si no hay chat en curso. */
+  function vivo(q: Record<string, string>): Resp {
+    const act = oficinas.requerirActiva()
+    const agente = q.agent
+    if (agente === undefined || !act.oficina.agentes.some((a) => a.id === agente)) return invalido
+    const v = vivos.get(claveVivo(act.carpeta, agente))
+    if (!v) return [200, { activo: false }]
+    return [200, { activo: true, session: v.sid, version: v.caja.version, pasos: v.caja.valor.map((p) => pasoJSON(p, act.carpeta)) }]
+  }
 
   function historial(q: Record<string, string>): Resp {
     const act = oficinas.requerirActiva()
@@ -155,6 +176,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const carpeta = act.carpeta
     const caja = new CajaCosto()
     const escritos = new CajaArchivos()
+    const enVivo = new CajaVivo()
     const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: d.catalogo?.() })
     // consultas a colegas: el token vive lo que dura este chat. Si el servidor MCP no arrancó, el chat sale igual.
     const mcp = d.mcp?.()
@@ -166,13 +188,14 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     let resultado: Resp
     try {
       resultado = await runner.conCarrilDe(carpeta, agente, async (): Promise<Resp> => {
+        vivos.set(claveVivo(carpeta, agente), { sid, caja: enVivo })
         const envExtra: Record<string, string> = { ...entorno(ctx) }
         if (mcpUrl !== undefined && mcp) envExtra[variableTokenMCP] = mcp.emitir({ oficina: carpeta, agente, sid, perfil: ctx.perfilMCP, interactivo: true })
         try {
           store.asegurarSesion(sid, agente, carpeta)
           store.agregar(sid, 'u', mensaje)
           const activa = store.estaActiva(sid)
-          const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: msg, extra: caja.observador(escritos.observador()) },
+          const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: msg, extra: caja.observador(escritos.observador(enVivo.observador())) },
             async (obs, token) => {
               const resumen = runner.resumirTarea(msg, { oficina: carpeta, agente, token, store })
               try {
@@ -192,6 +215,13 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           // un chat que dejó archivos en archivos/entregables/ cuenta como entrega para revisar
           const archivos = ArchivosEntrega.enEntregables(ArchivosEntrega.relativos(escritos.valor, carpeta))
           const r: Obj = { reply: texto }
+          // los pasos (textos intermedios, herramientas y archivos) para mostrarlos plegados arriba de la respuesta; los
+          // textos después de la última herramienta son la respuesta misma (reply), así que no se repiten
+          const todos = enVivo.valor
+          let fin = todos.length
+          while (fin > 0 && todos[fin - 1]!.t === 'texto') fin--
+          const pasos = todos.slice(0, fin).map((p) => pasoJSON(p, carpeta))
+          if (pasos.length > 0) r.pasos = pasos
           if (archivos.length > 0) {
             const e = entregas.registrar({ oficina: carpeta, agente, nombre: def.nombre, origen: 'chat', ref: sid, titulo: TextoEntrega.titulo(msg),
               texto, sid, archivos, costo: caja.valor })
@@ -209,6 +239,8 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           try { store.agregar(sid, 'a', 'No pude responder: ' + t, true) } catch {}
           return [500, { error: t }]
         } finally {
+          const k = claveVivo(carpeta, agente)
+          if (vivos.get(k)?.caja === enVivo) vivos.delete(k)
           const tok = envExtra[variableTokenMCP]
           if (tok !== undefined) { mcp?.revocar(tok); mcp?.cancelarPermisos?.(tok) }
         }
@@ -256,6 +288,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const n = partes.length
     if (seccion === 'historial' && n === 2) return method === 'GET' ? historial(query) : no405
     if (seccion === 'chat' && n === 2) return method === 'POST' ? chat(body) : no405
+    if (seccion === 'chat' && n === 3 && a2 === 'vivo') return method === 'GET' ? vivo(query) : no405
     if (seccion === 'actividad' && n === 2) {
       if (method !== 'GET') return no405
       const act = oficinas.activa()

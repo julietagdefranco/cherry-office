@@ -20,6 +20,9 @@ export function datosDirPorDefecto(home: string, plataforma: NodeJS.Platform = p
   return path.join(process.env.XDG_DATA_HOME ?? path.join(home, '.local', 'share'), 'Próspera HQ')
 }
 
+export type ModoPermisos = 'auto' | 'preguntar'
+export const esModoPermisos = (v: unknown): v is ModoPermisos => v === 'auto' || v === 'preguntar'
+
 export class Config {
   proyecto: string
   dirsExtra: string[]
@@ -41,6 +44,10 @@ export class Config {
   oficinasDir: string
   /** `--add-dir` extra para los agentes de una oficina (clave `oficina_dirs_extra`). */
   oficinaDirsExtra: string[]
+  /** Cómo piden permiso los agentes (clave `modo_permisos`, toda la app): `auto` = un clasificador de Claude Code decide
+   *  y solo se pregunta lo dudoso; `preguntar` = lo que no está permitido se pregunta o se rechaza. undefined = la
+   *  persona todavía no eligió (la app muestra el aviso al abrir) y se comporta como `preguntar`. */
+  modoPermisos?: ModoPermisos
 
   constructor(home: string = os.homedir()) {
     this.home = home
@@ -112,6 +119,7 @@ export class Config {
     if (s(o.datos_dir)) this.datosDir = Config.ruta(o.datos_dir, home)
     if (s(o.oficinas_dir)) this.oficinasDir = Config.ruta(o.oficinas_dir, home)
     if (lista(o.oficina_dirs_extra)) this.oficinaDirsExtra = o.oficina_dirs_extra.map((d) => Config.ruta(d, home))
+    if (esModoPermisos(o.modo_permisos)) this.modoPermisos = o.modo_permisos
     if (lista(o.legacy_dirs)) this.legacyDirs = [...o.legacy_dirs.map((d) => Config.ruta(d, home)), ...this.legacyDirs]
   }
 

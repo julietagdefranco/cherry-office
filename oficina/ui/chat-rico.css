@@ -1,0 +1,62 @@
+/* Chat rico (chat-rico.js): imágenes, bloques de código, artefactos, pasos del agente y archivos escritos. */
+
+/* imágenes en el markdown */
+.md img.md-img { display: block; max-width: 100%; max-height: 360px; margin: 6px 0; border-radius: var(--radio-chico); border: 1px solid var(--linea); cursor: zoom-in; background: var(--panel); }
+.md img.md-img.cargando { min-width: 120px; min-height: 80px; background: rgba(127, 127, 127, .10); }
+.md img.md-img:not([src]) { display: none; }
+.md img.md-img.cargando:not([src]) { display: block; }
+.md .md-img-falta { display: inline-flex; align-items: center; gap: 4px; color: var(--suave); font-size: 12px; }
+
+/* bloques de código */
+.md .md-codigo { border: 1px solid var(--linea); border-radius: var(--radio-chico); overflow: hidden; margin: 6px 0; background: var(--panel); }
+.md .md-codigo pre { margin: 0; border-radius: 0; }
+.md .md-codigo pre code, .msg.a .md-codigo pre code { background: none; padding: 0; border-radius: 0; }
+.md-codigo-cab { display: flex; align-items: center; gap: 4px; padding: 3px 4px 3px 9px; font-size: 11px; color: var(--suave); background: rgba(127, 127, 127, .07); border-bottom: 1px solid var(--linea); }
+.md-codigo-lang { flex: 1; font-family: ui-monospace, Menlo, monospace; }
+.md-codigo-btn { border: 0; background: none; color: var(--suave); font: inherit; padding: 2px 7px; border-radius: 5px; cursor: pointer; }
+.md-codigo-btn:hover { background: rgba(127, 127, 127, .14); color: var(--texto); }
+.md .md-codigo.artefacto .md-codigo-cab { border-bottom: 0; }
+.md .md-codigo.artefacto pre:not([hidden]) { border-top: 1px solid var(--linea); }
+
+/* tarjeta de artefacto */
+.artefacto-tarjeta { display: flex; align-items: center; gap: 10px; padding: 10px; cursor: pointer; border-top: 1px solid var(--linea); }
+.artefacto-tarjeta:hover { background: rgba(127, 127, 127, .06); }
+.artefacto-icono { width: 44px; height: 44px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--panel-2); border: 1px solid var(--linea); font: 600 13px ui-monospace, Menlo, monospace; color: var(--suave); }
+.artefacto-previa { width: 72px; height: 54px; flex: none; object-fit: contain; border-radius: 6px; border: 1px solid var(--linea); background: #fff; }
+.artefacto-txt { flex: 1; min-width: 0; }
+.artefacto-titulo { font-weight: 600; color: var(--texto); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artefacto-sub { font-size: 12px; color: var(--suave); }
+
+/* visor de artefactos e imágenes */
+.hoja-artefacto .hoja-cuerpo { padding: 0; display: flex; overflow: hidden; }
+.artefacto-marco { flex: 1; width: 100%; border: 0; background: #fff; }
+.artefacto-codigo { flex: 1; margin: 0; padding: 14px 18px; overflow: auto; font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre; background: var(--panel-2); }
+.hoja-imagen .hoja-cuerpo { display: flex; align-items: center; justify-content: center; padding: 8px; }
+.imagen-grande { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+/* pasos del agente */
+details.pasos { align-self: flex-start; max-width: 88%; font-size: 12px; color: var(--suave); margin-bottom: -4px; }
+details.pasos > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--linea); background: var(--panel); }
+details.pasos > summary::-webkit-details-marker { display: none; }
+details.pasos > summary::before { content: '▸'; font-size: 10px; }
+details.pasos[open] > summary::before { content: '▾'; }
+details.pasos .pasos-lista { margin: 6px 0 2px 8px; padding-left: 10px; border-left: 2px solid var(--linea); }
+.pasos-lista { display: flex; flex-direction: column; gap: 4px; }
+.paso-herr { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--suave); }
+.paso-punto { width: 6px; height: 6px; border-radius: 50%; background: var(--tenue); flex: none; transform: translateY(-1px); }
+.paso-obj { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--texto); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.paso-texto { color: var(--texto); font-size: 13px; }
+.msg.a.vivo .escribiendo { margin-top: 6px; }
+.msg.a.vivo .pasos-lista + .escribiendo { border-top: 1px dashed var(--linea); padding-top: 6px; }
+
+/* archivos que escribió el agente */
+.archivos-chat { display: flex; flex-wrap: wrap; gap: 6px; align-self: flex-start; max-width: 88%; }
+.msg .archivos-chat { margin-top: 8px; max-width: none; }
+.archivo-chat { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border: 1px solid var(--linea); border-radius: var(--radio-chico); background: var(--panel); cursor: pointer; font: inherit; text-align: left; max-width: 260px; color: inherit; }
+.archivo-chat:hover { border-color: var(--linea-fuerte); background: var(--panel-2); }
+.archivo-chat.fuera { cursor: default; opacity: .7; }
+.archivo-chat-ic { width: 34px; height: 34px; flex: none; border-radius: 6px; display: grid; place-items: center; background: var(--panel-2); color: var(--suave); overflow: hidden; }
+.archivo-chat-ic img { width: 100%; height: 100%; object-fit: cover; }
+.archivo-chat-txt { min-width: 0; }
+.archivo-chat-nom { font-weight: 600; font-size: 12.5px; color: var(--texto); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archivo-chat-sub { font-size: 11px; color: var(--suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -15,7 +15,9 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 
 | Método | Ruta | Cuerpo | Respuesta |
 |---|---|---|---|
-| GET | `/api/estado` | | `{app, version, claude, agentes:[ids de la oficina activa], auth, claudePath, oficina:{carpeta,nombre}\|null}` |
+| GET | `/api/estado` | | `{app, version, claude, agentes:[ids de la oficina activa], auth, claudePath, oficina:{carpeta,nombre}\|null, perfil, modo_permisos: "auto"\|"preguntar"\|null}` (null = la persona todavía no eligió: la app muestra el aviso) |
+| GET | `/api/preferencias` | | `{modo_permisos}` |
+| PUT | `/api/preferencias` | `{modo_permisos: "auto"\|"preguntar"}` | `{modo_permisos}`; se guarda en config.json y vale desde la próxima corrida. `auto` = `--permission-mode auto` en chats, tareas, encargos y reuniones con permiso en vivo; 400 si el valor no es válido |
 | GET | `/api/oficinas` | | `{oficinas:[{carpeta,nombre,activa}], activa: carpeta\|null}` (recientes; salta las que ya no existen) |
 | POST | `/api/oficinas` | `{nombre, duenio?, carpeta?, departamentos?:[string \| {nombre, color?, id?}]}` | `{carpeta, oficina}`; queda activa. Sin `departamentos`: Dirección, Comunicación, Operaciones. Carpeta por defecto `<oficinasDir>/<Nombre>` (si existe: `Nombre 2`). 409 si ya hay `oficina.json` en `carpeta` |
 | POST | `/api/oficinas/abrir` | `{carpeta}` | `{carpeta, oficina}`; 404 si no hay `oficina.json`, 400 si es inválido |
@@ -32,8 +34,9 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 | PATCH | `/api/agentes/:id` | cualquiera de `{nombre, rol, departamento, avatar, prompt, description, chips, modelo, brief}` | `{agente, oficina}`; reescribe el `.md` solo si cambia `prompt`, `description` o `modelo` |
 | DELETE | `/api/agentes/:id` | | `{ok, archivado: ".claude/agents/.archivados/<id>-<fecha>.md"\|null, oficina}`; `conocimiento/` queda |
 | GET | `/api/agentes/:id/conocimiento` | | `{id, ruta, texto}` |
-| POST | `/api/chat` | `{agent, message, session}` | `{reply}`; cwd = carpeta de la oficina; escritura solo en `conocimiento/agentes/<id>.md` (más `escritura` del agente en `oficina.json`, que solo pone el importador) |
+| POST | `/api/chat` | `{agent, message, session}` | `{reply, pasos?}` (`pasos`: textos intermedios, herramientas y archivos escritos, como en `/api/chat/vivo`, sin los textos finales que ya están en `reply`); cwd = carpeta de la oficina; escritura solo en `conocimiento/agentes/<id>.md` (más `escritura` del agente en `oficina.json`, que solo pone el importador) |
 | GET | `/api/historial?agent=&session=` | | igual que antes; las sesiones tienen clave por oficina |
+| GET | `/api/chat/vivo?agent=` | | Mientras el agente responde: `{activo:true, session, version, pasos:[{t:'texto',c} \| {t:'herramienta',nombre,objetivo?} \| {t:'archivo',rel?,nombre}]}` (`rel` relativa a la oficina; sin `rel` si el archivo cae afuera). Nunca trae resultados de herramientas ni contenido de archivos. Sin chat en curso: `{activo:false}`. El front lo consulta cada ~0,7 s (`oficina/ui/agente.js`) y lo pinta con `oficina/ui/chat-rico.js` |
 
 Los ids son slugs (`^[a-z0-9][a-z0-9-]{0,40}$`). Los chats guardados antes de las oficinas quedan con oficina vacía y pasan a «Próspera HQ» al importarla (o al abrir una carpeta con la marca `.importada-prospera`).
 
