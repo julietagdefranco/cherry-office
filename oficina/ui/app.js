@@ -275,7 +275,7 @@
     if (primera) {
       dom.equipo = h('div.equipo');
       dom.nombre = h('div.marca-nombre'); dom.sub = h('div.marca-sub');
-      dom.marca = h('div.marca', { onclick: function () { menuOficina(dom.marca); }, title: 'Oficinas y ajustes' }, h('div.marca-txt', dom.nombre, dom.sub), App.icono('abajo'));
+      dom.marca = h('div.marca', { onclick: function () { menuOficina(dom.marca); }, title: 'Cambiar de oficina' }, h('div.marca-txt', dom.nombre, dom.sub), App.icono('abajo'));
       dom.navReu = h('span.insignia.ok.oculto', 'En curso');
       dom.navBib = h('span.insignia.oculto');
       dom.navEnt = h('span.insignia.aviso.oculto');
@@ -403,9 +403,7 @@
         items.push({ texto: o.nombre, icono: 'edificio', nota: o.carpeta === E.carpeta ? 'actual' : '', accion: function () { if (o.carpeta !== E.carpeta) { App.Agente.cerrar(); abrirCarpeta(o.carpeta); } } });
       });
       items.push({ texto: 'Otra oficina…', icono: 'mas', accion: otraOficina });
-      items.push('-');
-      /* toda la configuración (de esta oficina y de la app) vive en la ventana de Ajustes */
-      items.push({ texto: 'Ajustes…', icono: 'ajustes', nota: App.Ajustes.atajo, accion: function () { App.Ajustes.abrir(); } });
+      /* Ajustes no va acá: tiene su lugar fijo abajo en el riel */
       App.menu(ancla, items);
     });
   }

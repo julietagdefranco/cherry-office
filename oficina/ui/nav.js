@@ -53,7 +53,7 @@ App.Nav = (function () {
       return b;
     });
     dom.riel = h('nav.riel',
-      h('button.riel-logo', { title: 'Oficinas y ajustes', onclick: function (ev) { op.menuOficina(ev.currentTarget); } }, App.logo()),
+      h('button.riel-logo', { title: 'Cambiar de oficina', onclick: function (ev) { op.menuOficina(ev.currentTarget); } }, App.logo()),
       h('button.riel-nuevo', { title: 'Nuevo…', onclick: function (ev) { op.menuNuevo(ev.currentTarget); } }, App.icono('mas')),
       items, h('div.riel-sep'), op.extra || null);
     return dom.riel;
