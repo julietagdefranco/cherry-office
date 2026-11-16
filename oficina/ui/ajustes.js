@@ -256,7 +256,40 @@ App.Ajustes = (function () {
     /* la elige la persona la primera vez que abre la app (permisos.js); acá se ve y se cambia */
     { id: 'permisos', grupo: 'app', texto: 'Permisos de los agentes', icono: 'escudo', nota: modoPermisos,
       visible: function () { return !!(App.Permisos && (App.Permisos.pintarModo || App.Permisos.abrirModo)); }, pintar: permisos },
+    { id: 'modelos', grupo: 'app', texto: 'Modelos', icono: 'bombilla', pintar: modelos },
   ];
+
+  /* `modelos` (toda la app, PUT /api/preferencias): los procesos que no son un agente de la oficina. El de cada agente se
+     elige en su ficha. Cada select guarda al cambiar; vale desde la próxima corrida. */
+  var OPC_MODELOS = [['sonnet', 'Sonnet (equilibrado)'], ['opus', 'Opus (el más capaz)'], ['haiku', 'Haiku (rápido y barato)'], ['inherit', 'El que use Claude Code']];
+  var PROCESOS = [
+    { clave: 'creador', titulo: 'Creador', bajada: 'El de la recepción, que arma y cambia la oficina charlando.' },
+    { clave: 'internos', titulo: 'Tareas de fondo', bajada: 'Borradores de agentes nuevos, fichas e imágenes de la biblioteca y resúmenes de reuniones.' },
+    { clave: 'resumenes', titulo: 'Carteles', bajada: 'La frase corta de lo que está haciendo cada agente.' },
+  ];
+  function modelos(crear) {
+    var hj = crear({ titulo: 'Modelos' });
+    var err = h('div.error-txt');
+    var actual = (App.E.estado && App.E.estado.modelos) || {};
+    App.add(hj.cuerpo, h('div.ayuda', { style: { marginTop: 0 } }, 'Vale para todas tus oficinas. El modelo de cada agente se elige en su ficha.'));
+    PROCESOS.forEach(function (p) {
+      var sel = h('select.campo', { style: { width: 'auto', marginLeft: 'auto', flex: 'none' } },
+        OPC_MODELOS.map(function (m) { return h('option', { value: m[0], selected: m[0] === actual[p.clave] }, m[1]); }));
+      sel.addEventListener('change', function () {
+        var cuerpo = { modelos: {} }; cuerpo.modelos[p.clave] = sel.value;
+        err.textContent = ''; sel.disabled = true;
+        api().put('/api/preferencias', cuerpo).then(function (r) {
+          if (App.E && App.E.estado) App.E.estado.modelos = r.modelos;
+          App.aviso(p.titulo + ': ' + sel.options[sel.selectedIndex].text + '.');
+        }).catch(function (e) {
+          err.textContent = e.message;
+          sel.value = actual[p.clave] || '';
+        }).then(function () { sel.disabled = false; actual = (App.E.estado && App.E.estado.modelos) || actual; });
+      });
+      hj.cuerpo.appendChild(h('div.aj-fila', h('div', { style: { minWidth: 0 } }, h('div', p.titulo), h('div.ayuda', { style: { margin: '2px 0 0' } }, p.bajada)), sel));
+    });
+    hj.cuerpo.appendChild(err);
+  }
 
   function avanzado(crear) {
     var hj = crear({ titulo: 'Avanzado' });

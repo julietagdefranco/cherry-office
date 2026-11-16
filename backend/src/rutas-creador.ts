@@ -93,7 +93,7 @@ export class CreadorRouter implements SubRouter {
     // (las herramientas comprueban las citas contra él)
     try {
       fs.mkdirSync(act.ruta('.claude/agents'), { recursive: true })
-      escribirAtomico(creadorMD(act.oficina), act.ruta(`.claude/agents/${Creador.idAgente}.md`))
+      escribirAtomico(creadorMD(act.oficina, s.config.modelo('creador')), act.ruta(`.claude/agents/${Creador.idAgente}.md`))
       s.store.asegurarSesion(sid, Creador.idAgente, carpeta)
       s.store.agregar(sid, 'u', msg)
     } catch {

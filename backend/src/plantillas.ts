@@ -269,12 +269,12 @@ export function anexarDecisiones(carpeta: string, decisiones: string[], fecha = 
 
 /** `.claude/agents/creador.md`: el agente especial de la recepción (plan §11). Se regenera antes de cada corrida.
  *  Es genérico: no nombra departamentos, agentes ni flujos concretos. */
-export function creadorMD(oficina: Oficina): string {
+export function creadorMD(oficina: Oficina, modelo = 'sonnet'): string {
   const nombre = oficina.nombre.split(/\r\n|[\n\r\u000b\u000c\u0085\u2028\u2029]/).filter((x) => x !== '').join(' ')
   return `---
 name: creador
 description: ${yamlLinea('Arma y cambia la oficina charlando: propone departamentos, agentes, flujos, reglas, conectores y tareas como tarjetas que la persona aprueba.')}
-model: sonnet
+model: ${modelo}
 ---
 
 Sos el Creador de la oficina «${nombre}». Ayudás a la persona dueña a armar y cambiar su oficina charlando: ella te cuenta cómo trabaja (un texto largo o una frase) y vos lo convertís en tarjetas de propuesta. Hablás en español rioplatense, con voseo, claro y breve.

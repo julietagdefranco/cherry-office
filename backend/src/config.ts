@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { esObjeto } from './json.js'
-import { esIdValido } from './validar.js'
+import { Validar, esIdValido } from './validar.js'
 
 export const agentesPorDefecto = ['betty', 'don-armando', 'marce', 'catalina', 'patricia', 'sofia', 'mario', 'nicolas']
 export const herramientasBase = 'Read,Glob,Grep,Skill,WebFetch,WebSearch'
@@ -24,6 +24,14 @@ export type ModoPermisos = 'auto' | 'preguntar'
 export const esModoPermisos = (v: unknown): v is ModoPermisos => v === 'auto' || v === 'preguntar'
 export type ConectoresAgentes = 'todos' | 'por_agente'
 export const esConectoresAgentes = (v: unknown): v is ConectoresAgentes => v === 'todos' || v === 'por_agente'
+
+/** Modelos de los procesos que no son un agente de la oficina (clave `modelos` de config.json, toda la app).
+ *  `creador`: el Creador de la recepción; `internos`: borradores de agente, fichas e imágenes de la biblioteca y síntesis
+ *  de reuniones; `resumenes`: el cartel corto de lo que está haciendo un agente. `inherit` = el de Claude Code. */
+export type ClaveModelo = 'creador' | 'internos' | 'resumenes'
+export const modelosPorDefecto: Record<ClaveModelo, string> = { creador: 'sonnet', internos: 'sonnet', resumenes: 'haiku' }
+export const clavesModelo = Object.keys(modelosPorDefecto) as ClaveModelo[]
+export const modelosValidos = Validar.modelos
 
 export class Config {
   proyecto: string
@@ -54,6 +62,15 @@ export class Config {
    *  todos los conectores conectados y lo que actúa (enviar, publicar...) se pide como cualquier permiso; `por_agente` = solo
    *  los asignados a cada agente (Ajustes › Conectores). undefined se comporta como `por_agente`. */
   conectoresAgentes?: ConectoresAgentes
+  /** Solo lo que la persona cambió; lo demás sale de `modelosPorDefecto` (ver `modelo()`). */
+  modelos: Partial<Record<ClaveModelo, string>> = {}
+
+  /** Modelo elegido para `clave`, o el de por defecto. */
+  modelo(clave: ClaveModelo): string { return this.modelos[clave] ?? modelosPorDefecto[clave] }
+  /** Todos los modelos, con los de por defecto completados. */
+  get modelosEfectivos(): Record<ClaveModelo, string> {
+    return Object.fromEntries(clavesModelo.map((k) => [k, this.modelo(k)])) as Record<ClaveModelo, string>
+  }
 
   constructor(home: string = os.homedir()) {
     this.home = home
@@ -127,6 +144,12 @@ export class Config {
     if (lista(o.oficina_dirs_extra)) this.oficinaDirsExtra = o.oficina_dirs_extra.map((d) => Config.ruta(d, home))
     if (esModoPermisos(o.modo_permisos)) this.modoPermisos = o.modo_permisos
     if (esConectoresAgentes(o.conectores_agentes)) this.conectoresAgentes = o.conectores_agentes
+    if (esObjeto(o.modelos)) {
+      for (const k of clavesModelo) {
+        const v = o.modelos[k]
+        if (typeof v === 'string' && modelosValidos.has(v)) this.modelos[k] = v
+      }
+    }
     if (lista(o.legacy_dirs)) this.legacyDirs = [...o.legacy_dirs.map((d) => Config.ruta(d, home)), ...this.legacyDirs]
   }
 

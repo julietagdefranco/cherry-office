@@ -3,7 +3,7 @@
 // en el actor. Si un método necesita esperar algo en el medio (claude), tiene que releer la oficina después.
 import fs from 'node:fs'
 import path from 'node:path'
-import { Config, type ConectoresAgentes, type ModoPermisos } from './config.js'
+import { Config, type ClaveModelo, type ConectoresAgentes, type ModoPermisos } from './config.js'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, type Obj } from './json.js'
 import { jsonSwift } from './json-swift.js'
@@ -272,6 +272,13 @@ export class Oficinas {
     this.log.info(`conectores de los agentes: ${modo}`)
   }
 
+  /** Guarda en config.json los modelos de los procesos internos que cambian (validados). Vale desde la próxima corrida. */
+  guardarModelos(m: Partial<Record<ClaveModelo, string>>) {
+    Object.assign(this.config.modelos, m)
+    this.guardarEstado()
+    this.log.info(`modelos: ${JSON.stringify(this.config.modelos)}`)
+  }
+
   private guardarEstado() {
     let o: Obj = {}
     if (fs.existsSync(this.estadoPath)) {
@@ -288,6 +295,7 @@ export class Oficinas {
     o.oficina_activa = this.activaCarpeta ?? null
     if (this.config.modoPermisos !== undefined) o.modo_permisos = this.config.modoPermisos
     if (this.config.conectoresAgentes !== undefined) o.conectores_agentes = this.config.conectoresAgentes
+    if (Object.keys(this.config.modelos).length) o.modelos = { ...this.config.modelos }
     o.oficinas_recientes = this.recientes.map((r) => ({ carpeta: r.carpeta, nombre: r.nombre, abierta: r.abierta }))
     try {
       fs.mkdirSync(this.config.datosDir, { recursive: true })

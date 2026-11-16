@@ -567,7 +567,7 @@ export function anexarActualizacion(carpeta: string, sugerencia: string, titulo:
 /** Un `claude -p` SIN agente con la herramienta `Read` y carpetas extra (`--add-dir`): para describir imágenes. */
 export async function correrConLectura(runner: ClaudeRunner, p: { prompt: string; cwd: string; dirs: string[]; timeout: number; obs?: Observador }): Promise<string> {
   runner.verificar(p.cwd)
-  const a = ['-p', ...ClaudeRunner.formatoSalida, '--tools', 'Read']
+  const a = ['-p', ...ClaudeRunner.formatoSalida, '--tools', 'Read', ...ClaudeRunner.argsModelo(runner.config.modelo('internos'))]
   for (const d of p.dirs) a.push('--add-dir', d)
   a.push('--allowedTools', 'Read', ...ClaudeRunner.sinConectores)
   return runner.resultado([...a, '--', p.prompt], { timeout: p.timeout, cwd: p.cwd, obs: p.obs })

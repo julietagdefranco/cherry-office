@@ -265,6 +265,8 @@ export class ClaudeRunner {
   static readonly formatoSalida = ['--output-format', 'stream-json', '--verbose']
   /** Para corridas sin agente: `dontAsk` y sin conectores de claude.ai. */
   static readonly sinConectores = ['--permission-mode', 'dontAsk', '--disallowedTools', 'mcp__claude_ai_*']
+  /** `--model` para un modelo de `Config.modelos`; `inherit` no pasa nada (queda el de Claude Code). */
+  static argsModelo(m: string): string[] { return m === 'inherit' ? [] : ['--model', m] }
 
   readonly actividad = new ActividadRegistro()
   /** Reciben el `rate_limit_info` de cada `rate_limit_event` de cualquier corrida (el medidor de uso). */
@@ -305,11 +307,12 @@ export class ClaudeRunner {
 
   // MARK: corridas sin chat
 
-  /** `claude -p` SIN agente y SIN herramientas: borradores, síntesis, resúmenes. Devuelve el texto de `result`. */
+  /** `claude -p` SIN agente y SIN herramientas: borradores, síntesis, resúmenes. Devuelve el texto de `result`.
+   *  Sin `modelo` usa el de los procesos internos (Ajustes › Modelos). */
   async correrSinAgente(prompt: string, { timeout, cwd, modelo, obs }: { timeout?: number; cwd?: string; modelo?: string; obs?: Observador } = {}): Promise<string> {
     this.verificar(cwd)
     const args = ['-p', ...ClaudeRunner.formatoSalida, '--tools', '', ...ClaudeRunner.sinConectores]
-    if (modelo) args.push('--model', modelo)
+    args.push(...ClaudeRunner.argsModelo(modelo ?? this.config.modelo('internos')))
     return this.resultado([...args, '--', prompt], { timeout: timeout ?? this.config.timeout, cwd, obs })
   }
 
@@ -469,7 +472,7 @@ export class ClaudeRunner {
     const caja = new CajaCosto()
     void (async () => {
       try {
-        const t = await this.correrSinAgente(ResumenTarea.prompt(msg), { timeout: ResumenTarea.timeout, cwd: p.oficina, modelo: 'haiku', obs: caja.observador() })
+        const t = await this.correrSinAgente(ResumenTarea.prompt(msg), { timeout: ResumenTarea.timeout, cwd: p.oficina, modelo: this.config.modelo('resumenes'), obs: caja.observador() })
         const r = ResumenTarea.limpiar(t)
         if (!cancelado && r !== undefined) this.actividad.tarea(p.oficina, p.agente, p.token, r)
       } catch {

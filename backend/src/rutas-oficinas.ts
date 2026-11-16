@@ -1,6 +1,6 @@
 // Rutas del núcleo para oficinas (Router.despachar de Swift): estado, oficinas, oficina, perfil, departamentos y la
 // lista de agentes. Contratar/editar/despedir agentes, chat e historial se suman al portar sus módulos.
-import { esConectoresAgentes, esModoPermisos, type Config } from './config.js'
+import { clavesModelo, esConectoresAgentes, esModoPermisos, modelosValidos, type ClaveModelo, type Config } from './config.js'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
 import { ValidarAgenteExtra, agenteJSON, departamentoJSON, oficinaJSON } from './oficina.js'
@@ -27,6 +27,18 @@ export function misionPatch(d: Obj): string | undefined {
   return Validar.texto(v, 'mision', ValidarAgenteExtra.maxMision, false) ?? ''
 }
 
+/** `modelos` de PUT /api/preferencias: `{creador?, internos?, resumenes?}` con sonnet, opus, haiku o inherit. */
+function modelosPedidos(v: unknown): Partial<Record<ClaveModelo, string>> {
+  if (!esObjeto(v)) throw new ErrorAPI(400, '«modelos» tiene que ser un objeto.')
+  const r: Partial<Record<ClaveModelo, string>> = {}
+  for (const [k, m] of Object.entries(v)) {
+    if (!(clavesModelo as string[]).includes(k)) throw new ErrorAPI(400, `«modelos.${k}» no existe (${clavesModelo.join(', ')}).`)
+    if (typeof m !== 'string' || !modelosValidos.has(m)) throw new ErrorAPI(400, `«modelos.${k}» tiene que ser sonnet, opus, haiku o inherit.`)
+    r[k as ClaveModelo] = m
+  }
+  return r
+}
+
 /** `alAbrir`: ganchos al abrir una oficina (reclamar chats de Próspera, escanear vínculos), se suman al portar esos módulos.
  *  `ocupada`: si hay agentes trabajando en esa oficina (no se puede borrar mientras tanto). */
 export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada = () => false }: {
@@ -42,7 +54,7 @@ export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada 
       agentes: (act?.oficina.agentes.map((x) => x.id) ?? []).sort(), auth: a,
       claudePath: bin ?? null, oficina: act ? act.resumen : null,
       perfil: perfilJSON(oficinas.perfilActual()), modo_permisos: config.modoPermisos ?? null,
-      conectores_agentes: config.conectoresAgentes ?? 'por_agente',
+      conectores_agentes: config.conectoresAgentes ?? 'por_agente', modelos: config.modelosEfectivos,
     }
   }
 
@@ -79,17 +91,20 @@ export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada 
       return no405
     }
     if (seccion === 'preferencias' && n === 2) {
-      const prefs = () => ({ modo_permisos: config.modoPermisos ?? null, conectores_agentes: config.conectoresAgentes ?? 'por_agente' })
+      const prefs = () => ({ modo_permisos: config.modoPermisos ?? null, conectores_agentes: config.conectoresAgentes ?? 'por_agente', modelos: config.modelosEfectivos })
       if (method === 'GET') return [200, prefs()]
       if (method === 'PUT') {
         const d = objeto(body)
         const hayModo = d.modo_permisos !== undefined
         const hayConectores = d.conectores_agentes !== undefined
-        if (!hayModo && !hayConectores) throw new ErrorAPI(400, 'Falta «modo_permisos» o «conectores_agentes».')
+        const hayModelos = d.modelos !== undefined
+        if (!hayModo && !hayConectores && !hayModelos) throw new ErrorAPI(400, 'Falta «modo_permisos», «conectores_agentes» o «modelos».')
+        const modelos = hayModelos ? modelosPedidos(d.modelos) : undefined
         if (hayModo && !esModoPermisos(d.modo_permisos)) throw new ErrorAPI(400, '«modo_permisos» tiene que ser "auto" o "preguntar".')
         if (hayConectores && !esConectoresAgentes(d.conectores_agentes)) throw new ErrorAPI(400, '«conectores_agentes» tiene que ser "todos" o "por_agente".')
         if (esModoPermisos(d.modo_permisos)) oficinas.guardarModoPermisos(d.modo_permisos)
         if (esConectoresAgentes(d.conectores_agentes)) oficinas.guardarConectoresAgentes(d.conectores_agentes)
+        if (modelos) oficinas.guardarModelos(modelos)
         return [200, prefs()]
       }
       return no405
