@@ -24,12 +24,35 @@ const calendar = {
 }
 const notionSrv = { nombre: 'Notion', prefijo: 'mcp__claude_ai_Notion', estado: 'needs-auth', herramientas: [] }
 
-/** Oficina importada de Próspera, con la sesión del Creador que tiene el texto de Juli como mensaje `u`. */
+/** Departamentos y agentes de la oficina de Próspera con la que arranca el caso. */
+const departamentosCaso = [
+  { id: 'dir', nombre: 'Dirección' },
+  { id: 'redes', nombre: 'Redes y estrategia digital' },
+  { id: 'ads', nombre: 'Ads' },
+  { id: 'clases', nombre: 'Clases de PRÓSPERAS' },
+  { id: 'video', nombre: 'Edición de video' },
+]
+const agentesCaso = [
+  { id: 'betty', nombre: 'Betty', rol: 'PM y directora del equipo', departamento: 'dir' },
+  { id: 'don-armando', nombre: 'Don Armando', rol: 'Editor de videos de PRÓSPERAS', departamento: 'video' },
+  { id: 'mario', nombre: 'Mario', rol: 'Editor de reels', departamento: 'video' },
+  { id: 'marce', nombre: 'Marce', rol: 'Directora creativa de redes', departamento: 'redes' },
+  { id: 'catalina', nombre: 'Doña Catalina', rol: 'Social Media Manager', departamento: 'redes' },
+  { id: 'patricia', nombre: 'Patricia', rol: 'Community Manager', departamento: 'redes' },
+  { id: 'sofia', nombre: 'Doña Sofía', rol: 'Creadora de las clases de PRÓSPERAS', departamento: 'clases' },
+  { id: 'nicolas', nombre: 'Nicolás Mora', rol: 'Ads (Meta Ads)', departamento: 'ads' },
+]
+
+/** Oficina de Próspera armada por la API, con la sesión del Creador que tiene el texto de Juli como mensaje `u`. */
 async function armar(texto = textoOriginal) {
   const sb = new Sandbox()
   const b = arrancar(sb)
-  const r = await llamar(b, 'POST', '/api/oficinas/importar-prospera', { origen: raizRepo })
-  expect(r.status, `importar: ${JSON.stringify(r.obj)}`).toBe(200)
+  const r = await llamar(b, 'POST', '/api/oficinas', { nombre: 'Próspera HQ', duenio: 'Juli', departamentos: departamentosCaso })
+  expect(r.status, `crear oficina: ${JSON.stringify(r.obj)}`).toBe(200)
+  for (const a of agentesCaso) {
+    const c = await llamar(b, 'POST', '/api/agentes', { ...a, prompt: `Sos ${a.nombre}, ${a.rol}.` })
+    expect(c.status, `contratar ${a.id}: ${JSON.stringify(c.obj)}`).toBe(200)
+  }
   const carpeta = String(r.obj.carpeta)
   const s = b.servicios
   s.store.asegurarSesion(U.a, 'creador', carpeta)

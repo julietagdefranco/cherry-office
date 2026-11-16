@@ -21,7 +21,6 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 | GET | `/api/oficinas` | | `{oficinas:[{carpeta,nombre,activa}], activa: carpeta\|null}` (recientes; salta las que ya no existen) |
 | POST | `/api/oficinas` | `{nombre, duenio?, carpeta?, departamentos?:[string \| {nombre, color?, id?}]}` | `{carpeta, oficina}`; queda activa. Sin `departamentos`: Dirección, Comunicación, Operaciones. Carpeta por defecto `<oficinasDir>/<Nombre>` (si existe: `Nombre 2`). 409 si ya hay `oficina.json` en `carpeta` |
 | POST | `/api/oficinas/abrir` | `{carpeta}` | `{carpeta, oficina}`; 404 si no hay `oficina.json`, 400 si es inválido |
-| POST | `/api/oficinas/importar-prospera` | `{origen?}` | `{carpeta, oficina, yaExistia, agentesImportados, faltantes, copiados}`; idempotente |
 | GET / PATCH | `/api/oficina` | PATCH `{nombre?, duenio?}` | `{carpeta, oficina}` |
 | DELETE | `/api/oficina` | | `{ok, carpeta}`: la oficina activa se cierra, sale de recientes y se borra todo lo suyo en `hq.db` (chats, Creador, reuniones, tareas, biblioteca, costos). La carpeta no se toca (la app de escritorio la manda a la papelera). 409 si hay agentes trabajando |
 | POST | `/api/departamentos` | `{nombre, color?, id?}` | `{departamento, oficina}` |
@@ -38,9 +37,7 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 | GET | `/api/historial?agent=&session=` | | igual que antes; las sesiones tienen clave por oficina |
 | GET | `/api/chat/vivo?agent=` | | Mientras el agente responde: `{activo:true, session, version, pasos:[{t:'texto',c} \| {t:'herramienta',nombre,objetivo?} \| {t:'archivo',rel?,nombre}]}` (`rel` relativa a la oficina; sin `rel` si el archivo cae afuera). Nunca trae resultados de herramientas ni contenido de archivos. Sin chat en curso: `{activo:false}`. El front lo consulta cada ~0,7 s (`oficina/ui/agente.js`) y lo pinta con `oficina/ui/chat-rico.js` |
 
-Los ids son slugs (`^[a-z0-9][a-z0-9-]{0,40}$`). Los chats guardados antes de las oficinas quedan con oficina vacía y pasan a «Próspera HQ» al importarla (o al abrir una carpeta con la marca `.importada-prospera`).
-
-**Importar Próspera:** `POST /api/oficinas/importar-prospera` (`importar.ts`) crea `~/Oficinas/Próspera HQ/` (5 departamentos, 8 agentes) y copia, sin mover nada, `estado-actual.md` → `conocimiento/oficina.md`, `contexto-maestro.md` y `_equipo/` → `conocimiento/`.
+Los ids son slugs (`^[a-z0-9][a-z0-9-]{0,40}$`). Los chats guardados antes de las oficinas quedan con oficina vacía.
 
 **Para reuniones** (`Backend` expone): `backend.oficinas` (`Oficinas`: `activa() -> OficinaActiva?` con `carpeta`, `oficina`, `ruta(rel)`), `backend.runner` (`correrSinAgente(prompt:timeout:cwd:)` para la síntesis, `turnoSoloLectura(agente:prompt:cwd:timeout:)` con `Read,Glob,Grep`, `conCarril(oficina:agente:_:)`), `backend.registrarReuniones(SubRouter)` para atender `/api/reuniones*`, y `Plantillas.anexarDecisiones(carpeta:decisiones:fecha:)`.
 
@@ -54,7 +51,7 @@ Para compartir una oficina o pasarla a otra compu. Código: `backend/src/paquete
 | POST | `/api/oficinas/importar` | `{archivo}` (ruta absoluta a un .zip) | `{carpeta, oficina, documentos, reprocesar, avisos}`; queda activa en `<oficinasDir>/<Nombre>` (`Nombre 2` si existe) |
 
 - **Qué viaja:** la carpeta de la oficina (agentes, `conocimiento/`, actas, archivos subidos, fichas, texto extraído y entregables) más `.oficina-paquete.json`, con las filas de la biblioteca (ficha incluida). Al importar, los documentos con ficha y texto quedan `listo` e indexados sin llamar al bibliotecario; los demás quedan `pendiente` y se vuelven a fichar.
-- **Qué no viaja:** lo de `hq.db` (chats, estado de reuniones, entregas, avisos, costos, esperas y pedidos entre agentes), `archivos/.papelera/`, las carpetas vinculadas (se quitan de `oficina.json` con sus fichas), la marca `.importada-prospera`, enlaces simbólicos y `.DS_Store`.
+- **Qué no viaja:** lo de `hq.db` (chats, estado de reuniones, entregas, avisos, costos, esperas y pedidos entre agentes), `archivos/.papelera/`, las carpetas vinculadas (se quitan de `oficina.json` con sus fichas), enlaces simbólicos y `.DS_Store`.
 - **Rutas:** la ruta absoluta de la oficina en los `.md/.txt/.json` de `.claude/`, `conocimiento/` y `reuniones/` viaja como `{{OFICINA}}` y se reemplaza por la carpeta nueva al importar. Las otras rutas `/Users/…` de los `.md` de agente se informan en `avisos` (al exportar, todas; al importar, las que no existen en esta compu). Al importar también se quitan los vínculos cuya carpeta no existe.
 - **Seguridad al importar:** antes de extraer se revisa el directorio central del zip: sin rutas absolutas ni `..`, sin enlaces simbólicos, hasta 50 000 entradas, 2 GB de zip y 4 GB descomprimido. Se extrae (`backend/src/zip.ts`, sin programas del sistema) en una carpeta temporal y recién después se mueve a la carpeta de oficinas; si algo falla no queda nada a medias. Un .zip hecho a mano con la carpeta de una oficina también se importa (sin índice de la biblioteca, con aviso).
 - **Elegir el .zip:** en la app, `{accion:'elegirArchivo', titulo}` al handler `hq` abre el diálogo del sistema solo de .zip (`desktop/src/main.ts`); en el navegador, el explorador propio con `GET /api/fs/carpetas?archivos=zip`. «Mostrar en Finder» del resultado usa `revelar`, que acepta un `.oficina.zip` aunque esté fuera de la oficina (solo lo muestra, nunca lo abre).

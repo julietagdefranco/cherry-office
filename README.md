@@ -36,8 +36,7 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
 | `oficina/` | El front (HTML, JS y three.js, con `vendor/` offline): la maqueta 3D y todas las pantallas. |
 | `backend/` | El backend en TypeScript (Node): oficinas, agentes, chat, flujos, tareas, biblioteca. La API está en [backend/API.md](backend/API.md). |
 | `desktop/` | La app de escritorio: carcasa Electron alrededor de `backend/` y `oficina/`. De acá salen el `.dmg` y el `.exe` de las releases. Ver [desktop/README.md](desktop/README.md). |
-| `docs/` | Planes de diseño y `aprendizajes.md` (cómo se comporta el `claude` real). |
-| `agentes/`, `contexto/`, `instalar.command` | El equipo original de Próspera (ver abajo). |
+| `docs/` | Planes de diseño, `aprendizajes.md` (cómo se comporta el `claude` real) y `caso-prospera/` (el texto con el que se prueba armar una oficina con el Creador). |
 | `tools/` | Utilidades sueltas, como el empaquetado de piezas LDraw. |
 
 Hasta la 0.7 la app de Mac era nativa en Swift, con su propio backend; se retiró al pasar las dos plataformas a
@@ -90,15 +89,5 @@ menú (Mac: menú Oficina; Windows: Ayuda). `HQ_SIN_ACTUALIZACIONES=1` las apaga
   1.0.0 se cae al abrir (el import de `electron-updater` quedaba `undefined` con esbuild), así que quien la tenga
   tiene que instalar a mano la versión siguiente.
 
-## El equipo de Próspera
-El repo nació como el equipo de agentes de Próspera (Betty, Don Armando, Marce, Doña Catalina, Patricia, Doña Sofía,
-Mario y Nicolás Mora). Siguen en `agentes/`, con su contexto en `contexto/`.
-
-- `instalar.command` copia los agentes a `~/.claude/agents/`, reemplazando `/Users/julietadefranco` por tu `$HOME`, y
-  crea la memoria compartida `~/Próspera/_equipo/` (`decisiones.md` y `agentes/<id>.md`) solo si falta. Se puede repetir:
-  si un agente ya instalado difiere, guarda antes un respaldo `.bak-AAAAMMDD-HHMMSS`, y nunca pisa tu
-  `estado-actual.md` ni la memoria.
-- `docs/caso-prospera/` tiene el texto con el que se probó armar esta oficina con el Creador.
-
-Repositorio privado recomendado: incluye contexto de negocio y el modelo `lego_man.json` (del repo
+Repositorio privado recomendado: incluye el modelo `lego_man.json` (del repo
 3d-lego-configurator, sin licencia).

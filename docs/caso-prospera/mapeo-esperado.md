@@ -1,6 +1,6 @@
 # Caso Próspera: mapeo esperado del Creador
 
-Qué debería proponer el Creador si se le pega `texto-original.md` estando abierta la oficina actual de Próspera HQ (5 departamentos y 8 agentes, ver `backend/src/importar.ts` y `agentes/*.md`). Este archivo hecho a mano es la vara para probarlo: cada tarjeta trae su tipo, su estado (`borrador` o `lista`), el fragmento de origen, la conciliación con la oficina actual (`nuevo`, `cambia` o `existente`) y lo que le falta.
+Qué debería proponer el Creador si se le pega `texto-original.md` estando abierta la oficina actual de Próspera HQ (5 departamentos y 8 agentes; el test `backend/test/unit/caso-prospera.test.ts` la arma por la API). Este archivo hecho a mano es la vara para probarlo: cada tarjeta trae su tipo, su estado (`borrador` o `lista`), el fragmento de origen, la conciliación con la oficina actual (`nuevo`, `cambia` o `existente`) y lo que le falta.
 
 Reglas del mapeo:
 - **No inventar.** Lo que el texto no dice queda como **falta** o como pregunta, no como valor.

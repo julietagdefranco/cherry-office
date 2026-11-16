@@ -16,7 +16,6 @@ import { Config } from './config.js'
 import { ErrorAPI } from './errores.js'
 import { iso } from './entregas.js'
 import { dentro, esDirectorio, realAunqueFalte } from './explorador.js'
-import { marcaProspera } from './importar.js'
 import { codificar, esObjeto, type Obj } from './json.js'
 import { jsonSwift } from './json-swift.js'
 import type { HQLog } from './log.js'
@@ -206,7 +205,7 @@ export function copiar(origen: string, destino: string): boolean {
       fs.mkdirSync(path.join(destino, ...rel.split('/')), { recursive: true })
       continue
     }
-    if (nombre === '.DS_Store' || rel === marcaProspera || st.isSymbolicLink()) continue
+    if (nombre === '.DS_Store' || st.isSymbolicLink()) continue
     const src = path.join(origen, ...rel.split('/'))
     const dst = path.join(destino, ...rel.split('/'))
     if (st.isDirectory()) {
@@ -501,8 +500,6 @@ export class PaqueteRouter implements SubRouter {
     } catch {}
     fs.rmSync(pathManifiesto, { force: true })
     if (!man) avisos.push('El archivo no trae el índice de la biblioteca: los documentos están en la carpeta, pero no aparecen en la Biblioteca.')
-    // la marca de Próspera reclama los chats viejos de esta compu: una oficina importada no la necesita
-    fs.rmSync(path.join(dest, marcaProspera), { force: true })
 
     if (of.vinculos && of.vinculos.length > 0) {
       const quedan = of.vinculos.filter((v) => fs.existsSync(v.ruta))

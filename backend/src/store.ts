@@ -144,11 +144,6 @@ export class Store {
     this.db.run('INSERT OR IGNORE INTO sesiones(id,agente,creada,activa,oficina) VALUES(?,?,?,0,?)', [sid, agente, Date.now() / 1000, oficina])
   }
 
-  /** Pasa a `oficina` las sesiones anteriores a las oficinas (oficina ''). Devuelve cuántas. */
-  reclamarLegacy(oficina: string): number {
-    return this.db.run("UPDATE sesiones SET oficina=? WHERE oficina=''", [oficina])
-  }
-
   marcarActiva(sid: string) { this.db.run('UPDATE sesiones SET activa=1 WHERE id=?', [sid]) }
 
   /** Sesión más reciente del agente que tenga mensajes, o undefined. */
