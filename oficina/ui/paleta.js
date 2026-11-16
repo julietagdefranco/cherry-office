@@ -39,17 +39,21 @@ App.Paleta = (function () {
     out.push({ tipo: 'Vos', icono: 'personas', txt: 'Quién dirige', sub: App.Yo.nombre(), buscar: 'yo perfil quien dirige mi nombre dueño minifig',
       hacer: function () { App.Yo.abrir(); } });
     o.departamentos.forEach(function (d) {
-      out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Deptos.abrir(); } });
+      out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Ajustes.abrir('departamentos'); } });
     });
     [['Parte del día', 'parte', function () { App.Parte.abrir(); }],
      ['Flujos', 'flujo', function () { App.Flujos.abrir(); }],
      ['Nueva corrida', 'flujo', function () { App.Flujos.abrir(); App.Flujos.nueva(); }],
      ['Armar con el Creador', 'chispa', function () { App.Creador.abrir(); }],
-     ['Reglas de la oficina', 'regla', function () { App.Ajustes.reglas(); }],
-     ['Conectores', 'enchufe', function () { App.Ajustes.conectores(); }],
+     ['Ajustes', 'ajustes', function () { App.Ajustes.abrir(); }],
+     ['Nombre de la oficina y quién dirige', 'edificio', function () { App.Ajustes.abrir('general'); }],
+     ['Reglas de la oficina', 'regla', function () { App.Ajustes.abrir('reglas'); }],
+     ['Nuevo departamento', 'capas', function () { App.Deptos.agregar(); }],
+     ['Conectores', 'enchufe', function () { App.Ajustes.abrir('conectores'); }],
+     ['Permisos de los agentes', 'escudo', function () { App.Ajustes.abrir('permisos'); }],
      ['Contratar un agente', 'mas', function () { App.Contratar.abrir(); }],
      ['Llamar a reunión', 'reunion', function () { App.Reunion.nueva(); }],
-     ['Departamentos', 'capas', function () { App.Deptos.abrir(); }],
+     ['Departamentos', 'capas', function () { App.Ajustes.abrir('departamentos'); }],
      ['Siguiente aviso pendiente', 'chispa', function () { if (App.Avisos) App.Avisos.siguiente(); }],
      ['Revisar la próxima entrega', 'chispa', function () { if (!App.Entregables.siguiente()) App.aviso('No tenés entregas sin revisar.'); }],
      ['Exportar oficina', 'subir', function () { App.exportarOficina(); }],

@@ -260,7 +260,7 @@
           checks.childNodes.length ? checks : null));
       });
       zonaConectores.appendChild(h('div', { style: { display: 'flex', gap: '8px', marginTop: '4px' } },
-        h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.conectores(); } }, App.icono('enchufe'), 'Ver todos los conectores')));
+        h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.abrir('conectores'); } }, App.icono('enchufe'), 'Ver todos los conectores')));
     }
 
     function cargarCatalogo() {

@@ -4,11 +4,12 @@
   var h = App.h, api = App.api;
 
   App.Deptos = {
-    abrir: function () {
-      var hj = App.hoja({ titulo: 'Departamentos', ancho: 520 });
+    /* `crear` (opcional) reemplaza a App.hoja: la ventana de Ajustes lo usa para dibujar la sección adentro */
+    abrir: function (crear) {
+      var hj = (crear || App.hoja)({ titulo: 'Departamentos', ancho: 520 });
       var lista = h('div.lista-ed');
       App.add(hj.cuerpo, h('p', { style: { color: 'var(--suave)', marginBottom: '12px' } }, 'Cada departamento es una sala del edificio. El edificio crece solo cuando sumás más.'), lista);
-      App.add(hj.pie, h('button.btn.izq', { onclick: agregar }, App.icono('mas'), 'Nuevo departamento'), h('button.btn.primario', { onclick: hj.cerrar }, 'Listo'));
+      App.add(hj.pie, h('button.btn.izq', { onclick: function () { agregar(pintar); } }, App.icono('mas'), 'Nuevo departamento'), hj.enVentana ? null : h('button.btn.primario', { onclick: hj.cerrar }, 'Listo'));
 
       function pintar() {
         var o = App.E.oficina;
@@ -17,10 +18,10 @@
         o.departamentos.forEach(function (d) {
           var n = o.agentes.filter(function (a) { return a.departamento === d.id; }).length;
           var muestra = h('button.muestra', { style: { background: d.color }, title: 'Cambiar color', onclick: function () {
-            App.elegirColor(muestra, d.color, function (c) { guardar(d.id, { color: c }); });
+            App.elegirColor(muestra, d.color, function (c) { guardar(d.id, { color: c }, pintar); });
           } });
           var inp = h('input.campo', { value: d.nombre, maxlength: 60 });
-          var guardarNombre = function () { var v = inp.value.trim(); if (v && v !== d.nombre) guardar(d.id, { nombre: v }); else inp.value = d.nombre; };
+          var guardarNombre = function () { var v = inp.value.trim(); if (v && v !== d.nombre) guardar(d.id, { nombre: v }, pintar); else inp.value = d.nombre; };
           inp.addEventListener('blur', guardarNombre);
           inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') inp.blur(); });
           /* misión: una línea que dice para qué existe el departamento; se guarda al salir del campo.
@@ -38,42 +39,64 @@
           lista.appendChild(h('div.dep-bloque',
             h('div.fila-ed', muestra, inp,
               h('span.insignia', n + (n === 1 ? ' agente' : ' agentes')),
-              h('button.btn.fantasma.icono', { title: 'Borrar', onclick: function () { borrar(d, n); } }, App.icono('papelera'))),
+              h('button.btn.fantasma.icono', { title: 'Borrar', onclick: function () { borrar(d, n, pintar); } }, App.icono('papelera'))),
             mis));
         });
       }
-      function guardar(id, cambios) {
-        api.patch('/api/departamentos/' + encodeURIComponent(id), cambios).then(function (r) { App.actualizar(r.oficina); pintar(); }).catch(App.fallo);
-      }
-      function agregar() {
-        var o = App.E.oficina;
-        App.preguntar('Nuevo departamento', 'Nombre').then(function (nombre) {
-          if (!nombre) return;
-          api.post('/api/departamentos', { nombre: nombre, color: App.PALETA[o.departamentos.length % App.PALETA.length] })
-            .then(function (r) { App.actualizar(r.oficina); pintar(); }).catch(App.fallo);
-        });
-      }
-      function borrar(d, n) {
-        var o = App.E.oficina;
-        if (!n) {
-          App.confirmar('¿Borrar ' + d.nombre + '?', 'La sala desaparece del edificio.', 'Borrar', true).then(function (si) {
-            if (si) api.del('/api/departamentos/' + encodeURIComponent(d.id)).then(function (r) { App.actualizar(r.oficina); pintar(); }).catch(App.fallo);
-          });
-          return;
-        }
-        var otros = o.departamentos.filter(function (x) { return x.id !== d.id; });
-        if (!otros.length) { App.aviso('Es el único departamento y tiene gente. Creá otro primero para moverlos.', true); return; }
-        var hj2 = App.hoja({ titulo: '¿Borrar ' + d.nombre + '?', ancho: 420 });
-        var sel = h('select.campo', otros.map(function (x) { return h('option', { value: x.id }, x.nombre); }));
-        App.add(hj2.cuerpo, h('p', { style: { color: 'var(--suave)', marginBottom: '12px' } }, 'Tiene ' + n + (n === 1 ? ' agente' : ' agentes') + '. ¿A qué departamento los paso?'), sel);
-        App.add(hj2.pie, h('button.btn', { onclick: hj2.cerrar }, 'Cancelar'), h('button.btn.primario', {
-          style: { background: 'var(--peligro)', borderColor: 'var(--peligro)', color: '#fff' },
-          onclick: function () {
-            api.del('/api/departamentos/' + encodeURIComponent(d.id), { moverA: sel.value }).then(function (r) { hj2.cerrar(); App.actualizar(r.oficina); pintar(); }).catch(App.fallo);
-          }
-        }, 'Mover y borrar'));
-      }
       pintar();
-    }
+    },
+    agregar: function (alListo) { agregar(alListo); },
+    guardar: function (id, cambios, alListo) { guardar(id, cambios, alListo); },
+    borrar: function (d, alListo) {
+      var n = App.E.oficina.agentes.filter(function (a) { return a.departamento === d.id; }).length;
+      borrar(d, n, alListo);
+    },
+    menu: menuDepto
   };
+  function guardar(id, cambios, alListo) {
+    api.patch('/api/departamentos/' + encodeURIComponent(id), cambios).then(function (r) { App.actualizar(r.oficina); if (alListo) alListo(); }).catch(App.fallo);
+  }
+  function agregar(alListo) {
+    var o = App.E.oficina;
+    App.preguntar('Nuevo departamento', 'Nombre').then(function (nombre) {
+      if (!nombre) return;
+      api.post('/api/departamentos', { nombre: nombre, color: App.PALETA[o.departamentos.length % App.PALETA.length] })
+        .then(function (r) { App.actualizar(r.oficina); if (alListo) alListo(); }).catch(App.fallo);
+    });
+  }
+  function borrar(d, n, alListo) {
+    var o = App.E.oficina;
+    if (!n) {
+      App.confirmar('¿Borrar ' + d.nombre + '?', 'La sala desaparece del edificio.', 'Borrar', true).then(function (si) {
+        if (si) api.del('/api/departamentos/' + encodeURIComponent(d.id)).then(function (r) { App.actualizar(r.oficina); if (alListo) alListo(); }).catch(App.fallo);
+      });
+      return;
+    }
+    var otros = o.departamentos.filter(function (x) { return x.id !== d.id; });
+    if (!otros.length) { App.aviso('Es el único departamento y tiene gente. Creá otro primero para moverlos.', true); return; }
+    var hj2 = App.hoja({ titulo: '¿Borrar ' + d.nombre + '?', ancho: 420 });
+    var sel = h('select.campo', otros.map(function (x) { return h('option', { value: x.id }, x.nombre); }));
+    App.add(hj2.cuerpo, h('p', { style: { color: 'var(--suave)', marginBottom: '12px' } }, 'Tiene ' + n + (n === 1 ? ' agente' : ' agentes') + '. ¿A qué departamento los paso?'), sel);
+    App.add(hj2.pie, h('button.btn', { onclick: hj2.cerrar }, 'Cancelar'), h('button.btn.primario', {
+      style: { background: 'var(--peligro)', borderColor: 'var(--peligro)', color: '#fff' },
+      onclick: function () {
+        api.del('/api/departamentos/' + encodeURIComponent(d.id), { moverA: sel.value }).then(function (r) { hj2.cerrar(); App.actualizar(r.oficina); if (alListo) alListo(); }).catch(App.fallo);
+      }
+    }, 'Mover y borrar'));
+  }
+
+  /* menú del título de un departamento en la barra lateral */
+  function menuDepto(ancla, d) {
+    App.menu(ancla, [
+      { texto: 'Contratar en ' + d.nombre + '…', icono: 'mas', accion: function () { App.Contratar.abrir({ departamento: d.id }); } },
+      '-',
+      { texto: 'Cambiar nombre…', icono: 'lapiz', accion: function () {
+        App.preguntar('Cambiar nombre', 'Nombre del departamento', d.nombre).then(function (v) { if (v && v !== d.nombre) guardar(d.id, { nombre: v }); });
+      } },
+      { texto: 'Cambiar color…', icono: 'chispa', accion: function () { App.elegirColor(ancla, d.color, function (c) { guardar(d.id, { color: c }); }); } },
+      { texto: 'Misión y más…', icono: 'capas', accion: function () { App.Ajustes.abrir('departamentos'); } },
+      '-',
+      { texto: 'Borrar departamento…', icono: 'papelera', accion: function () { App.Deptos.borrar(d); } }
+    ]);
+  }
 })();
