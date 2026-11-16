@@ -3,6 +3,7 @@
   'use strict';
   var h = App.h, api = App.api;
   var actual = null, pestana = 'chat';
+  var sesionFija = null;  // la charla que se abrió por su id (desde la lista de charlas): va en la ruta #/charlas/<agente>/<sesión>
   var sesiones = {};      // id -> session uuid
   var chats = {};         // id -> [{r, t, e}]  (cache en memoria)
   var enCurso = {};       // id -> true mientras espera respuesta
@@ -55,27 +56,51 @@
   function abrir(id, pest) {
     var a = App.agente(id); if (!a) return;
     var mismo = actual === id;
+    if (!mismo) sesionFija = null;
     actual = id; pestana = pest || (mismo ? pestana : 'chat');
     App.Oficina3D.elegir(id);
+    App.abrirDerecho('agente');   // primero: así ya está en su sección (y con lugar para «Relacionado») al pintar
     pintar();
-    App.abrirDerecho('agente');
     if (App.Avisos) App.Avisos.vistoAgente(id);
     App.marcarEstados();
   }
 
+  /* Dos caras: la charla (limpia, sin pestañas) y la ficha del agente (perfil y apariencia, permisos, notas, tareas),
+     que se abre con el lápiz o tocando el avatar, como en una app de mensajes. */
+  var FICHA = [['perfil', 'Perfil y apariencia'], ['permisos', 'Permisos'], ['notas', 'Notas'], ['tareas', 'Tareas']];
   function pintar() {
     var a = App.agente(actual); if (!a) { cerrar(); return; }
     var d = App.depto(a.departamento);
     var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
-    var tabs = h('div.pestanas', [['chat', 'Conversación'], ['perfil', 'Perfil'], ['permisos', 'Permisos'], ['notas', 'Notas'], ['tareas', 'Tareas']].map(function (p) {
-      return h('button.pestana' + (pestana === p[0] ? '.activa' : ''), { onclick: function () { pestana = p[0]; pintar(); } }, p[1]);
-    }));
-    App.add(App.vaciar(App.dom.derecho), 
-      h('div.der-cab', App.retratoImg(a, 'retrato', 120), h('div.der-tit', h('h2', a.nombre),
-        h('div.sub', a.rol, d ? h('span.insignia', h('span.punto', { style: { background: d.color, marginRight: '5px' } }), d.nombre) : null,
-          (a.permisos || []).indexOf('coordinador') >= 0 ? h('span.insignia.coord', 'Coordinador/a') : null)),
-        h('button.btn.fantasma.icono', { title: 'Cerrar', onclick: App.cerrarDerecho }, App.icono('cerrar'))),
-      tabs, cuerpo, pie);
+    var sub = h('div.sub', a.rol, d ? h('span.insignia', h('span.punto', { style: { background: d.color, marginRight: '5px' } }), d.nombre) : null,
+      (a.permisos || []).indexOf('coordinador') >= 0 ? h('span.insignia.coord', 'Coordinador/a') : null);
+    var cerrarBtn = h('button.btn.fantasma.icono', { title: 'Cerrar', onclick: App.cerrarDerecho }, App.icono('cerrar'));
+    function aFicha(p) { pestana = p || 'perfil'; pintar(); }
+    if (pestana === 'chat') {
+      App.add(App.vaciar(App.dom.derecho),
+        h('div.der-cab.agente-cab',
+          h('button.agente-cara', { title: 'Editar a ' + a.nombre + ' (perfil, apariencia, permisos)', onclick: function () { aFicha('perfil'); } },
+            App.retratoImg(a, 'retrato', 120), h('span.agente-lapiz', App.icono('lapiz'))),
+          h('div.der-tit', h('h2', a.nombre), sub),
+          h('button.btn.fantasma.icono', { title: 'Editar a ' + a.nombre, onclick: function () { aFicha('perfil'); } }, App.icono('lapiz')),
+          cerrarBtn),
+        cuerpo, pie);
+    } else {
+      App.add(App.vaciar(App.dom.derecho),
+        h('div.der-cab.agente-cab.ficha',
+          h('button.btn.fantasma.chico.volver', { title: 'Volver a la charla', onclick: function () { pestana = 'chat'; pintar(); } }, App.icono('atras'), 'Charla'),
+          App.retratoImg(a, 'retrato', 96),
+          h('div.der-tit', h('h2', a.nombre), sub),
+          cerrarBtn),
+        h('div.pestanas', FICHA.map(function (p) {
+          return h('button.pestana' + (pestana === p[0] ? '.activa' : ''), { onclick: function () { pestana = p[0]; pintar(); } }, p[1]);
+        })),
+        cuerpo, pie);
+    }
+    /* en la sección Charlas, a la derecha del chat: lo relacionado con el agente (nav.js) */
+    var conRel = pestana === 'chat' && App.Nav && App.Nav.enSeccion();
+    App.dom.derecho.classList.toggle('con-relacionado', !!conRel);
+    if (conRel) App.dom.derecho.appendChild(App.Nav.relacionado(a.id));
     if (pestana === 'chat') pintarChat(a, cuerpo, pie);
     else if (pestana === 'perfil') pintarPerfil(a, cuerpo, pie);
     else if (pestana === 'permisos') pintarPermisos(a, cuerpo, pie);
@@ -98,7 +123,7 @@
     App.add(pie, adj.lista, adj.error, adj.input, h('div.redactar', adj.boton, txt, enviar),
       h('div', { style: { display: 'flex', justifyContent: 'space-between', marginTop: '6px' } },
         h('span.ayuda', 'Enter para enviar · Mayús+Enter para otra línea · arrastrá o pegá archivos'),
-        h('button.btn.chico.fantasma', { onclick: function () { sesiones[a.id] = App.uuid(); chats[a.id] = []; pintar(); } }, 'Conversación nueva')));
+        h('button.btn.chico.fantasma', { onclick: function () { nueva(a.id); } }, 'Conversación nueva')));
 
     function render() {
       App.vaciar(lista); App.vaciar(sug);
@@ -170,6 +195,7 @@
         delete vivos[id];
         ocupado(id, false);
         if (actual === id && pestana === 'chat') pintar();   // si no, el aviso llega por /api/actividad (banner y faro)
+        if (App.Nav) App.Nav.refrescar();                    // la lista de charlas: título, último mensaje y orden
       });
     }
 
@@ -179,6 +205,7 @@
       api.get('/api/historial', { agent: a.id }).then(function (r) {
         if (r.session) sesiones[a.id] = r.session;
         chats[a.id] = (r.msgs || []).map(function (m) { return { r: m.r, t: m.t, e: !!m.e }; });
+        if (App.Nav) App.Nav.pintarLista();    // ya se sabe qué charla es: se marca en la lista
         return cargarConsultas(a.id).then(function () { if (actual === a.id && pestana === 'chat') render(); });
       }).catch(function () { chats[a.id] = []; render(); });
     }
@@ -549,6 +576,15 @@
       h('button.btn.primario', { onclick: function () { hojaTarea(a, null, cargar); } }, 'Nueva tarea')));
   }
 
+  /* charla nueva con el agente: sesión nueva y vacía (la anterior queda en la lista de charlas) */
+  function nueva(id) {
+    if (!App.agente(id)) return;
+    sesiones[id] = App.uuid(); chats[id] = []; delete borradores[id];
+    sesionFija = sesiones[id];
+    if (actual === id && App.modoDerecho() === 'agente') { pestana = 'chat'; pintar(); App.abrirDerecho('agente'); }
+    else abrir(id, 'chat');
+  }
+
   /* abre la conversación de una ejecución en la pestaña de chat (se puede seguir escribiendo en esa sesión) */
   function abrirSesion(a, sid) {
     api.get('/api/historial', { agent: a.id, session: sid }).then(function (r) {
@@ -556,6 +592,7 @@
       chats[a.id] = (r.msgs || []).map(function (m) { return { r: m.r, t: m.t, e: !!m.e }; });
       pestana = 'chat';
       pintar();
+      if (App.Nav) App.Nav.pintarLista();
     }).catch(App.fallo);
   }
 
@@ -711,6 +748,9 @@
     /* abre una conversación concreta del agente (p. ej. la de una entrega) en su pestaña de chat */
     abrirSesion: function (id, sid) {
       var a = App.agente(id); if (!a) return;
-      actual = id; App.Oficina3D.elegir(id); App.abrirDerecho('agente'); abrirSesion(a, sid); App.marcarEstados();
-    } };
+      actual = id; sesionFija = sid; App.Oficina3D.elegir(id); App.abrirDerecho('agente'); abrirSesion(a, sid); App.marcarEstados();
+    },
+    nueva: nueva,
+    sesion: function (id) { return sesiones[id] || null; },
+    sesionFija: function () { return sesionFija; } };
 })();

@@ -240,7 +240,10 @@ App.Oficina3D = !window.THREE ? (function () {
 
   /* ---------------- render bajo demanda ---------------- */
   var pedidoEn = 0, idCuadro = 0;
+  var pausada = false;   // oculta detrás de otra sección: no se dibuja ni se anima el ambiente
+  function pausar(si) { pausada = !!si; if (!pausada) { ultimo = 0; pedir(); } }
   function pedir() {
+    if (pausada) return;
     /* si un cuadro pedido no llegó en 1 s (ventana oculta), se vuelve a pedir en vez de quedar trabado */
     if (pendiente && performance.now() - pedidoEn < 1000) return;
     if (pendiente) cancelAnimationFrame(idCuadro);
@@ -249,6 +252,7 @@ App.Oficina3D = !window.THREE ? (function () {
   }
   function cuadro(t) {
     pendiente = false;
+    if (pausada) { ultimo = 0; return; }
     var dt = ultimo ? Math.min(0.05, (t - ultimo) / 1000) : 0.016; ultimo = t;
     var hayAnim = false;
     sombraAnim = false; soloLento = true;
@@ -2390,6 +2394,7 @@ App.Oficina3D = !window.THREE ? (function () {
 
   /* ---------------- API ---------------- */
   return {
+    pausar: pausar,
     iniciar: iniciar,
     construir: construir,
     alElegirAgente: function (fn) { cbAgente = fn; },

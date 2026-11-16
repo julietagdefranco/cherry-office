@@ -28,22 +28,10 @@
   function activa(r) { return r && (r.estado === 'en_curso' || r.estado === 'esperando'); }
 
   /* ---------------- lista ---------------- */
+  /* la lista vive en la sección Reuniones (nav.js); con una en curso, se abre esa */
   function abrir() {
     if (activa(E.reunion)) { panel(E.reunion.id); return; }
-    var hj = App.hoja({ titulo: 'Reuniones', ancho: 560 });
-    var lista = h('div.lista-reuniones', h('div.vacio', h('span.giro')));
-    hj.cuerpo.appendChild(lista);
-    App.add(hj.pie, h('button.btn.primario', { onclick: function () { hj.cerrar(); nueva(); } }, App.icono('mas'), 'Nueva reunión'));
-    api.get('/api/reuniones').then(function (r) {
-      App.vaciar(lista);
-      if (!r.reuniones.length) { lista.appendChild(h('div.vacio', 'Todavía no hubo reuniones.')); return; }
-      r.reuniones.forEach(function (x) {
-        var est = x.estado === 'cerrada' ? h('span.insignia', 'Cerrada') : h('span.insignia.ok', x.estado === 'en_curso' ? 'En curso' : 'Esperando');
-        lista.appendChild(h('div.reciente', { onclick: function () { hj.cerrar(); panel(x.id); } }, App.icono('reunion'),
-          h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { style: { fontWeight: 550 } }, x.tema),
-            h('div.ruta', App.fecha(x.creada) + ' · ' + x.agentes.map(nombre).join(', '))), est));
-      });
-    }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
+    App.Nav.ir('#/reuniones');
   }
   function nombre(id) { var a = App.agente(id); return a ? a.nombre : id; }
 

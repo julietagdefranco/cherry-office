@@ -1,0 +1,412 @@
+/* Navegación: riel de secciones, columna de lista y rutas con # (Atrás y Adelante funcionan).
+   Los módulos siguen pintando en App.dom.derecho y llamando a App.abrirDerecho(modo). Acá se decide dónde se ve:
+   - Oficina: la maqueta 3D, con el panel flotando a la derecha (el parte del día).
+   - Charlas (con las reuniones adentro), Archivos y Trabajo: el panel ocupa todo el ancho y a su izquierda queda la lista.
+   Se sincroniza en los dos sentidos: una ruta abre el módulo, y un módulo abierto desde otro lado (un aviso, la
+   maqueta, ⌘K) deja la ruta que le corresponde en el historial. */
+App.Nav = (function () {
+  'use strict';
+  var h = function () { return App.h.apply(null, arguments); };
+  var api = function () { return App.api; };
+
+  var SECCIONES = [
+    { id: 'oficina', texto: 'Oficina', icono: 'edificio', ruta: '#/oficina' },
+    { id: 'charlas', texto: 'Charlas', icono: 'charla', ruta: '#/charlas' },
+    { id: 'archivos', texto: 'Archivos', icono: 'carpeta', ruta: '#/archivos' },
+    { id: 'trabajo', texto: 'Trabajo', icono: 'reloj', ruta: '#/trabajo' }
+  ];
+  /* modo del panel -> sección y subsección */
+  var LUGAR = {
+    agente: ['charlas'], reunion: ['charlas'],
+    entregables: ['archivos', 'revisar'], biblioteca: ['archivos', 'biblioteca'], conocimiento: ['archivos', 'conocimiento'],
+    tareas: ['trabajo', 'tareas'], flujos: ['trabajo', 'flujos'], parte: ['oficina']
+  };
+  var seccion = null, sub = null;
+  var aplicando = false;        // mientras una ruta abre un módulo, el módulo no vuelve a escribir la ruta
+  var dom = {};                 // riel, lista, items del riel
+  var sesiones = null;          // cache de /api/sesiones
+  var reuniones = null;         // cache de /api/reuniones
+  var buscar = '';
+  var plegado = {};
+  try { plegado = JSON.parse(localStorage.getItem('oficina.nav.plegado') || '{}') || {}; } catch (e) {}
+
+  function esMovil() { return window.matchMedia('(max-width: 720px)').matches; }
+  function leer() {
+    var p = (location.hash || '').replace(/^#\/?/, '').split('/').map(function (x) { try { return decodeURIComponent(x); } catch (e) { return x; } });
+    // #/reuniones/<id> es una reunión: se ve dentro de Charlas
+    var sec = p[0] === 'reuniones' || SECCIONES.some(function (s) { return s.id === p[0]; }) ? p[0] : 'oficina';
+    return { sec: sec, a: p[1] || null, b: p[2] || null };
+  }
+  function empujar(ruta, reemplazar) {
+    if (location.hash === ruta) return;
+    if (reemplazar) history.replaceState(null, '', ruta); else history.pushState(null, '', ruta);
+  }
+
+  /* ---------------- riel ---------------- */
+  /* `op`: {menuOficina(ancla), menuNuevo(ancla), insignias: {seccion: elemento}, extra: [elementos abajo]} */
+  function riel(op) {
+    dom.items = {};
+    var items = SECCIONES.map(function (s, i) {
+      var b = h('button.riel-item', { title: s.texto + ' (' + (App.atajoMod || '⌘') + (i + 1) + ')', onclick: function () { ir(s.id === 'oficina' ? s.ruta : rutaSeccion(s.id)); } },
+        App.icono(s.icono), h('span', s.texto), op.insignias && op.insignias[s.id] ? op.insignias[s.id] : null);
+      dom.items[s.id] = b;
+      return b;
+    });
+    dom.riel = h('nav.riel',
+      h('button.riel-logo', { title: 'Oficinas y ajustes', onclick: function (ev) { op.menuOficina(ev.currentTarget); } }, App.logo()),
+      h('button.riel-nuevo', { title: 'Nuevo…', onclick: function (ev) { op.menuNuevo(ev.currentTarget); } }, App.icono('mas')),
+      items, h('div.riel-sep'), op.extra || null);
+    return dom.riel;
+  }
+  /* la última subsección que miraste de cada sección (Archivos › Biblioteca, Trabajo › Flujos…) */
+  var ultimaSub = { archivos: 'revisar', trabajo: 'tareas' };
+  function rutaSeccion(id) {
+    if (id === 'archivos' || id === 'trabajo') return '#/' + id + (esMovil() ? '' : '/' + ultimaSub[id]);
+    return '#/' + id;
+  }
+
+  /* ---------------- secciones ---------------- */
+  function ponerSeccion(sec, s) {
+    var antes = seccion;
+    seccion = sec; sub = s || null;
+    if (antes !== sec && sec === 'charlas' && sesiones) cargarSesiones();      // al entrar, se pone al día sin parpadear
+    if (antes !== sec && sec === 'charlas' && reuniones) cargarReuniones();
+    if (s && ultimaSub[sec] !== undefined) ultimaSub[sec] = s;
+    var app = App.dom.app;
+    app.classList.toggle('en-oficina', sec === 'oficina');
+    app.classList.toggle('en-seccion', sec !== 'oficina');
+    app.setAttribute('data-seccion', sec);
+    if (App.Oficina3D && App.Oficina3D.pausar) App.Oficina3D.pausar(sec !== 'oficina');
+    Object.keys(dom.items || {}).forEach(function (k) { dom.items[k].classList.toggle('activo', k === sec); });
+    marcarDetalle();
+    pintarLista();
+  }
+  function marcarDetalle() {
+    var m = App.modoDerecho ? App.modoDerecho() : null;
+    App.dom.app.classList.toggle('con-detalle', seccion !== 'oficina' && !!m && m !== 'vacio');
+  }
+
+  /* El panel vacío de una sección (nada elegido todavía). Cierra lo que hubiera con su limpieza de siempre. */
+  function vacio() {
+    if (App.modoDerecho() && App.modoDerecho() !== 'vacio') App.cerrarDerecho(true);
+    var der = App.dom.derecho;
+    der.classList.remove('con-relacionado');
+    der.classList.add('abierto'); der.setAttribute('data-modo', 'vacio');
+    var txt = {
+      charlas: ['charla', 'Elegí una charla o empezá una', 'Hablale a alguien del equipo, o juntá a varios en una reunión. Todo queda guardado a la izquierda.'],
+      archivos: ['carpeta', 'Archivos de la oficina', 'Lo que te entregaron para revisar, la biblioteca y lo que sabe la oficina.'],
+      trabajo: ['reloj', 'Lo que los agentes hacen solos', 'Tareas programadas y flujos que pasan de un agente a otro.']
+    }[seccion] || ['edificio', '', ''];
+    var accion = seccion === 'charlas' ? h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center' } },
+      h('button.btn.primario', { onclick: function (ev) { elegirAgente(ev.currentTarget, nuevaCharla); } }, App.icono('charla'), 'Charlar con alguien'),
+      h('button.btn', { onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), 'Nueva reunión')) : null;
+    App.add(App.vaciar(der), h('div.nav-vacio', App.icono(txt[0]), h('b', txt[1]), h('p', txt[2]), accion));
+    marcarDetalle();
+  }
+
+  /* ---------------- rutas -> módulos ---------------- */
+  function aplicar() {
+    var r = leer(), m = App.modoDerecho();
+    aplicando = true;
+    try {
+      if (r.sec === 'oficina') {
+        ponerSeccion('oficina');
+        if (m && m !== 'parte') App.cerrarDerecho(true);
+      } else if (r.sec === 'charlas') {
+        ponerSeccion('charlas');
+        if (r.a && App.agente(r.a)) {
+          if (r.b) { if (!(m === 'agente' && App.Agente.actual() === r.a && App.Agente.sesion(r.a) === r.b)) App.Agente.abrirSesion(r.a, r.b); }
+          else if (!(m === 'agente' && App.Agente.actual() === r.a)) App.Agente.abrir(r.a, 'chat');
+        } else if (!esMovil() && sesiones && sesiones.length && !(m === 'agente')) {
+          var s = sesiones[0];
+          empujar('#/charlas/' + encodeURIComponent(s.agente) + '/' + s.session, true);
+          App.Agente.abrirSesion(s.agente, s.session);
+        } else if (m === 'agente' && !esMovil()) {
+          empujar(rutaDe('agente'), true);
+        } else vacio();
+      } else if (r.sec === 'reuniones') {
+        ponerSeccion('charlas');
+        if (r.a) { if (!(m === 'reunion' && App.Reunion.abierta() === r.a)) App.Reunion.ver(r.a); }
+        else { empujar('#/charlas', true); vacio(); }
+      } else if (r.sec === 'archivos') {
+        ponerSeccion('archivos', r.a);
+        if (r.a === 'revisar') { if (r.b) App.Entregables.abrir(+r.b); else if (m !== 'entregables') App.Entregables.abrir(); }
+        else if (r.a === 'biblioteca') { if (m !== 'biblioteca') App.Biblioteca.abrir(); }
+        else if (r.a === 'conocimiento') { if (m !== 'conocimiento') App.Conocimiento.abrir(); }
+        else vacio();
+      } else if (r.sec === 'trabajo') {
+        ponerSeccion('trabajo', r.a);
+        if (r.a === 'flujos') { if (r.b && App.Flujos.verCorrida) App.Flujos.verCorrida(r.b); else if (m !== 'flujos') App.Flujos.abrir(); }
+        else if (r.a === 'tareas') { if (m !== 'tareas') App.Tareas.abrir(); }
+        else vacio();
+      }
+    } finally { aplicando = false; }
+    marcarDetalle();
+    pintarLista();
+  }
+
+  /* ---------------- módulos -> ruta ---------------- */
+  function rutaDe(modo) {
+    if (modo === 'agente') {
+      var id = App.Agente.actual(), sid = App.Agente.sesionFija && App.Agente.sesionFija();
+      return '#/charlas/' + encodeURIComponent(id || '') + (sid ? '/' + sid : '');
+    }
+    if (modo === 'reunion') return '#/reuniones/' + encodeURIComponent((App.Reunion.abierta && App.Reunion.abierta()) || '');
+    if (modo === 'entregables') return '#/archivos/revisar';
+    if (modo === 'biblioteca') return '#/archivos/biblioteca';
+    if (modo === 'conocimiento') return '#/archivos/conocimiento';
+    if (modo === 'tareas') return '#/trabajo/tareas';
+    if (modo === 'flujos') return '#/trabajo/flujos';
+    return '#/oficina';
+  }
+  /* App.abrirDerecho avisa acá: si el módulo se abrió desde otro lado, la sección y la ruta lo siguen */
+  function alAbrir(modo) {
+    if (modo !== 'agente') App.dom.derecho.classList.remove('con-relacionado');
+    var lugar = LUGAR[modo];
+    if (!lugar) return;
+    if (seccion !== lugar[0] || (lugar[1] && sub !== lugar[1])) ponerSeccion(lugar[0], lugar[1]);
+    if (!aplicando) empujar(rutaDe(modo));
+    marcarDetalle();
+    pintarLista();
+  }
+  /* App.cerrarDerecho avisa acá: en una sección, cerrar el panel vuelve a la lista (en el celular) o al vacío */
+  function alCerrar(silencioso) {
+    if (seccion === 'oficina' || silencioso) { marcarDetalle(); return; }
+    vacio();
+    if (!aplicando) empujar('#/' + seccion);
+    pintarLista();
+  }
+  /* un módulo cambió algo que mira la lista (mandaste un mensaje, terminó una reunión…) */
+  var refrescoPendiente = null;
+  function refrescar() {
+    sesiones = seccion === 'charlas' ? sesiones : null;
+    clearTimeout(refrescoPendiente);
+    refrescoPendiente = setTimeout(function () { if (seccion === 'charlas') { cargarSesiones(); cargarReuniones(); } else pintarLista(); }, 150);
+  }
+
+  function ir(ruta) { if (location.hash === ruta) aplicar(); else location.hash = ruta; }
+
+  /* ---------------- columna de lista ---------------- */
+  function lista() { return App.dom.lista; }
+  function pintarLista() {
+    var col = lista(); if (!col) return;
+    if (seccion === 'charlas') pintarCharlas(col);
+    else if (seccion === 'archivos') pintarArchivos(col);
+    else if (seccion === 'trabajo') pintarTrabajo(col);
+    else App.vaciar(col);
+  }
+  function cabecera(titulo, boton) { return h('div.lista-cab', h('h2', titulo), boton || null); }
+  function filtroFila(icono, texto, activo, accion, extra) {
+    return h('button.lista-filtro' + (activo ? '.activo' : ''), { onclick: accion }, typeof icono === 'string' ? App.icono(icono) : icono, h('span', texto), extra || null);
+  }
+  function grupoPlegable(clave, titulo, cuerpo, cuenta) {
+    var abierto = !plegado[clave];
+    var tit = h('button.lista-grupo.plegable' + (abierto ? '.abierto' : ''), { onclick: function () {
+      plegado[clave] = abierto; abierto = !abierto;
+      try { localStorage.setItem('oficina.nav.plegado', JSON.stringify(plegado)); } catch (e) {}
+      tit.classList.toggle('abierto', abierto); cuerpo.classList.toggle('oculto', !abierto);
+    } }, App.icono('abajo'), titulo, cuenta ? h('span.cuenta', cuenta) : null);
+    cuerpo.classList.toggle('oculto', !abierto);
+    return [tit, cuerpo];
+  }
+
+  /* --- Charlas: el equipo arriba (plegable) y las charlas guardadas de todos, la más reciente primero --- */
+  function cargarSesiones() {
+    return api().get('/api/sesiones').then(function (r) {
+      sesiones = r.sesiones || [];
+      if (seccion === 'charlas') pintarLista();
+      return sesiones;
+    }).catch(function () { sesiones = sesiones || []; });
+  }
+  function pintarCharlas(col) {
+    var inp = h('input.campo', { placeholder: 'Buscar en charlas', value: buscar });
+    var caja = h('div');
+    inp.addEventListener('input', function () { buscar = inp.value; llenar(); });
+    function llenar() {
+      App.vaciar(caja);
+      var q = buscar.trim().toLowerCase();
+      caja.appendChild(bloqueReuniones(q));
+      if (!sesiones) { caja.appendChild(h('div.vacio', h('span.giro'))); return; }
+      caja.appendChild(h('div.lista-grupo', 'Charlas'));
+      var ss = sesiones.filter(function (s) {
+        var a = App.agente(s.agente); if (!a) return false;
+        return !q || (titulo(s) + ' ' + s.ultimo + ' ' + a.nombre).toLowerCase().indexOf(q) >= 0;
+      });
+      var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      var corte = [hoy.getTime() / 1000, hoy.getTime() / 1000 - 86400, hoy.getTime() / 1000 - 6 * 86400];
+      var grupos = [['Hoy', []], ['Ayer', []], ['Esta semana', []], ['Antes', []]];
+      ss.forEach(function (s) { grupos[s.ts >= corte[0] ? 0 : s.ts >= corte[1] ? 1 : s.ts >= corte[2] ? 2 : 3][1].push(s); });
+      grupos.forEach(function (g) {
+        if (!g[1].length) return;
+        caja.appendChild(h('div.lista-subgrupo', g[0]));
+        g[1].forEach(function (s) { caja.appendChild(filaSesion(s)); });
+      });
+      if (!ss.length) caja.appendChild(h('div.vacio', q ? 'Nada con «' + buscar + '».' : 'Todavía no hay charlas. Tocá a alguien del equipo para empezar.'));
+    }
+    llenar();
+    var eq = App.dom.equipo;
+    App.add(App.vaciar(col),
+      cabecera('Charlas', h('button.btn.chico', { title: 'Charla con alguien o reunión nueva', onclick: function (ev) { menuNueva(ev.currentTarget); } }, App.icono('lapiz'), 'Nueva')),
+      h('div.lista-buscar', App.icono('buscar'), inp),
+      h('div.lista-cuerpo', grupoPlegable('equipo', 'Equipo', eq, (App.E.oficina.agentes || []).length), caja));
+    if (!sesiones) cargarSesiones().then(function () {
+      var r = leer();   // recién llegó la lista: en la compu se abre la charla más reciente
+      if (r.sec === 'charlas' && !r.a && !esMovil() && App.modoDerecho() !== 'agente' && sesiones.length) aplicar();
+    });
+  }
+  function titulo(s) {
+    var t = App.Adjuntos && App.Adjuntos.separar ? App.Adjuntos.separar(s.titulo || '').texto : s.titulo;
+    return (t || '').trim() || 'Archivos';
+  }
+  function filaSesion(s) {
+    var a = App.agente(s.agente);
+    var activa = App.modoDerecho() === 'agente' && App.Agente.actual() === s.agente && App.Agente.sesion(s.agente) === s.session;
+    var ult = App.Adjuntos && App.Adjuntos.separar ? App.Adjuntos.separar(s.ultimo || '').texto : s.ultimo;
+    return h('div.lista-item' + (activa ? '.activo' : ''), { onclick: function () { ir('#/charlas/' + encodeURIComponent(s.agente) + '/' + s.session); } },
+      App.retratoImg(a, 'retrato', 64),
+      h('div.lista-item-txt',
+        h('div.lista-item-tit', h('b', titulo(s)), h('small', corto(s.ts))),
+        h('div.lista-item-sub', a.nombre + ' · ' + (s.de === 'u' ? 'Vos: ' : '') + (ult || '').replace(/[*#`|>]/g, ''))));
+  }
+  function corto(ts) {
+    var d = Date.now() / 1000 - ts;
+    if (d < 60) return 'recién';
+    if (d < 3600) return Math.round(d / 60) + ' min';
+    if (d < 86400) return Math.round(d / 3600) + ' h';
+    return Math.round(d / 86400) + ' d';
+  }
+  function elegirAgente(ancla, alElegir) {
+    var items = [{ titulo: 'Charlar con' }];
+    (App.E.oficina.agentes || []).forEach(function (a) { items.push({ texto: a.nombre, nota: a.rol, accion: function () { alElegir(a.id); } }); });
+    if (items.length === 1) { App.Contratar.abrir(); return; }
+    App.menu(ancla, items);
+  }
+  function nuevaCharla(id) { App.Agente.nueva(id); }
+
+  /* --- Reuniones: la lista de siempre, a la izquierda --- */
+  function cargarReuniones() {
+    return api().get('/api/reuniones').then(function (r) { reuniones = r.reuniones || []; if (seccion === 'charlas') pintarLista(); }).catch(function () { reuniones = reuniones || []; });
+  }
+  /* Dentro de Charlas: las reuniones en curso y las últimas (con «Ver todas»). La búsqueda también las filtra. */
+  var todasReuniones = false;
+  function bloqueReuniones(q) {
+    var caja = h('div');
+    var abierta = App.modoDerecho() === 'reunion' ? App.Reunion.abierta() : null;
+    if (reuniones && abierta && !reuniones.some(function (x) { return x.id === abierta; })) cargarReuniones();   // recién creada
+    if (!reuniones) { cargarReuniones(); return caja; }
+    var rs = reuniones.filter(function (x) { return !q || (x.tema + ' ' + nombresDe(x).join(' ')).toLowerCase().indexOf(q) >= 0; });
+    if (!rs.length) return caja;
+    var vivas = rs.filter(function (x) { return x.estado !== 'cerrada'; });
+    var cerradas = rs.filter(function (x) { return x.estado === 'cerrada'; });
+    var mostrar = vivas.concat(q || todasReuniones ? cerradas : cerradas.slice(0, Math.max(0, 3 - vivas.length)));
+    App.add(caja, h('div.lista-grupo', 'Reuniones', vivas.length ? h('span.insignia.ok', { style: { marginLeft: 'auto' } }, vivas.length === 1 ? 'En curso' : vivas.length + ' en curso') : null),
+      mostrar.map(function (x) {
+        var activa = abierta === x.id;
+        var est = x.estado === 'cerrada' ? h('small', App.fecha(x.creada)) : h('span.insignia.ok', x.estado === 'en_curso' ? 'En curso' : 'Esperando');
+        return h('div.lista-item' + (activa ? '.activo' : ''), { onclick: function () { ir('#/reuniones/' + encodeURIComponent(x.id)); } },
+          h('div.lista-icono', App.icono('reunion')),
+          h('div.lista-item-txt', h('div.lista-item-tit', h('b', x.tema), est), h('div.lista-item-sub', nombresDe(x).join(', '))));
+      }),
+      !q && cerradas.length > mostrar.length - vivas.length || (todasReuniones && cerradas.length > 3)
+        ? h('button.lista-mas', { onclick: function () { todasReuniones = !todasReuniones; pintarLista(); } },
+          todasReuniones ? 'Ver menos' : 'Ver todas las reuniones (' + rs.length + ')') : null);
+    return caja;
+  }
+  function nombresDe(x) { return (x.agentes || []).map(function (id) { var a = App.agente(id); return a ? a.nombre : id; }); }
+  /* «Nueva»: una charla con alguien o una reunión */
+  function menuNueva(ancla) {
+    var items = [{ titulo: 'Charlar con' }];
+    (App.E.oficina.agentes || []).forEach(function (a) { items.push({ texto: a.nombre, nota: a.rol, accion: function () { nuevaCharla(a.id); } }); });
+    items.push('-');
+    items.push({ texto: 'Nueva reunión…', icono: 'reunion', accion: function () { App.Reunion.nueva(); } });
+    if ((App.E.oficina.agentes || []).length === 0) items = [{ texto: 'Contratar un agente…', icono: 'mas', accion: function () { App.Contratar.abrir(); } }];
+    App.menu(ancla, items);
+  }
+
+  /* --- Archivos: para revisar, biblioteca, conocimiento y la carpeta --- */
+  function pintarArchivos(col) {
+    var n = App.Entregables && App.Entregables.sinRevisar ? App.Entregables.sinRevisar() : 0;
+    var d = App.dom;
+    App.add(App.vaciar(col), cabecera('Archivos'), h('div.lista-cuerpo',
+      filtroFila('bandeja', 'Para revisar', sub === 'revisar', function () { ir('#/archivos/revisar'); }, n ? h('span.insignia.aviso', n) : null),
+      filtroFila('libro', 'Biblioteca', sub === 'biblioteca', function () { ir('#/archivos/biblioteca'); }, d.navBib),
+      filtroFila('bombilla', 'Conocimiento', sub === 'conocimiento', function () { ir('#/archivos/conocimiento'); }, d.navCon),
+      h('div.lista-grupo', 'En la compu'),
+      filtroFila('carpeta', App.nativo.hay ? 'Mostrar la carpeta en ' + App.nativo.enExplorador : 'Carpeta de la oficina', false, function () {
+        if (App.nativo.hay) App.nativo.revelar(App.E.carpeta); else App.verArchivosOficina();
+      })));
+  }
+
+  /* --- Trabajo: tareas y flujos --- */
+  function pintarTrabajo(col) {
+    var d = App.dom;
+    App.add(App.vaciar(col), cabecera('Trabajo', h('button.btn.chico', { title: 'Nueva tarea', onclick: function (ev) {
+      elegirAgente(ev.currentTarget, function (id) { App.Agente.nuevaTarea(id, {}, function () { if (App.modoDerecho() === 'tareas') App.Tareas.abrir(); }); });
+    } }, App.icono('mas'), 'Tarea')), h('div.lista-cuerpo',
+      filtroFila('reloj', 'Tareas', sub === 'tareas', function () { ir('#/trabajo/tareas'); }, null),
+      filtroFila('flujo', 'Flujos', sub === 'flujos', function () { ir('#/trabajo/flujos'); }, d.navFlu),
+      h('div.lista-grupo', 'Atajos'),
+      filtroFila('flujo', 'Nueva corrida de flujo…', false, function () { App.Flujos.abrir(); App.Flujos.nueva(); }),
+      filtroFila('chispa', 'Armar un flujo con el Creador…', false, function () { App.Creador.abrir(); })));
+  }
+
+  /* --- «Relacionado»: a la derecha del chat (en una sección y con lugar): quién es, sus otras charlas, lo que te
+     entregó y sus tareas. Cada cosa lleva a su lugar. --- */
+  function relacionado(id) {
+    var a = App.agente(id);
+    var caja = h('aside.relacionado');
+    if (!a) return caja;
+    var d = App.depto(a.departamento);
+    var charlas = h('div'), entregas = h('div', h('div.ayuda', '…')), tareas = h('div', h('div.ayuda', '…'));
+    function mini(icono, texto, nota, accion, cls) {
+      return h('button.rel-fila' + (cls || ''), { onclick: accion }, App.icono(icono), h('span', texto), nota ? h('small', nota) : null);
+    }
+    function pintarCharlas() {
+      App.vaciar(charlas);
+      var actualSid = App.Agente.sesion(id);
+      var ss = (sesiones || []).filter(function (s) { return s.agente === id && s.session !== actualSid; }).slice(0, 6);
+      if (!ss.length) charlas.appendChild(h('div.ayuda', sesiones ? 'No hay otras.' : '…'));
+      ss.forEach(function (s) { charlas.appendChild(mini('charla', titulo(s), corto(s.ts), function () { ir('#/charlas/' + encodeURIComponent(id) + '/' + s.session); })); });
+    }
+    if (sesiones) pintarCharlas(); else cargarSesiones().then(pintarCharlas);
+    api().get('/api/entregas', { agente: id, limite: 5 }).then(function (r) {
+      App.vaciar(entregas);
+      var es = r.entregas || [];
+      if (!es.length) entregas.appendChild(h('div.ayuda', 'Todavía nada.'));
+      es.forEach(function (e) {
+        entregas.appendChild(mini('bandeja', e.titulo || 'Entrega', e.estado === 'sin_revisar' ? 'para revisar' : '', function () { App.Entregables.abrir(e.id); }, e.estado === 'sin_revisar' ? '.pendiente' : ''));
+      });
+    }).catch(function () { App.vaciar(entregas); });
+    api().get('/api/tareas').then(function (r) {
+      App.vaciar(tareas);
+      var ts = (r.tareas || []).filter(function (t) { return t.agente === id; });
+      if (!ts.length) tareas.appendChild(h('div.ayuda', 'Sin tareas programadas.'));
+      ts.slice(0, 5).forEach(function (t) { tareas.appendChild(mini('reloj', t.nombre, t.corriendo ? 'corriendo' : t.activa === false ? 'en pausa' : '', function () { App.Agente.abrir(id, 'tareas'); })); });
+    }).catch(function () { App.vaciar(tareas); });
+    App.add(caja,
+      h('div.rel-quien', App.retratoImg(a, 'retrato', 96), h('div', h('b', a.nombre), h('span', a.rol + (d ? ' · ' + d.nombre : '')))),
+      h('div.rel-acciones', h('button.btn.chico', { onclick: function () { App.Agente.abrir(id, 'perfil'); } }, 'Perfil'),
+        h('button.btn.chico', { onclick: function () { App.Agente.abrir(id, 'notas'); } }, 'Notas')),
+      h('div.rel-sec', h('h4', 'Otras charlas', h('button', { onclick: function () { nuevaCharla(id); } }, '+ Nueva')), charlas),
+      h('div.rel-sec', h('h4', 'Lo que te entregó', h('button', { onclick: function () { ir('#/archivos/revisar'); } }, 'Todo')), entregas),
+      h('div.rel-sec', h('h4', 'Sus tareas', h('button', { onclick: function () { App.Agente.nuevaTarea(id, {}); } }, '+ Nueva')), tareas));
+    return caja;
+  }
+
+  /* ---------------- arranque ---------------- */
+  window.addEventListener('hashchange', function () { if (App.dom && App.dom.app) aplicar(); });
+  window.addEventListener('popstate', function () { if (App.dom && App.dom.app) aplicar(); });
+  document.addEventListener('keydown', function (e) {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !/^[1-4]$/.test(e.key)) return;
+    if (!App.dom || !App.dom.app || (App.hojaAbierta && App.hojaAbierta())) return;
+    e.preventDefault();
+    var s = SECCIONES[+e.key - 1];
+    ir(s.id === 'oficina' ? s.ruta : rutaSeccion(s.id));
+  });
+
+  return {
+    riel: riel, aplicar: aplicar, ir: ir, alAbrir: alAbrir, alCerrar: alCerrar, refrescar: refrescar,
+    seccion: function () { return seccion; }, enSeccion: function () { return !!seccion && seccion !== 'oficina'; },
+    pintarLista: pintarLista, elegirAgente: elegirAgente, relacionado: relacionado, menuNueva: menuNueva
+  };
+})();

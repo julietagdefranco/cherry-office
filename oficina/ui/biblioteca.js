@@ -56,7 +56,8 @@
 
   /* `slug` (opcional): abre con ese documento elegido (por ejemplo, recién guardado desde una entrega) */
   function abrir(slug) {
-    var hj = App.hoja({ titulo: 'Biblioteca', ancho: 1100, alto: 'min(740px, 92vh)', sinPie: true });
+    if (App.Agente && App.Agente.alCerrar) App.Agente.alCerrar();
+    var hj = App.hojaEnPanel({ titulo: 'Biblioteca', sinPie: true }, 'biblioteca');
     var vista = 'todo';            // 'todo' | 'compartido' | id de departamento | 'propuestas'
     var sel = typeof slug === 'string' && slug ? { tipo: 'archivo', id: slug } : null;   // {tipo: 'archivo'|'carpeta', id}
     var abiertas = {};             // carpetas vinculadas desplegadas en la lista

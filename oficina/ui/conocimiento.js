@@ -274,7 +274,8 @@
   }
 
   function abrir(pestanaInicial) {
-    var hj = App.hoja({ titulo: 'Conocimiento', ancho: 900, alto: 'min(720px, 92vh)', sinPie: true });
+    if (App.Agente && App.Agente.alCerrar) App.Agente.alCerrar();
+    var hj = App.hojaEnPanel({ titulo: 'Conocimiento', sinPie: true }, 'conocimiento');
     var pestana = pestanaInicial || 'buscar';
     var estado = {};
     var tabs = h('div.pestanas'), cuerpo = h('div.con-cuerpo');

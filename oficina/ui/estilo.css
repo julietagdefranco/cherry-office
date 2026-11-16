@@ -684,3 +684,141 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .con-dos { grid-template-columns: 1fr; }
   .con-cuerpo { padding: 12px; }
 }
+
+/* ================= navegación (nav.js): riel · lista de la sección · vista ================= */
+:root { --riel: 68px; --lista: 284px; }
+.app { grid-template-columns: var(--riel) var(--lista) minmax(0, 1fr); }
+.app.en-oficina { grid-template-columns: var(--riel) 0 minmax(0, 1fr); }
+.app.en-oficina .lista-col { display: none; }
+.riel { grid-column: 1; } .lista-col { grid-column: 2; } .vista { grid-column: 3; }
+
+/* riel */
+.riel { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 0; background: var(--panel-2); border-right: 1px solid var(--linea); min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.riel-logo { border: 0; background: none; padding: 4px; border-radius: 10px; cursor: pointer; margin-bottom: 4px; }
+.riel-logo:hover { background: var(--panel); }
+.riel-nuevo { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--linea-fuerte); background: var(--panel); cursor: pointer; display: flex; align-items: center; justify-content: center; margin: 2px 0 8px; flex: none; }
+.riel-nuevo:hover { background: var(--fondo); }
+.riel-nuevo svg { width: 18px; height: 18px; }
+.riel-item { position: relative; width: 56px; min-height: 50px; border: 0; border-radius: 12px; background: none; cursor: pointer; color: var(--suave); flex: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 10.5px; font-weight: 500; padding: 4px 2px; }
+.riel-item svg { width: 19px; height: 19px; }
+.riel-item:hover { background: var(--panel); color: var(--texto); }
+.riel-item.activo { background: var(--panel); color: var(--texto); box-shadow: inset 0 0 0 1px var(--linea-fuerte); }
+.riel-item .insignia { position: absolute; top: 2px; right: 2px; height: 16px; min-width: 16px; padding: 0 4px; font-size: 10px; justify-content: center; background: var(--panel); }
+.riel-item .insignia.ok { background: var(--ok); color: #fff; border-color: var(--ok); font-size: 0; min-width: 9px; width: 9px; height: 9px; padding: 0; top: 6px; right: 10px; }
+.riel-item .insignia.aviso { background: #e0a84a; color: #1d1d1f; border-color: #e0a84a; }
+.riel-sep { flex: 1; min-height: 8px; }
+.riel .btn.uso { flex-direction: column; height: auto; width: 56px; padding: 6px 2px; gap: 2px; border: 0; background: none; box-shadow: none; font-size: 10px; color: var(--suave); }
+.riel .btn.uso:hover { background: var(--panel); }
+.riel .btn.uso .uso-txt { flex-direction: column; gap: 0; line-height: 1.25; }
+.riel .btn.uso .uso-sep { display: none; }
+
+/* columna de lista */
+.lista-col { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--linea); background: var(--panel-2); overflow: hidden; }
+.lista-cab { display: flex; align-items: center; gap: 8px; padding: 16px 14px 8px; }
+.lista-cab h2 { font-size: 16px; flex: 1; }
+.lista-buscar { margin: 0 12px 6px; position: relative; }
+.lista-buscar > svg { position: absolute; left: 9px; top: 9px; width: 15px; height: 15px; color: var(--tenue); }
+.lista-buscar .campo { padding-left: 30px; height: 32px; }
+.lista-cuerpo { flex: 1; overflow-y: auto; padding: 0 8px 14px; min-height: 0; }
+.lista-grupo { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 11px; font-weight: 600; color: var(--tenue); text-transform: uppercase; letter-spacing: .04em; padding: 14px 8px 5px; border: 0; background: none; text-align: left; }
+.lista-grupo.plegable { cursor: pointer; }
+.lista-grupo.plegable svg { width: 13px; height: 13px; transform: rotate(-90deg); transition: transform .12s; }
+.lista-grupo.plegable.abierto svg { transform: none; }
+.lista-grupo .cuenta { margin-left: auto; font-weight: 500; }
+.lista-col .equipo { padding: 0; overflow: visible; flex: none; }
+.lista-item { display: flex; gap: 10px; align-items: center; padding: 7px 8px; border-radius: var(--radio-chico); cursor: pointer; }
+.lista-item:hover { background: var(--panel); }
+.lista-item.activo { background: var(--panel); box-shadow: inset 0 0 0 1px var(--linea-fuerte); }
+.lista-item .retrato { width: 32px; height: 32px; }
+.lista-icono { width: 32px; height: 32px; border-radius: 8px; background: var(--fondo); display: flex; align-items: center; justify-content: center; color: var(--suave); flex: none; }
+.lista-item-txt { min-width: 0; flex: 1; }
+.lista-item-tit { display: flex; gap: 6px; align-items: baseline; }
+.lista-item-tit b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.lista-item-tit small { color: var(--tenue); font-size: 11px; flex: none; }
+.lista-item-sub { color: var(--suave); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lista-filtro { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: var(--radio-chico); background: none; cursor: pointer; text-align: left; }
+.lista-filtro > svg { width: 16px; height: 16px; color: var(--suave); flex: none; }
+.lista-filtro > span:not(.insignia) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lista-filtro:hover { background: var(--panel); }
+.lista-filtro.activo { background: var(--panel); box-shadow: inset 0 0 0 1px var(--linea-fuerte); }
+
+/* oficina: la maqueta con el nombre arriba a la izquierda y el panel flotando */
+.vista > .marca { position: absolute; top: 14px; left: 14px; z-index: 5; margin: 0; padding: 7px 10px 7px 12px; gap: 8px; background: var(--panel); border: 1px solid var(--linea); box-shadow: var(--sombra); max-width: 40%; }
+.vista > .marca:hover { background: var(--panel-2); }
+.vista > .marca svg { width: 15px; height: 15px; color: var(--suave); flex: none; }
+
+/* secciones: el panel es la pantalla (la maqueta queda armada, oculta) */
+.app.en-seccion .lienzo { visibility: hidden; }
+.app.en-seccion .carga3d, .app.en-seccion .herramientas, .app.en-seccion .pista, .app.en-seccion .vista > .marca, .app.en-seccion .aviso-reunion { display: none; }
+.app.en-seccion .derecho { width: 100%; transform: none; visibility: visible; box-shadow: none; border-left: 0; transition: none; }
+.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]) .der-cab,
+.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]) .pestanas,
+.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]) .der-cuerpo > *,
+.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]) .der-pie > * { width: 100%; max-width: 860px; margin-left: auto; margin-right: auto; }
+.app.en-seccion .der-cab { padding-top: 16px; }
+.app.en-seccion .der-pie { border-top: 0; padding-bottom: 16px; }
+.app.en-seccion .msg { max-width: 78%; }
+.app.en-seccion .avisos-banner { left: auto; right: 20px; transform: none; bottom: 110px; z-index: 20; max-width: min(560px, calc(100% - 40px)); }
+.app.en-seccion .permisos-pila { top: 74px; right: 20px; }
+.nav-vacio { margin: auto; text-align: center; color: var(--suave); padding: 40px 24px; max-width: 420px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.nav-vacio > svg { width: 34px; height: 34px; color: var(--tenue); margin-bottom: 6px; }
+.nav-vacio b { color: var(--texto); font-size: 15px; }
+.nav-vacio .btn { margin-top: 12px; }
+.hoja-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.hoja-panel-cuerpo { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px 16px; }
+
+/* celular: el riel abajo; en una sección se ve la lista o lo elegido */
+@media (max-width: 720px) {
+  .app, .app.en-oficina { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .riel { grid-row: 2; grid-column: 1; flex-direction: row; justify-content: space-around; gap: 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); border-right: 0; border-top: 1px solid var(--linea); overflow-x: auto; }
+  .riel-logo, .riel-sep, .riel .btn.uso, .riel-extra { display: none; }
+  .riel-nuevo { margin: 0 4px; width: 38px; height: 38px; }
+  .riel-item { width: auto; min-width: 54px; min-height: 46px; }
+  .lista-col, .vista { grid-row: 1; grid-column: 1; }
+  .lista-col { border-right: 0; }
+  .app.en-seccion.con-detalle .lista-col { display: none; }
+  .app.en-seccion:not(.con-detalle) .vista { display: none; }
+  .vista > .marca { top: 12px; left: 12px; max-width: calc(100% - 140px); }
+  .app.en-seccion .avisos-banner { left: 12px; right: 12px; bottom: 90px; max-width: none; }
+  .app.en-seccion .msg { max-width: 92%; }
+}
+
+/* «Relacionado» a la derecha del chat, solo si hay lugar */
+.relacionado { display: none; }
+@media (min-width: 1180px) {
+  .app.en-seccion .derecho.con-relacionado { display: grid; grid-template-columns: minmax(0, 1fr) 280px; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .app.en-seccion .derecho.con-relacionado > :not(.relacionado) { grid-column: 1; }
+  .app.en-seccion .derecho.con-relacionado .relacionado { display: block; grid-column: 2; grid-row: 1 / -1; border-left: 1px solid var(--linea); background: var(--panel-2); overflow-y: auto; padding: 16px 14px; }
+}
+.rel-quien { display: flex; gap: 10px; align-items: center; }
+.rel-quien .retrato { width: 48px; height: 48px; border-radius: 12px; }
+.rel-quien b { display: block; font-size: 14px; }
+.rel-quien span { color: var(--suave); font-size: 12px; }
+.rel-acciones { display: flex; gap: 6px; margin: 10px 0 4px; }
+.rel-sec { margin-top: 16px; }
+.rel-sec h4 { display: flex; align-items: center; font-size: 11px; font-weight: 600; color: var(--tenue); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.rel-sec h4 button { margin-left: auto; border: 0; background: none; color: var(--suave); font-size: 11.5px; cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.rel-sec h4 button:hover { color: var(--texto); }
+.rel-fila { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px; margin: 0 -6px; width: calc(100% + 12px); border: 0; background: none; border-radius: 6px; cursor: pointer; text-align: left; font-size: 12.5px; }
+.rel-fila:hover { background: var(--panel); }
+.rel-fila svg { width: 15px; height: 15px; color: var(--suave); flex: none; }
+.rel-fila span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rel-fila small { color: var(--tenue); flex: none; font-size: 11px; }
+.rel-fila.pendiente small { color: var(--aviso); }
+@media (max-width: 720px) { .app.en-seccion .avisos-banner { top: 8px; bottom: auto; } }
+.lista-subgrupo { font-size: 11px; color: var(--tenue); padding: 8px 8px 3px; }
+.lista-mas { border: 0; background: none; color: var(--suave); font-size: 12px; padding: 6px 8px; cursor: pointer; }
+.lista-mas:hover { color: var(--texto); }
+
+/* agente: la charla con el avatar que se toca para editar, y la ficha con «‹ Charla» */
+.agente-cara { position: relative; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 12px; flex: none; }
+.agente-cara .retrato { display: block; }
+.agente-lapiz { position: absolute; right: -4px; bottom: -4px; width: 22px; height: 22px; border-radius: 50%; background: var(--panel); border: 1px solid var(--linea-fuerte);
+  display: flex; align-items: center; justify-content: center; color: var(--suave); box-shadow: var(--sombra); opacity: 0; transition: opacity .12s; }
+.agente-lapiz svg { width: 12px; height: 12px; }
+.agente-cara:hover .agente-lapiz, .agente-cara:focus-visible .agente-lapiz { opacity: 1; }
+.agente-cara:hover .retrato { box-shadow: 0 0 0 2px var(--linea-fuerte); }
+@media (hover: none) { .agente-lapiz { opacity: 1; } }
+.agente-cab.ficha .retrato { width: 40px; height: 40px; border-radius: 10px; }
+.agente-cab .volver { flex: none; }

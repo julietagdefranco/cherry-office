@@ -113,6 +113,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     menu: 'M4 7h16M4 12h16M4 17h16',
     personas: 'M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M20 19v-1.5a3.5 3.5 0 0 0-2.5-3.35M15.5 4.2a3 3 0 0 1 0 5.6',
     reunion: 'M4 6h16v9H8l-4 4zM8 10h8',
+    charla: 'M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-5 4v-4H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM8 9.5h8M8 12.5h5',
     bombilla: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.2h5c0-.9.4-1.7 1.1-2.2A6 6 0 0 0 12 3z',
     libro: 'M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3',
     capas: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
@@ -200,6 +201,22 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     return obj;
   };
   App.hojaAbierta = function () { return pila.length > 0; };
+  /* Lo mismo que una hoja ({cuerpo, pie, cab, cerrar, titulo, el}) pero pintado en el panel principal, con su modo
+     (p. ej. 'biblioteca'): para las pantallas que antes eran ventanas y ahora son una sección. */
+  App.hojaEnPanel = function (op, modo) {
+    if (!App.dom || !App.dom.derecho) return App.hoja(op);
+    var der = App.dom.derecho;
+    var cuerpo = h('div.der-cuerpo.hoja-panel-cuerpo'), pie = h('div.der-pie');
+    var cab = h('div.der-cab.hoja-panel-cab', h('div.der-tit', h('h2', op.titulo || '')),
+      h('button.btn.fantasma.icono', { title: 'Cerrar', onclick: function () { obj.cerrar(); } }, App.icono('cerrar')));
+    var el = h('div.hoja-panel', cab, cuerpo, op.sinPie ? null : pie);
+    App.add(App.vaciar(der), el);
+    var obj = { el: el, cuerpo: cuerpo, pie: pie, cab: cab, enPanel: true,
+      cerrar: function () { if (der.contains(el)) App.cerrarDerecho(); if (op.alCerrar) op.alCerrar(); },
+      titulo: function (t) { cab.querySelector('h2').textContent = t; } };
+    App.abrirDerecho(modo);
+    return obj;
+  };
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
     if (emergente) { cerrarEmergente(); return; }
