@@ -20,15 +20,21 @@
           var muestra = h('button.muestra', { style: { background: d.color }, title: 'Cambiar color', onclick: function () {
             App.elegirColor(muestra, d.color, function (c) { guardar(d.id, { color: c }, pintar); });
           } });
-          var inp = h('input.campo', { value: d.nombre, maxlength: 60 });
+          var inp = h('input.dep-nombre', { value: d.nombre, maxlength: 60, 'aria-label': 'Nombre del departamento', title: 'Clic para cambiar el nombre' });
           var guardarNombre = function () { var v = inp.value.trim(); if (v && v !== d.nombre) guardar(d.id, { nombre: v }, pintar); else inp.value = d.nombre; };
           inp.addEventListener('blur', guardarNombre);
           inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') inp.blur(); });
           /* misión: una línea que dice para qué existe el departamento; se guarda al salir del campo.
              Si el backend la ignora, el campo simplemente queda vacío al reabrir. */
           var ultima = d.mision || '';
-          var mis = h('textarea.campo', { rows: 2, maxlength: 600, placeholder: 'Misión: para qué existe este departamento', 'aria-label': 'Misión de ' + d.nombre });
+          var mis = h('textarea.dep-mision', { rows: 1, maxlength: 600, placeholder: 'Agregá una misión: para qué existe este departamento', 'aria-label': 'Misión de ' + d.nombre });
           mis.value = ultima;
+          /* crece con el texto: se lee como un párrafo, no como una caja */
+          var ajustar = function () { mis.style.height = 'auto'; mis.style.height = mis.scrollHeight + 'px'; };
+          mis.addEventListener('input', ajustar);
+          requestAnimationFrame(ajustar);
+          mis.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); mis.blur(); } if (e.key === 'Escape') { mis.value = ultima; ajustar(); mis.blur(); } });
+          inp.addEventListener('keydown', function (e) { if (e.key === 'Escape') { inp.value = d.nombre; inp.blur(); } });
           mis.addEventListener('blur', function () {
             var v = mis.value.trim();
             if (v === ultima) return;
@@ -36,11 +42,14 @@
               ultima = v; if (r && r.oficina) App.actualizar(r.oficina);
             }).catch(function (e) { App.fallo(e); });
           });
-          lista.appendChild(h('div.dep-bloque',
-            h('div.fila-ed', muestra, inp,
+          var tarjeta = h('div.dep-tarjeta',
+            muestra,
+            h('div.dep-cuerpo', inp, mis),
+            h('div.dep-acciones',
               h('span.insignia', n + (n === 1 ? ' agente' : ' agentes')),
-              h('button.btn.fantasma.icono', { title: 'Borrar', onclick: function () { borrar(d, n, pintar); } }, App.icono('papelera'))),
-            mis));
+              h('button.btn.fantasma.icono.dep-borrar', { title: 'Borrar departamento', onclick: function () { borrar(d, n, pintar); } }, App.icono('papelera'))));
+          tarjeta.style.setProperty('--dep-color', d.color);
+          lista.appendChild(tarjeta);
         });
       }
       pintar();
