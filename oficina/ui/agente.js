@@ -273,6 +273,10 @@
       var extra = asig.filter(function (c) { return !servs.some(function (s) { return s.nombre === c.servidor; }); })
         .map(function (c) { return { nombre: c.servidor, disponible: false, herramientas: [], _viejo: c }; });
       var todos = servs.concat(extra);
+      // preferencia de toda la app «todos los agentes usan todos los conectores» (Ajustes › Conectores): acá no se elige nada
+      var global = ((App.E.estado && App.E.estado.conectores_agentes) || 'por_agente') === 'todos';
+      if (global) zonaConectores.appendChild(h('div.ayuda', { style: { marginBottom: '8px' } },
+        'Todos los agentes usan todos los conectores (lo elegiste en Ajustes › Conectores). Para elegir por agente, cambialo ahí.'));
       if (catalogo.detectando) zonaConectores.appendChild(h('div.ayuda', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' } }, h('span.giro'), 'Detectando tus conectores de claude.ai…'));
       if (!todos.length) {
         zonaConectores.appendChild(h('div.ayuda', catalogo.detectando ? '' : 'No hay conectores detectados. Conectalos en claude.ai y actualizá la lista.'));
@@ -287,15 +291,16 @@
           var tiene = s._viejo ? lista.length : todas.filter(function (n) { return lista.indexOf(n) >= 0; }).length;
           var total = s._viejo ? lista.length : todas.length;
           var t = tocado[s.nombre] && tocado[s.nombre][tipo];
-          var ck = h('input', { type: 'checkbox', disabled: !s.disponible });
-          if (t !== undefined) ck.checked = t; else { ck.checked = total > 0 && tiene === total; ck.indeterminate = tiene > 0 && tiene < total; }
+          var ck = h('input', { type: 'checkbox', disabled: global || !s.disponible });
+          if (global) ck.checked = s.disponible && !s._viejo;
+          else if (t !== undefined) ck.checked = t; else { ck.checked = total > 0 && tiene === total; ck.indeterminate = tiene > 0 && tiene < total; }
           ck.addEventListener('change', function () {
             (tocado[s.nombre] = tocado[s.nombre] || {})[tipo] = ck.checked; ck.indeterminate = false;
           });
           checks.appendChild(h('label', ck, tipo === 'leer' ? 'Leer' : 'Actuar',
             tipo === 'actuar' ? h('span.insignia.actuar', 'Actuar pide tu aprobación') : null));
         });
-        zonaConectores.appendChild(h('div.perm-srv' + (s.disponible ? '' : '.no'),
+        zonaConectores.appendChild(h('div.perm-srv' + (s.disponible && !global ? '' : '.no'),
           h('div', { style: { fontWeight: 600 } }, s.nombre, s.disponible ? null : h('span.ayuda', { style: { fontWeight: 400, marginLeft: '8px' } }, 'No disponible · conectalo en claude.ai')),
           checks.childNodes.length ? checks : null));
       });
