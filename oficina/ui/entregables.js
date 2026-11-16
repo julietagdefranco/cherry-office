@@ -17,7 +17,8 @@ App.Entregables = (function () {
 
   /* quién la hizo: en una entrega tuya (paso de persona) no hay agente */
   function nombreDe(e) { return e.origen === 'persona' && !e.agente ? 'Vos' : nombre(e.agente); }
-  function nombre(id) { var a = id && App.agente(id); return a ? a.nombre : (id ? id : 'Reunión'); }
+  function nombre(id) { var a = id && App.agente(id); return a ? a.nombre : (id ? App.humano.quien(id) : 'Reunión'); }
+  function origenTxt(o) { return ORIGEN[o] || 'Otro origen'; }
   function hace(iso) {
     var s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
     if (s < 60) return 'recién';
@@ -68,23 +69,27 @@ App.Entregables = (function () {
   function pintarLista() {
     if (!abiertoPanel()) return;
     if (abierta !== null) { abierta = null; App.Nav.alAbrir('entregables'); }
-    var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), lista = h('div.entregas', h('div.vacio', h('span.giro')));
+    var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), lista = h('div.entregas', App.cargando('Trayendo las entregas…'));
     var o = App.E.oficina || { agentes: [] };
-    function chip(est, txt) {
-      return h('button.chip' + (filtro.estado === est ? '.sel' : ''), { onclick: function () { filtro.estado = est; pintarLista(); } }, txt);
-    }
-    var selAg = h('select.campo.chico', { onchange: function () { filtro.agente = selAg.value; pintarLista(); } },
-      [h('option', { value: '' }, 'Todos'), h('option', { value: '__reunion' }, 'Actas de reunión')]
-        .concat(o.agentes.map(function (a) { return h('option', { value: a.id }, a.nombre); })));
-    selAg.value = filtro.agente;
-    var selOr = h('select.campo.chico', { onchange: function () { filtro.origen = selOr.value; pintarLista(); } },
-      [h('option', { value: '' }, 'Cualquier origen')].concat(Object.keys(ORIGEN).map(function (k) { return h('option', { value: k }, ORIGEN[k]); })));
-    selOr.value = filtro.origen;
+    var porEstado = App.elegir({ forma: 'chips', etiqueta: 'Estado', valor: filtro.estado,
+      opciones: [{ valor: 'sin_revisar', titulo: 'Sin revisar' + (sinRevisar ? ' (' + sinRevisar + ')' : '') }, { valor: '', titulo: 'Todas' }],
+      alCambiar: function (v) { filtro.estado = v; pintarLista(); } });
+    /* origen: un menú «Filtrar» (son once y no hacen falta a la vista) */
+    var botonOrigen = h('button.chip' + (filtro.origen ? '.sel' : ''), { type: 'button', onclick: function (ev) {
+      App.menu(ev.currentTarget, [{ texto: 'Cualquier origen', accion: function () { filtro.origen = ''; pintarLista(); } }]
+        .concat(Object.keys(ORIGEN).map(function (k) { return { texto: ORIGEN[k], accion: function () { filtro.origen = k; pintarLista(); } }; })));
+    } }, App.icono('deslizadores'), filtro.origen ? origenTxt(filtro.origen) : 'Filtrar');
+    /* de quién: chips con el retrato de cada agente */
+    var porAgente = App.elegir({ forma: 'chips', etiqueta: 'De quién', valor: filtro.agente,
+      opciones: [{ valor: '', titulo: 'De todos' }, { valor: '__reunion', titulo: 'Actas de reunión', icono: 'reunion' }]
+        .concat(o.agentes.map(function (a) { return { valor: a.id, titulo: a.nombre, retrato: a }; })),
+      alCambiar: function (v) { filtro.agente = v; pintarLista(); } });
     App.add(App.vaciar(der),
       cabecera('Para revisar', sinRevisar ? (sinRevisar === 1 ? '1 sin revisar' : sinRevisar + ' sin revisar') : 'Todo revisado'),
       cuerpo);
     App.add(cuerpo,
-      h('div.entregas-filtros', chip('sin_revisar', 'Sin revisar' + (sinRevisar ? ' (' + sinRevisar + ')' : '')), chip('', 'Todas'), selAg, selOr),
+      h('div.entregas-filtros', porEstado, botonOrigen),
+      h('div.entregas-filtros', porAgente),
       lista);
     var q = { limite: 100 };
     if (filtro.estado) q.estado = filtro.estado;
@@ -118,7 +123,7 @@ App.Entregables = (function () {
       marcaAgente(e),
       h('div.entrega-txt',
         h('div.entrega-tit', e.titulo),
-        h('div.entrega-sub', nombreDe(e) + ' · ' + (ORIGEN[e.origen] || e.origen) + ' · ' + hace(e.creada) +
+        h('div.entrega-sub', nombreDe(e) + ' · ' + origenTxt(e.origen) + ' · ' + hace(e.creada) +
           (e.archivos && e.archivos.length ? ' · ' + e.archivos.length + (e.archivos.length === 1 ? ' archivo' : ' archivos') : '')),
         e.resumen ? h('div.entrega-res', e.resumen) : null),
       est);
@@ -130,7 +135,7 @@ App.Entregables = (function () {
     abierta = id;
     if (!abiertoPanel()) App.abrirDerecho('entregables'); else if (cambio) App.Nav.alAbrir('entregables');
     var der = App.dom.derecho;
-    App.vaciar(der).appendChild(h('div.vacio', h('span.giro')));
+    App.vaciar(der).appendChild(App.cargando('Trayendo la entrega…'));
     api().get('/api/entregas/' + id).then(function (r) { if (abierta === id) pintarDetalle(r.entrega); })
       .catch(function (e) { App.fallo(e); pintarLista(); });
   }
@@ -167,7 +172,7 @@ App.Entregables = (function () {
     var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
     var bloqueAccion = h('div'), bloqueEspera = h('div');
     var volver = { texto: 'Para revisar', titulo: 'Volver a la lista', accion: function () { App.Nav.ir('#/bandeja/revisar'); } };
-    var sub = nombreDe(e) + ' · ' + (ORIGEN[e.origen] || e.origen) + ' · ' + hace(e.creada) + (typeof e.costo === 'number' && e.costo > 0 ? ' · ≈ US$ ' + e.costo.toFixed(2) : '');
+    var sub = nombreDe(e) + ' · ' + origenTxt(e.origen) + ' · ' + hace(e.creada) + (typeof e.costo === 'number' && e.costo > 0 ? ' · ≈ US$ ' + e.costo.toFixed(2) : '');
     App.add(App.vaciar(der), cabecera(e.titulo, sub, volver, e.origen === 'reunion' ? 'reunion' : 'libro'), cuerpo, pie);
     var est = e.estado === 'sin_revisar' ? h('span.insignia.aviso', 'Sin revisar') : e.estado === 'revisada' ? h('span.insignia.ok', 'Revisada') : h('span.insignia', 'Reemplazada por una versión nueva');
     var meta = h('div.entrega-meta', est, e.padre ? h('span.insignia', 'Versión con cambios') : null, linkOrigen(e));
@@ -223,31 +228,33 @@ App.Entregables = (function () {
   /* una v1 con espera abierta: a quién espera y qué se puede hacer; una v2: de qué colega llegó lo que faltaba */
   function pintarEspera(e, esperas, caja) {
     App.vaciar(caja);
-    var filas = [];
+    var filas = [], pendientes = [];
     (esperas || []).forEach(function (x) {
       if (x.entregaParcial === e.id && (x.estado === 'esperando' || x.estado === 'lista' || x.estado === 'relanzada' || x.estado === 'fallida')) {
-        var botones = [];
         var pedidoFallo = x.pedido && x.pedido.estado === 'fallido' && x.estado === 'esperando';
-        var texto = x.estado === 'esperando' ? 'Esperando a ' + x.esperaANombre + ': ' + x.que + ' · ' + hace(x.creada) + (x.vencida ? ' (ya pasó el plazo)' : '')
-          : x.estado === 'lista' ? 'Ya llegó lo de ' + x.esperaANombre + ' («' + x.que + '»): ' + x.agenteNombre + ' va a rehacer la versión completa.'
-          : x.estado === 'relanzada' ? x.agenteNombre + ' está haciendo la versión completa con lo de ' + x.esperaANombre + '…'
-          : 'No se pudo hacer la versión completa' + (x.motivo ? ': ' + x.motivo : '.');
-        if (pedidoFallo) texto += ' · el pedido falló';
-        if (x.estado === 'esperando' || x.estado === 'lista') {
-          botones.push(h('button.btn.chico', { onclick: function () {
-            api().post('/api/esperas/' + x.id + '/seguir').then(function () { despuesDeEspera(e, 'Listo: ' + x.agenteNombre + ' sigue sin esperar.'); }).catch(App.fallo);
-          } }, 'Seguir sin esperar'));
-          botones.push(h('button.btn.chico.fantasma', { onclick: function () {
-            api().post('/api/esperas/' + x.id + '/cancelar').then(function () { despuesDeEspera(e, 'Espera cancelada.'); }).catch(App.fallo);
-          } }, 'Cancelar espera'));
-        }
-        if (pedidoFallo || x.estado === 'fallida') {
-          botones.push(h('button.btn.chico', { onclick: function () {
-            api().post('/api/esperas/' + x.id + '/reintentar').then(function () { despuesDeEspera(e, pedidoFallo ? 'Se volvió a lanzar el pedido.' : 'Se vuelve a intentar.'); }).catch(App.fallo);
-          } }, pedidoFallo ? 'Reintentar el pedido' : 'Reintentar'));
-        }
-        filas.push(h('div.entrega-accion', h('h4', App.icono('reloj'), ' En espera'), h('div.acc-res', texto),
-          h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } }, botones)));
+        var titulo = x.estado === 'esperando' ? 'Espera a ' + x.esperaANombre
+          : x.estado === 'lista' ? 'Ya llegó lo de ' + x.esperaANombre
+          : x.estado === 'relanzada' ? x.agenteNombre + ' rehace la versión completa'
+          : 'No se pudo hacer la versión completa';
+        var sub = x.estado === 'esperando' ? x.que + ' · ' + hace(x.creada) + (x.vencida ? ' · ya pasó el plazo' : '') + (pedidoFallo ? ' · el pedido falló' : '')
+          : x.estado === 'lista' ? '«' + x.que + '»: ' + x.agenteNombre + ' va a rehacer la versión completa.'
+          : x.estado === 'relanzada' ? 'Con lo de ' + x.esperaANombre + '…'
+          : (x.motivo || 'Probá de nuevo.');
+        var seguir = { texto: 'Seguir sin esperar', accion: function () {
+          api().post('/api/esperas/' + x.id + '/seguir').then(function () { despuesDeEspera(e, 'Listo: ' + x.agenteNombre + ' sigue sin esperar.'); }).catch(App.fallo);
+        } };
+        var cancelar = { texto: 'Cancelar la espera', icono: 'cerrar', accion: function () {
+          api().post('/api/esperas/' + x.id + '/cancelar').then(function () { despuesDeEspera(e, 'Espera cancelada.'); }).catch(App.fallo);
+        } };
+        var reintentar = { texto: pedidoFallo ? 'Reintentar el pedido' : 'Reintentar', accion: function () {
+          api().post('/api/esperas/' + x.id + '/reintentar').then(function () { despuesDeEspera(e, pedidoFallo ? 'Se volvió a lanzar el pedido.' : 'Se vuelve a intentar.'); }).catch(App.fallo);
+        } };
+        var acc = [];
+        if (pedidoFallo || x.estado === 'fallida') acc.push(reintentar);
+        if (x.estado === 'esperando' || x.estado === 'lista') acc.push(seguir, cancelar);
+        var principal = acc[0] ? h('button.btn.chico', { onclick: function () { acc[0].accion(); } }, acc[0].texto) : null;
+        var a = x.esperaA && App.agente(x.esperaA);
+        pendientes.push(App.filaDecision({ marca: a || 'reloj', titulo: titulo, sub: sub, principal: principal, mas: acc.slice(1) }));
       }
       if (x.entregaParcial === e.id && x.estado === 'hecha' && x.entregaNueva && x.entregaNueva !== e.id) {
         filas.push(h('div.entrega-accion', h('h4', 'Ya está la versión completa'), h('div.acc-res', 'Llegó lo de ' + x.esperaANombre + ' y ' + x.agenteNombre + ' rehízo esta entrega.'),
@@ -258,6 +265,7 @@ App.Entregables = (function () {
           x.entregaLlegada ? h('div', h('button.btn.chico.fantasma', { onclick: function () { verEntrega(x.entregaLlegada); } }, 'Ver lo que entregó ' + x.esperaANombre)) : null));
       }
     });
+    if (pendientes.length) filas.unshift(App.seccion('En espera', pendientes));
     App.add(caja, filas);
     /* mientras la espera siga abierta, se vuelve a mirar cada 4 s: cuando llega lo que faltaba, el bloque se actualiza solo */
     var abiertas = (esperas || []).some(function (x) { return x.entregaParcial === e.id && (x.estado === 'esperando' || x.estado === 'lista' || x.estado === 'relanzada'); });
@@ -278,6 +286,37 @@ App.Entregables = (function () {
   /* ---------------- acción hacia afuera (plan §8) ---------------- */
   var TEXTO_ACCION = { send_message: 'Mandar el mail', create_event: 'Crear el evento' };
   function cortoHerramienta(h2) { return String(h2 || '').replace(/^mcp__.*__/, ''); }
+
+  /* los argumentos de la acción como filas «Para: …», «Asunto: …» en vez de JSON; lo que no se conoce se muestra con su clave en palabras */
+  var CLAVES = { to: 'Para', cc: 'Con copia', bcc: 'Con copia oculta', subject: 'Asunto', body: 'Mensaje', message: 'Mensaje', text: 'Mensaje',
+    summary: 'Título', title: 'Título', start: 'Empieza', end: 'Termina', startTime: 'Empieza', endTime: 'Termina', when: 'Cuándo', date: 'Cuándo',
+    attendees: 'Invitados', location: 'Dónde', description: 'Detalle', calendarId: 'Calendario', threadId: 'Conversación', replyTo: 'Responder a',
+    name: 'Nombre', channel: 'Canal', url: 'Enlace' };
+  var ORDEN = ['to', 'cc', 'bcc', 'subject', 'summary', 'title', 'start', 'startTime', 'when', 'date', 'end', 'endTime', 'location', 'attendees', 'body', 'message', 'text', 'description'];
+  function claveHumana(k) {
+    if (CLAVES[k]) return CLAVES[k];
+    var t = String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim().toLowerCase();
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function valorHumano(v) {
+    if (v === null || v === undefined || v === '') return '';
+    if (Array.isArray(v)) return v.map(valorHumano).filter(Boolean).join(', ');
+    if (typeof v === 'object') { var f = v.dateTime || v.date || v.email || v.nombre || v.name; return f ? valorHumano(f) : JSON.stringify(v); }
+    if (typeof v === 'boolean') return v ? 'Sí' : 'No';
+    if (typeof v === 'string' && /^\d{4}-\d\d-\d\d(T|$)/.test(v) && !isNaN(Date.parse(v))) return App.fecha ? App.fecha(v) : v;
+    return String(v);
+  }
+  function tablaDetalle(d) {
+    var ks = Object.keys(d).sort(function (a, b) {
+      var i = ORDEN.indexOf(a), j = ORDEN.indexOf(b);
+      return (i < 0 ? 99 : i) - (j < 0 ? 99 : j);
+    });
+    var filas = ks.map(function (k) {
+      var v = valorHumano(d[k]); if (!v) return null;
+      return h('div.acc-dato', h('div.acc-clave', claveHumana(k)), h('div.acc-valor', v));
+    }).filter(Boolean);
+    return filas.length ? h('div.acc-datos', filas) : null;
+  }
   function textoAprobar(ac) { return TEXTO_ACCION[cortoHerramienta(ac.herramienta)] || 'Aprobar y ejecutar'; }
 
   function pintarAccion(e, ac, caja) {
@@ -290,13 +329,15 @@ App.Entregables = (function () {
       error: h('span.insignia.error', 'Con error'),
       descartada: h('span.insignia', 'Descartada')
     }[ac.estado] || h('span.insignia', ac.estado);
-    var detalle = ac.detalle && Object.keys(ac.detalle).length ? JSON.stringify(ac.detalle, null, 2) : '';
+    var tiene = ac.detalle && Object.keys(ac.detalle).length;
+    var tabla = tiene ? tablaDetalle(ac.detalle) : null;
     App.add(caja, h('div.entrega-accion',
       h('h4', 'Acción propuesta'),
       h('div.acc-res', ac.resumen),
       h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
-        h('span.insignia', { title: ac.herramienta }, cortoHerramienta(ac.herramienta)), estado),
-      detalle ? h('pre', detalle) : null,
+        h('span.insignia', { title: ac.herramienta }, App.humano.herramienta(ac.herramienta)), estado),
+      tabla,
+      tiene ? h('details.acc-tecnico', h('summary', 'Detalle técnico'), h('pre', JSON.stringify(ac.detalle, null, 2))) : null,
       ac.resultado && ac.estado !== 'pendiente' ? App.htmlSeguro(h('div.md-doc.doc-panel'), App.markdown(ac.resultado)) : null));
   }
 
@@ -364,17 +405,15 @@ App.Entregables = (function () {
     });
     var ag = e.agente && App.agente(e.agente), deps = (App.E.oficina && App.E.oficina.departamentos) || [];
     var porDefecto = ag && ag.departamento && deps.some(function (d) { return d.id === ag.departamento; }) ? ag.departamento : 'compartido';
-    var sel = h('select.campo', [h('option', { value: 'compartido' }, 'Toda la oficina')].concat(deps.map(function (d) {
-      return h('option', { value: d.id }, d.nombre);
-    })));
-    sel.value = porDefecto;
+    var sel = App.elegir({ forma: 'chips', etiqueta: 'Para quién', valor: porDefecto,
+      opciones: [{ valor: 'compartido', titulo: 'Toda la oficina', icono: 'personas' }].concat(deps.map(function (d) { return { valor: d.id, titulo: d.nombre, color: d.color }; })) });
     var leer = h('input', { type: 'checkbox' });
     var err = h('div.error-txt');
     App.add(hj.cuerpo,
       h('div.fila-campo', h('label.etiqueta-campo', rels.length > 1 ? 'Qué archivos' : 'Archivo'),
         rels.length > 1 ? h('div', checks.map(function (c) { return c.fila; })) : h('div', rels[0].split('/').pop())),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Para quién'), sel,
-        h('div.ayuda', 'Lo puede consultar quien elijas. Después lo podés cambiar desde la biblioteca.')),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Para quién'),
+        h('div.ayuda', 'Lo puede consultar quien elijas. Después lo podés cambiar desde la biblioteca.'), sel),
       h('label.biblio-elegir', leer, h('span', 'Que lo lean ahora y tomen notas desde su rol')),
       h('div.ayuda', { style: { marginTop: '10px' } }, 'Se guarda una copia: si después pedís cambios, la de la biblioteca queda como está. El bibliotecario le arma una ficha y la suma al catálogo.'),
       err);
@@ -382,7 +421,7 @@ App.Entregables = (function () {
       var elegidos = rels.length > 1 ? checks.filter(function (c) { return c.ck.checked; }).map(function (c) { return c.rel; }) : rels;
       if (!elegidos.length) { err.textContent = 'Elegí al menos un archivo.'; return; }
       ok.disabled = true; err.textContent = '';
-      api().post('/api/entregas/' + e.id + '/biblioteca', { archivos: elegidos, departamento: sel.value, leer: leer.checked }).then(function (r) {
+      api().post('/api/entregas/' + e.id + '/biblioteca', { archivos: elegidos, departamento: sel.valor(), leer: leer.checked }).then(function (r) {
         hj.cerrar();
         if (App.Biblioteca && App.Biblioteca.vigilarEstado) App.Biblioteca.vigilarEstado();
         var n = (r.archivos || []).length, msg = n === 1 ? 'Guardado en la biblioteca.' : 'Guardados ' + n + ' archivos en la biblioteca.';

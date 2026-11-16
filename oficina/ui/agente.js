@@ -224,7 +224,7 @@
 
   /* ---------------- perfil ---------------- */
   function pintarPerfil(a, cuerpo, pie) {
-    var cont = h('div', { style: { padding: '14px' } }, h('div.vacio', h('span.giro')));
+    var cont = h('div', { style: { padding: '14px' } }, App.cargando('Trayendo el perfil…'));
     cuerpo.appendChild(cont);
     api.get('/api/agentes/' + encodeURIComponent(a.id)).then(function (r) {
       if (actual !== a.id || pestana !== 'perfil') return;
@@ -233,14 +233,14 @@
       ed.el.style.gridTemplateColumns = '1fr';
       ed.el.querySelector('.grande').style.cssText = 'width:160px;height:160px';
       var err = h('div.error-txt');
-      App.add(App.vaciar(cont), ed.el, err);
+      App.add(App.vaciar(cont), ed.el, filaCoordinador(a), err);
       var guardar = h('button.btn.primario', {
         onclick: function () {
           var m = ed.validar(); if (m) { err.textContent = m; return; }
           var v = ed.valor(); delete v.id;
           guardar.disabled = true;
           api.patch('/api/agentes/' + encodeURIComponent(a.id), v).then(function (r2) {
-            App.aviso('Cambios guardados.');
+            App.guardado('Cambios guardados.');
             App.actualizar(r2.oficina);
             pintar();
           }).catch(function (e) { err.textContent = e.message; guardar.disabled = false; });
@@ -248,6 +248,24 @@
       }, 'Guardar cambios');
       App.add(pie, App.acciones([h('button.btn.peligro', { onclick: function () { despedir(a); } }, 'Despedir')], guardar));
     }).catch(function (e) { App.vaciar(cont).appendChild(h('div.vacio', e.message)); });
+  }
+
+  /* «Coordinador/a» es un permiso del agente que se enciende y apaga acá, y se guarda al tocarlo */
+  function filaCoordinador(a) {
+    var id = a.id;
+    var ck = h('input', { type: 'checkbox', checked: ((App.agente(id) || a).permisos || []).indexOf('coordinador') >= 0 });
+    ck.addEventListener('change', function () {
+      var ag = App.agente(id) || a, antes = (ag.permisos || []).slice(), si = ck.checked;
+      /* conserva los demás permisos del agente: solo pone o saca «coordinador» */
+      function poner(lista) { return api.patch('/api/agentes/' + encodeURIComponent(id), { permisos: lista }).then(function (r) { App.actualizar(r.oficina); }); }
+      poner(antes.filter(function (x) { return x !== 'coordinador'; }).concat(si ? ['coordinador'] : [])).then(function () {
+        App.guardado(si ? a.nombre + ' coordina la oficina.' : a.nombre + ' ya no coordina.', function () {
+          poner(antes).then(function () { if (actual === id && pestana === 'perfil') pintar(); }).catch(App.fallo);
+        });
+      }).catch(function (e) { App.fallo(e); ck.checked = !si; });
+    });
+    return App.seccion('En la oficina', App.ajuste('Coordinador/a', 'Ve entregas, flujos y bloqueos de todos y puede repartir encargos. No hace el trabajo de otros: lo pide.',
+      h('label.ajuste-check', ck, h('span', 'Es el coordinador/a de la oficina'))));
   }
 
   function despedir(a) {
@@ -261,154 +279,164 @@
     });
   }
 
-  /* ---------------- permisos (docs/plan-creador-flujos.md §12) ---------------- */
+  /* ---------------- permisos (docs/plan-creador-flujos.md §12, docs/plan-ui-presentacion.md §3 y §4) ----------------
+     Todo se guarda al cambiarlo (PATCH + «Guardado · Deshacer»). Las reglas crudas («Bash(git pull:*)») solo van en el title. */
   var sondeoPermisos = null;
 
-  function pintarPermisos(a, cuerpo, pie) {
-    var id = a.id, cont = h('div.perm'), err = h('div.error-txt');
+  function pintarPermisos(a, cuerpo) {
+    var id = a.id, cont = h('div.perm');
     cuerpo.appendChild(cont);
     function vigente() { return actual === id && pestana === 'permisos' && cont.isConnected; }
-    var lim = a.limites || {};
+    function ag() { return App.agente(id) || a; }
+    var lim = ag().limites || {};
     var solo = (lim.solo || []).slice(), proponer = (lim.proponer || []).slice();
-    var coord = (a.permisos || []).indexOf('coordinador') >= 0;
-    var tocado = {};          // servidor -> {leer?, actuar?}
-    var catalogo = null, carpetaEnt = null;
-    var zonaConectores = h('div');
+    var reglas = (ag().reglas || []).slice();
+    var catalogo = null, carpetaEnt = '';
+    var global = ((App.E.estado && App.E.estado.conectores_agentes) || 'por_agente') === 'todos';
+    var resumen = h('div.resumen-ui'), zonaReglas = h('div'), zonaConectores = h('div');
+    var url = '/api/agentes/' + encodeURIComponent(id);
 
-    /* lista editable de textos: una fila por ítem, con «Agregar» (hasta 12 de 300 caracteres) */
-    function listaEditable(items, placeholder) {
-      var caja = h('div.perm-lista'), mas = h('button.btn.chico', { onclick: function () { items.push(''); pintarItems(true); } }, App.icono('mas'), 'Agregar');
-      function pintarItems(foco) {
-        App.vaciar(caja);
-        var ult = null;
-        items.forEach(function (t, i) {
-          var inp = h('input.campo', { value: t, maxlength: 300, placeholder: placeholder });
-          inp.addEventListener('input', function () { items[i] = inp.value; });
-          caja.appendChild(h('div.fila-ed', inp, h('button.btn.fantasma.icono', { title: 'Quitar', onclick: function () { items.splice(i, 1); pintarItems(); } }, App.icono('papelera'))));
-          ult = inp;
+    /* un guardado a la vez: cada uno arma su cuerpo con lo último que quedó guardado */
+    var cola = Promise.resolve();
+    function guardar(armar, texto, previo) {
+      cola = cola.then(function () {
+        var cuerpoPatch = armar(); if (!cuerpoPatch) return null;
+        return api.patch(url, cuerpoPatch).then(function (r) {
+          App.actualizar(r.oficina);
+          App.guardado(texto, previo ? function () {
+            api.patch(url, previo).then(function (r2) { App.actualizar(r2.oficina); if (vigente()) pintar(); }).catch(App.fallo);
+          } : null);
+          pintarResumen();
         });
-        mas.disabled = items.length >= 12;
-        if (foco && ult) ult.focus();
-      }
-      pintarItems();
-      return h('div', caja, mas);
+      }).catch(function (e) { App.fallo(e); if (vigente()) pintar(); });
+    }
+    function copia(x) { return JSON.parse(JSON.stringify(x)); }
+
+    function nombreServ(n) { return App.Ajustes.nombreServidor(n); }
+    function conectadosTexto() {
+      if (global) return 'todos';
+      var nombres = (ag().conectores || []).filter(function (c) { return (c.leer || []).length || (c.actuar || []).length; }).map(function (c) { return nombreServ(c.servidor); });
+      return nombres.length ? nombres.join(', ') : 'ninguno';
+    }
+    function pintarResumen() {
+      var corre = App.humano.reglas(reglas).filter(function (g) { return g.tipo === 'correr'; }).length;
+      resumen.textContent = a.nombre + ' escribe en sus notas y sus entregables'
+        + (reglas.length && App.humano.reglas(reglas).some(function (g) { return g.tipo === 'escribir'; }) ? ' (y en lo que le permitiste)' : '')
+        + ' · ' + (corre ? 'puede correr ' + corre + (corre === 1 ? ' comando' : ' comandos') + ' sin preguntar' : 'te pide permiso para correr comandos')
+        + ' · conectores: ' + conectadosTexto();
     }
 
+    /* permisos que le diste con «Siempre» al responder un pedido (permisos.js): acá solo se quitan */
+    function quitarReglas(crudas, texto) {
+      var previo = { reglas: copia(ag().reglas || reglas) };
+      reglas = reglas.filter(function (r) { return crudas.indexOf(r) < 0; });
+      guardar(function () { return { reglas: reglas.slice() }; }, texto, previo);
+    }
+    function chipsDeReglas(tipos, vacio, fijos) {
+      var grupos = App.humano.reglas(reglas).filter(function (g) { return tipos.indexOf(g.tipo) >= 0; });
+      var items = grupos.map(function (g) { return g.texto; });
+      function grupoDe(t) { return grupos.filter(function (g) { return g.texto === t; })[0]; }
+      if (!items.length && !(fijos && fijos.length)) return h('span.ayuda', vacio);
+      return App.chipsEditables(items, { agregar: false, fijos: fijos,
+        titulo: function (t) { var g = grupoDe(t); return g ? g.reglas.join(' · ') : t; },
+        alCambiar: function (lista, c) {
+          if (!c || c.quitado === undefined) return;
+          var g = grupoDe(c.quitado); if (!g) return;
+          quitarReglas(g.reglas, 'Permiso quitado.');
+          pintarReglas();
+        } });
+    }
+    function pintarReglas() {
+      App.vaciar(zonaReglas);
+      var hay = function (tipos) { return App.humano.reglas(reglas).some(function (g) { return tipos.indexOf(g.tipo) >= 0; }); };
+      App.add(zonaReglas,
+        App.ajuste('Puede escribir en', 'Solo ahí y en lo que le permitiste. El resto de la oficina lo puede leer, pero no tocar.',
+          chipsDeReglas(['escribir'], '', [
+            { texto: 'Sus notas', title: 'conocimiento/agentes/' + id + '.md', icono: 'candado', accion: function () { irPestana('notas'); } },
+            { texto: 'Sus entregables', title: carpetaEnt || ('archivos/entregables/' + id + '/'), icono: 'candado', accion: function () { irPestana('archivos'); } }])),
+        App.ajuste('Puede correr sin preguntar', 'Los comandos a los que le dijiste «Siempre» cuando te pidió permiso. Si quiere correr otro, te pregunta.',
+          chipsDeReglas(['correr'], 'Ninguno todavía.')),
+        hay(['conector', 'otro']) ? App.ajuste('Otros permisos', 'También los guardaste con «Siempre».', chipsDeReglas(['conector', 'otro'], '')) : null);
+      pintarResumen();
+    }
+
+    /* conectores: «todos» es una línea; por agente, una fila por servidor con No / Leer / Leer y actuar */
+    function nivelActual(s) {
+      var o = (ag().conectores || []).filter(function (c) { return c.servidor === s.nombre; })[0] || { leer: [], actuar: [] };
+      var tiene = function (tipo) { return App.Ajustes.delTipo(s, tipo).filter(function (n) { return (o[tipo] || []).indexOf(n) >= 0; }).length; };
+      if (s._viejo) return (o.actuar || []).length ? 'actuar' : (o.leer || []).length ? 'leer' : 'no';
+      return tiene('actuar') ? 'actuar' : tiene('leer') ? 'leer' : 'no';
+    }
+    function cambiarConector(s, nivel) {
+      var previo = { conectores: copia(ag().conectores || []) };
+      var t = { leer: nivel !== 'no', actuar: nivel === 'actuar' };
+      var porServ = {}; porServ[s.nombre] = t;
+      guardar(function () { return { conectores: App.Ajustes.nuevosConectores(ag(), catalogo.servidores, porServ) }; },
+        nombreServ(s.nombre) + ': ' + (nivel === 'no' ? 'sin acceso' : nivel === 'leer' ? 'solo leer' : 'leer y actuar') + '.', previo);
+    }
     function pintarConectores() {
       App.vaciar(zonaConectores);
-      if (!catalogo) { zonaConectores.appendChild(h('div.vacio', h('span.giro'))); return; }
-      var servs = catalogo.servidores || [], asig = a.conectores || [];
+      if (global) {
+        App.add(zonaConectores, App.ajuste('Conectores', 'Está elegido para toda la oficina.',
+          h('div', 'Usa todos los conectores conectados. ', h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.abrir('conectores'); } }, App.icono('enchufe'), 'Ajustes › Conectores'))));
+        return;
+      }
+      if (!catalogo) { zonaConectores.appendChild(App.seccion('Conectores', App.cargando('Trayendo tus conectores…'))); return; }
+      var servs = catalogo.servidores || [], asig = ag().conectores || [];
       // servidores asignados que ya no aparecen en el catálogo: se muestran apagados y se conservan
       var extra = asig.filter(function (c) { return !servs.some(function (s) { return s.nombre === c.servidor; }); })
         .map(function (c) { return { nombre: c.servidor, disponible: false, herramientas: [], _viejo: c }; });
       var todos = servs.concat(extra);
-      // preferencia de toda la app «todos los agentes usan todos los conectores» (Ajustes › Conectores): acá no se elige nada
-      var global = ((App.E.estado && App.E.estado.conectores_agentes) || 'por_agente') === 'todos';
-      if (global) zonaConectores.appendChild(h('div.ayuda', { style: { marginBottom: '8px' } },
-        'Todos los agentes usan todos los conectores (lo elegiste en Ajustes › Conectores). Para elegir por agente, cambialo ahí.'));
-      if (catalogo.detectando) zonaConectores.appendChild(h('div.ayuda', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' } }, h('span.giro'), 'Detectando tus conectores de claude.ai…'));
-      if (!todos.length) {
-        zonaConectores.appendChild(h('div.ayuda', catalogo.detectando ? '' : 'No hay conectores detectados. Conectalos en claude.ai y actualizá la lista.'));
-      }
-      todos.forEach(function (s) {
-        var o = asig.filter(function (c) { return c.servidor === s.nombre; })[0] || { leer: [], actuar: [] };
-        var checks = h('div.perm-checks');
-        ['leer', 'actuar'].forEach(function (tipo) {
-          var todas = App.Ajustes.delTipo(s, tipo);
-          if (!s._viejo && !todas.length) return;
-          var lista = o[tipo] || [];
-          var tiene = s._viejo ? lista.length : todas.filter(function (n) { return lista.indexOf(n) >= 0; }).length;
-          var total = s._viejo ? lista.length : todas.length;
-          var t = tocado[s.nombre] && tocado[s.nombre][tipo];
-          var ck = h('input', { type: 'checkbox', disabled: global || !s.disponible });
-          if (global) ck.checked = s.disponible && !s._viejo;
-          else if (t !== undefined) ck.checked = t; else { ck.checked = total > 0 && tiene === total; ck.indeterminate = tiene > 0 && tiene < total; }
-          ck.addEventListener('change', function () {
-            (tocado[s.nombre] = tocado[s.nombre] || {})[tipo] = ck.checked; ck.indeterminate = false;
-          });
-          checks.appendChild(h('label', ck, tipo === 'leer' ? 'Leer' : 'Actuar',
-            tipo === 'actuar' ? h('span.insignia.actuar', 'Actuar pide tu aprobación') : null));
-        });
-        zonaConectores.appendChild(h('div.perm-srv' + (s.disponible && !global ? '' : '.no'),
-          h('div', { style: { fontWeight: 600 } }, s.nombre, s.disponible ? null : h('span.ayuda', { style: { fontWeight: 400, marginLeft: '8px' } }, 'No disponible · conectalo en claude.ai')),
-          checks.childNodes.length ? checks : null));
+      var filas = todos.map(function (s) {
+        var hayLeer = s._viejo || App.Ajustes.delTipo(s, 'leer').length, hayActuar = s._viejo || App.Ajustes.delTipo(s, 'actuar').length;
+        var control;
+        if (!s.disponible) control = h('span.ayuda', s._viejo ? 'Ya no aparece en tus conectores.' : 'No disponible · conectalo en claude.ai');
+        else {
+          var ops = [{ valor: 'no', titulo: 'No' }];
+          if (hayLeer) ops.push({ valor: 'leer', titulo: 'Leer' });
+          if (hayActuar) ops.push({ valor: 'actuar', titulo: hayLeer ? 'Leer y actuar' : 'Actuar', sub: 'Actuar siempre pide tu aprobación' });
+          control = App.elegir({ forma: 'chips', etiqueta: nombreServ(s.nombre), opciones: ops, valor: nivelActual(s), alCambiar: function (v) { cambiarConector(s, v); } });
+        }
+        return App.ajuste(nombreServ(s.nombre), null, control);
       });
-      zonaConectores.appendChild(h('div', { style: { display: 'flex', gap: '8px', marginTop: '4px' } },
-        h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.abrir('conectores'); } }, App.icono('enchufe'), 'Ver todos los conectores')));
+      App.add(zonaConectores, App.seccion('Conectores', [
+        catalogo.detectando ? h('div.ayuda', 'Mirando tus conectores de claude.ai… puede tardar un minuto.') : null,
+        todos.length ? filas : h('div.ayuda', catalogo.detectando ? '' : 'No hay conectores detectados. Conectalos en claude.ai y actualizá la lista en Ajustes › Conectores.'),
+        h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.abrir('conectores'); } }, App.icono('enchufe'), 'Ver todos los conectores')],
+        { ayuda: 'Actuar es hacer algo afuera (mandar, publicar, crear) y siempre queda como propuesta que aprobás vos.' }));
     }
 
     function cargarCatalogo() {
       clearTimeout(sondeoPermisos);
       api.get('/api/conectores').then(function (r) {
         if (!vigente()) return;
-        catalogo = r; pintarConectores();
+        catalogo = r; pintarConectores(); pintarResumen();
         if (r.detectando) sondeoPermisos = setTimeout(function () { if (vigente()) cargarCatalogo(); }, 2000);
       }).catch(function () { if (vigente()) { catalogo = { servidores: [] }; pintarConectores(); } });
     }
 
-    /* permisos que le diste con «Siempre» al responder un pedido (permisos.js): acá solo se quitan */
-    var reglas = (a.reglas || []).slice(), reglasTocadas = false, zonaReglas = h('div');
-    function textoRegla(r) {
-      var m = /^(Bash|Edit|Write)\((.*)\)$/.exec(r) || [];
-      if (m[1] === 'Bash') return 'Correr ' + m[2].replace(/:\*$/, '') + '…';
-      if (m[1] === 'Edit' || m[1] === 'Write') return (m[1] === 'Edit' ? 'Editar' : 'Crear') + ' archivos en ' + m[2].replace(/^\/\//, '/').replace(/\/\*\*$/, '');
-      return r;
+    function guardarLimites() {
+      var l = ag().limites || {};
+      guardar(function () { return { limites: { solo: solo.slice(), proponer: proponer.slice() } }; }, 'Guardado.',
+        { limites: { solo: copia(l.solo || []), proponer: copia(l.proponer || []) } });
     }
-    function pintarReglas() {
-      App.vaciar(zonaReglas);
-      if (!reglas.length) { zonaReglas.appendChild(h('div.ayuda', 'Nada todavía. Cuando en un chat te pida permiso y elijas «Siempre», aparece acá.')); return; }
-      reglas.forEach(function (r, i) {
-        zonaReglas.appendChild(h('div.fila-ed', h('div', { style: { flex: 1, minWidth: 0 } }, h('div', textoRegla(r)), h('code.ayuda', { style: { wordBreak: 'break-all' } }, r)),
-          h('button.btn.fantasma.icono', { title: 'Quitar', onclick: function () { reglas.splice(i, 1); reglasTocadas = true; pintarReglas(); } }, App.icono('papelera'))));
-      });
-    }
-    pintarReglas();
+    var chipsSolo = App.chipsEditables(solo, { placeholder: 'Algo que puede hacer sin preguntarte', max: 12, largo: 300, alCambiar: guardarLimites });
+    var chipsProponer = App.chipsEditables(proponer, { placeholder: 'Algo que te tiene que consultar antes', max: 12, largo: 300, alCambiar: guardarLimites });
 
-    var checkCoord = h('input', { type: 'checkbox', checked: coord });
-    var rutaEnt = h('div', 'archivos/entregables/' + id + '/');
-    App.add(cont,
-      h('div.det-sec', h('h4', 'Dónde puede escribir'),
-        h('div.perm-rutas', h('div', 'conocimiento/agentes/' + id + '.md'), rutaEnt),
-        h('div.ayuda', 'Solo ahí. El resto de la oficina lo puede leer pero no tocar.')),
-      h('div.det-sec', h('h4', 'Lo que le permitiste'), zonaReglas,
-        h('div.ayuda', 'En un chat, si quiere correr un comando o escribir fuera de sus notas, te pide permiso.')),
-      h('div.det-sec', h('h4', 'Hace solo'), listaEditable(solo, 'Algo que puede hacer sin preguntarte'),
-        h('div.ayuda', 'Lo que sale de la oficina siempre queda como propuesta: mandar un mail, crear un evento, publicar, gastar.')),
-      h('div.det-sec', h('h4', 'Deja como propuesta'), listaEditable(proponer, 'Algo que te tiene que consultar antes'),
-        h('div.ayuda', 'Lo que sale de la oficina siempre queda como propuesta, aunque no figure acá.')),
-      h('div.det-sec', h('h4', 'Conectores'), zonaConectores),
-      h('div.det-sec', h('h4', 'Coordinación'),
-        h('label', { style: { display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer' } }, checkCoord,
-          h('span', 'Es el coordinador/a de la oficina', h('div.ayuda', 'Ve entregas, flujos y bloqueos de todos y puede repartir encargos. No hace el trabajo de otros: lo pide.')))),
-      err);
-    pintarConectores();
-    cargarCatalogo();
+    App.add(cont, resumen, zonaReglas,
+      App.ajuste('Hace solo', 'Lo que resuelve sin consultarte.', chipsSolo),
+      App.ajuste('Te consulta antes', 'Mail, publicar o gastar siempre quedan como propuesta, aunque no figure acá.', chipsProponer),
+      zonaConectores);
+    pintarReglas(); pintarConectores();
+    if (!global) cargarCatalogo();
     api.get('/api/biblioteca/entregables', { agente: id }).then(function (r) {
-      if (vigente() && r.carpeta) { var c = String(r.carpeta); rutaEnt.textContent = c; }
+      if (vigente() && r.carpeta) { carpetaEnt = String(r.carpeta); pintarReglas(); }
     }).catch(function () {});
-
-    var guardar = h('button.btn.primario', { onclick: function () {
-      var limpiar = function (l) { return l.map(function (t) { return t.trim(); }).filter(Boolean); };
-      var cuerpoPatch = {
-        limites: { solo: limpiar(solo), proponer: limpiar(proponer) },
-        /* conserva los demás permisos del agente: el check solo pone o saca «coordinador» */
-        permisos: (a.permisos || []).filter(function (x) { return x !== 'coordinador'; }).concat(checkCoord.checked ? ['coordinador'] : [])
-      };
-      if (reglasTocadas) cuerpoPatch.reglas = reglas;
-      if (Object.keys(tocado).length && catalogo) cuerpoPatch.conectores = App.Ajustes.nuevosConectores(a, catalogo.servidores, tocado);
-      guardar.disabled = true; err.textContent = '';
-      api.patch('/api/agentes/' + encodeURIComponent(id), cuerpoPatch).then(function (r) {
-        App.aviso('Permisos guardados.');
-        App.actualizar(r.oficina);
-        pintar();
-      }).catch(function (e) { err.textContent = e.message; guardar.disabled = false; });
-    } }, 'Guardar permisos');
-    App.add(pie, App.acciones(null, guardar));
   }
 
   /* ---------------- notas ---------------- */
   function pintarNotas(a, cuerpo) {
-    var notas = h('div', h('div.vacio', h('span.giro')));
+    var notas = h('div', App.cargando('Trayendo sus notas…'));
     cuerpo.appendChild(h('div', { style: { padding: '14px' } }, h('div.det-sec', h('h4', 'Lo que fue anotando'), notas)));
     api.get('/api/agentes/' + encodeURIComponent(a.id) + '/conocimiento').then(function (r) {
       App.vaciar(notas).appendChild(App.htmlSeguro(h('div.md-doc.doc-panel.notas-doc'), App.markdown(r.texto || 'Todavía no anotó nada.')));
@@ -417,7 +445,7 @@
 
   /* ---------------- archivos que guardó (su carpeta de entregables) ---------------- */
   function pintarArchivos(a, cuerpo, pie) {
-    var ent = h('div', h('div.vacio', h('span.giro')));
+    var ent = h('div', App.cargando('Trayendo sus archivos…'));
     cuerpo.appendChild(h('div', { style: { padding: '14px' } }, h('div.det-sec', h('h4', 'Archivos que guardó'), ent)));
     api.get('/api/biblioteca/entregables', { agente: a.id }).then(function (r) {
       App.vaciar(ent);
@@ -465,7 +493,7 @@
   }
 
   function pintarTareas(a, cuerpo, pie) {
-    var cont = h('div', { style: { padding: '14px' } }, h('div.vacio', h('span.giro')));
+    var cont = h('div', { style: { padding: '14px' } }, App.cargando('Trayendo las tareas…'));
     cuerpo.appendChild(cont);
     var id = a.id;
     function vigente() { return actual === id && pestana === 'tareas' && cont.isConnected; }
@@ -479,81 +507,100 @@
         if (mias.some(function (t) { return t.corriendo; })) sondeoTareas = setTimeout(function () { if (vigente()) cargar(); }, 3000);
       }).catch(function (e) { if (vigente()) App.vaciar(cont).appendChild(h('div.vacio', e.message)); });
     }
+    var CUANDO_CORREN = 'Corren mientras Oficina está abierta (aunque cierres la ventana). Si la app estuvo cerrada, una que se repite se pone al día al abrirla, hasta 12 horas después de su hora; una de una sola vez se hace igual, aunque sea tarde.';
     function listar(ts) {
       App.vaciar(cont);
       if (!ts.length) {
-        cont.appendChild(h('div.vacio', 'Todavía no hay tareas. Programá algo que ' + a.nombre + ' haga solo: algo que se repite, como un informe cada mañana, o un encargo de una sola vez con una entrega.'));
+        cont.appendChild(App.vacio('reloj', 'Todavía no hay tareas', 'Programá algo que ' + a.nombre + ' haga solo: un informe cada mañana (se repite) o un encargo de una sola vez, con su entrega. ' + CUANDO_CORREN));
+        return;
       }
       // las de una sola vez ya hechas van al final
-      ts.slice().sort(function (x, y) { return (x.hecha ? 1 : 0) - (y.hecha ? 1 : 0); }).forEach(function (t) { cont.appendChild(tarjeta(t)); });
-      cont.appendChild(h('div.ayuda', 'Las tareas corren mientras Oficina está abierta (aunque cierres la ventana). Si la app estuvo cerrada, una tarea que se repite se pone al día al abrirla, hasta 12 horas después de su hora; una de una sola vez se hace igual, aunque sea tarde.'));
+      var ordenadas = ts.slice().sort(function (x, y) { return (x.hecha ? 1 : 0) - (y.hecha ? 1 : 0); });
+      cont.appendChild(App.seccion('Tareas programadas', ordenadas.map(fila), { cuenta: String(ts.length), ayuda: CUANDO_CORREN }));
     }
     function recargarDespues() { cargar(); if (App.Actividad) setTimeout(App.Actividad.ya, 300); }
 
-    function tarjeta(t) {
+    /* estado en una insignia, y qué es lo que hay que hacer: reintentar, ver el pedido de permiso o nada */
+    function estadoTarea(t, activa, hecha) {
+      var u = t.ultima;
+      if (t.corriendo) return { ins: h('span.insignia.aviso', 'Corriendo…') };
+      if (u && u.estado === 'esperando_permiso') return { ins: h('span.insignia.aviso', 'Espera tu permiso'), verPedido: true };
+      if (hecha) return { ins: h('span.insignia.ok', 'Hecha') };
+      if (!activa) return { ins: h('span.insignia', 'En pausa') };
+      if (u && u.estado === 'error') return { ins: h('span.insignia.error', 'Falló'), reintentar: true };
+      if (!u) return { ins: h('span.insignia', 'Todavía no corrió') };
+      return { ins: h('span.insignia.ok', 'Funcionó') };
+    }
+
+    function fila(t) {
       var sis = zonaSistema();
       var activa = t.activa !== false;
       var unica = t.tipo === 'unica', hecha = unica && !!t.hecha;
       var zonaTxt = t.zona && t.zona !== sis ? ' (' + t.zona + ')' : '';
-      var historial = h('div', { style: { display: 'none', marginTop: '8px' } });
-      var btnHist = h('button.btn.chico.fantasma', { onclick: function () {
-        var abierto = historial.style.display !== 'none';
-        historial.style.display = abierto ? 'none' : 'block';
-        btnHist.textContent = abierto ? 'Historial' : 'Ocultar historial';
-        if (!abierto) cargarHistorial(t, historial);
-      } }, 'Historial');
-      var probar = h('button.btn.chico', { disabled: !!t.corriendo, onclick: function () {
-        probar.disabled = true;
+      var est = estadoTarea(t, activa, hecha);
+      var historial = h('div.tarea-historial.oculto'), abiertoHist = false;
+      function verHistorial() {
+        abiertoHist = !abiertoHist;
+        historial.classList.toggle('oculto', !abiertoHist);
+        if (abiertoHist) cargarHistorial(t, historial);
+      }
+      function probar(btn) {
+        btn.disabled = true;
         api.post('/api/tareas/' + encodeURIComponent(t.id) + '/correr').then(function () {
           App.aviso('Probando «' + t.nombre + '»…');
           recargarDespues();
-        }).catch(function (e) { App.fallo(e); probar.disabled = false; });
-      } }, unica ? (hecha ? 'Hacer de nuevo' : 'Hacer ahora') : 'Probar ahora');
-      var botones = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' } },
-        probar,
-        h('button.btn.chico', { onclick: function () { hojaTarea(a, t, cargar); } }, 'Editar'),
-        hecha ? null : h('button.btn.chico', { onclick: function () {
-          api.patch('/api/tareas/' + encodeURIComponent(t.id), { activa: !activa }).then(function () {
-            App.aviso(activa ? 'Tarea en pausa.' : 'Tarea reanudada.');
-            cargar();
-          }).catch(App.fallo);
-        } }, activa ? 'Pausar' : 'Reanudar'),
-        h('button.btn.chico.peligro', { onclick: function () {
-          App.confirmar('¿Borrar «' + t.nombre + '»?', 'Deja de correr y se borra su historial de ejecuciones. Las conversaciones que ya generó quedan en el chat de ' + a.nombre + '.', 'Borrar', true).then(function (si) {
-            if (!si) return;
-            api.del('/api/tareas/' + encodeURIComponent(t.id)).then(function () { App.aviso('Tarea borrada.'); cargar(); }).catch(App.fallo);
-          });
-        } }, 'Borrar'),
-        h('span', { style: { flex: 1 } }), btnHist);
-      return h('div', { style: { border: '1px solid var(--linea)', borderRadius: 'var(--radio-chico)', padding: '10px 12px', marginBottom: '10px', background: 'var(--panel)', opacity: activa ? 1 : 0.8 } },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-          h('div', { style: { fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, t.nombre),
-          activa || hecha ? null : h('span.insignia', 'En pausa'),
-          hecha && !t.corriendo ? h('span.insignia.ok', 'Hecha') : estadoEjecucion(t.ultima)),
-        unica ? lineasUnica(t, activa, hecha, zonaTxt) : [
-          h('div.ayuda', textoDias(t.dias) + ' · ' + t.hora + zonaTxt),
-          h('div.ayuda', activa && t.proxima ? 'Próxima: ' + fechaCorta(t.proxima, t.zona, true)
-            : (activa ? 'Sin próxima corrida' : 'No corre mientras esté en pausa'))],
-        t.ultima && !hecha ? h('div.ayuda', 'Última: ' + fechaCorta(t.ultima.inicio, t.zona, false) + (t.ultima.manual ? (unica ? ' (a mano)' : ' (prueba)') : '')) : null,
-        t.archivos && t.archivos.length ? App.Adjuntos.chips(t.archivos) : null,
-        botones, historial);
+        }).catch(function (e) { App.fallo(e); btn.disabled = false; });
+      }
+      function editar() { hojaTarea(a, t, cargar); }
+      var principal;
+      if (est.verPedido) principal = h('button.btn.chico.primario', { onclick: function () { App.Nav.ir('#/bandeja/permisos'); } }, 'Ver pedido');
+      else {
+        var texto = unica ? (hecha ? 'Hacer de nuevo' : est.reintentar ? 'Reintentar' : 'Hacer ahora') : (est.reintentar ? 'Reintentar' : 'Probar ahora');
+        principal = h('button.btn.chico', { disabled: !!t.corriendo, onclick: function (ev) { probar(ev.currentTarget); } }, texto);
+      }
+      var linea1 = unica ? 'Una sola vez · ' + (t.cuando ? fechaCorta(t.cuando, t.zona, true) : (t.fecha + ' ' + t.hora)) + zonaTxt
+        : textoDias(t.dias) + ' · ' + t.hora + zonaTxt;
+      var linea2 = unica ? estadoUnica(t, activa, hecha)
+        : (activa ? (t.proxima ? 'Próxima: ' + fechaCorta(t.proxima, t.zona, true) : 'Sin próxima corrida') : 'No corre mientras esté en pausa');
+      var ultima = t.ultima && !hecha ? 'Última: ' + fechaCorta(t.ultima.inicio, t.zona, false) + (t.ultima.manual ? (unica ? ' (a mano)' : ' (prueba)') : '') : null;
+      var filaDec = App.filaDecision({
+        marca: 'reloj', titulo: t.nombre, alTocar: editar, estado: est.ins, principal: principal,
+        sub: [h('div', linea1), h('div', linea2), ultima ? h('div', ultima) : null],
+        mas: [
+          { texto: 'Editar', icono: 'lapiz', accion: editar },
+          hecha ? null : { texto: activa ? 'Pausar' : 'Reanudar', accion: function () {
+            api.patch('/api/tareas/' + encodeURIComponent(t.id), { activa: !activa }).then(function () {
+              App.guardado(activa ? 'Tarea en pausa.' : 'Tarea reanudada.', function () {
+                api.patch('/api/tareas/' + encodeURIComponent(t.id), { activa: activa }).then(cargar).catch(App.fallo);
+              });
+              cargar();
+            }).catch(App.fallo);
+          } },
+          { texto: 'Historial', accion: verHistorial },
+          '-',
+          { texto: 'Borrar', icono: 'papelera', peligro: true, accion: function () {
+            App.confirmar('¿Borrar «' + t.nombre + '»?', 'Deja de correr y se borra su historial de ejecuciones. Las conversaciones que ya generó quedan en el chat de ' + a.nombre + '.', 'Borrar', true).then(function (si) {
+              if (!si) return;
+              api.del('/api/tareas/' + encodeURIComponent(t.id)).then(function () { App.aviso('Tarea borrada.'); cargar(); }).catch(App.fallo);
+            });
+          } }]
+      });
+      return h('div.tarea-item' + (activa ? '' : '.pausada'), filaDec,
+        t.archivos && t.archivos.length ? h('div.tarea-archivos', App.Adjuntos.chips(t.archivos)) : null, historial);
     }
 
-    /* una sola vez: cuándo le toca y en qué quedó */
-    function lineasUnica(t, activa, hecha, zonaTxt) {
-      var cuando = t.cuando ? fechaCorta(t.cuando, t.zona, true) : (t.fecha + ' ' + t.hora);
-      var estado;
-      if (hecha) estado = 'Hecha el ' + fechaCorta(t.hecha, t.zona, false) + '. Su entrega está en Entregables.';
-      else if (t.corriendo) estado = 'Haciéndola ahora…';
-      else if (!activa) estado = 'No se hace mientras esté en pausa';
-      else if (t.proxima) estado = 'Pendiente: se hace ese día a esa hora';
-      else if (t.ultima && t.ultima.estado === 'error' && !t.ultima.manual) estado = 'Falló. Usá «Hacer ahora» para reintentar, o cambiale la fecha.';
-      else estado = 'Ya es la hora: se hace en cuanto se pueda';
-      return [h('div.ayuda', 'Una sola vez · ' + cuando + zonaTxt), h('div.ayuda', estado)];
+    /* una sola vez: en qué quedó */
+    function estadoUnica(t, activa, hecha) {
+      if (hecha) return 'Hecha el ' + fechaCorta(t.hecha, t.zona, false) + '. Su entrega está en Entregables.';
+      if (t.corriendo) return 'Haciéndola ahora…';
+      if (!activa) return 'No se hace mientras esté en pausa';
+      if (t.proxima) return 'Pendiente: se hace ese día a esa hora';
+      if (t.ultima && t.ultima.estado === 'error' && !t.ultima.manual) return 'Falló. Reintentala, o cambiale la fecha.';
+      return 'Ya es la hora: se hace en cuanto se pueda';
     }
 
     function cargarHistorial(t, caja) {
-      App.vaciar(caja).appendChild(h('div.vacio', { style: { padding: '12px' } }, h('span.giro')));
+      App.vaciar(caja).appendChild(App.cargando('Trayendo el historial…'));
       api.get('/api/tareas/' + encodeURIComponent(t.id) + '/ejecuciones').then(function (r) {
         App.vaciar(caja);
         var es = r.ejecuciones || [];
@@ -564,8 +611,12 @@
 
     function filaEjecucion(e, t) {
       var texto = h('div', { style: { display: 'none', marginTop: '6px' } });
-      var detalle = e.estado === 'error' ? (e.error || 'Falló.') : (e.resultado || (e.estado === 'corriendo' ? 'Todavía está corriendo…' : e.estado === 'esperando_permiso' ? 'Frenó: necesita tu permiso para seguir (mirá las tarjetas arriba a la derecha).' : '(sin respuesta)'));
-      App.add(texto, e.estado === 'error' ? h('div.error-txt', detalle) : App.htmlSeguro(h('div.md-doc.doc-panel'), App.markdown(detalle)));
+      if (e.estado === 'esperando_permiso') {
+        App.add(texto, h('div', 'Frenó: necesita tu permiso para seguir. ', h('button.btn.chico', { onclick: function () { App.Nav.ir('#/bandeja/permisos'); } }, 'Ver pedido')));
+      } else {
+        var detalle = e.estado === 'error' ? (e.error || 'Falló.') : (e.resultado || (e.estado === 'corriendo' ? 'Todavía está corriendo…' : '(sin respuesta)'));
+        App.add(texto, e.estado === 'error' ? h('div.error-txt', detalle) : App.htmlSeguro(h('div.md-doc.doc-panel'), App.markdown(detalle)));
+      }
       var ver = h('button.btn.chico.fantasma', { onclick: function () {
         var abierto = texto.style.display !== 'none';
         texto.style.display = abierto ? 'none' : 'block';
@@ -605,11 +656,16 @@
     }).catch(App.fallo);
   }
 
-  /* hoja para crear (t = null) o editar una tarea */
+  /* hoja para crear (t = null) o editar una tarea. `a` puede ser null al crear: arriba se elige para quién es. */
   /* `pre` (solo al crear): {nombre, consigna, origen, unica} precargados, p. ej. desde un pendiente de reunión */
   function hojaTarea(a, t, alGuardar, pre) {
     pre = pre || {};
-    var hj = App.hoja({ titulo: t ? 'Editar tarea' : 'Nueva tarea de ' + a.nombre, ancho: 540 });
+    var agentes = (App.E.oficina && App.E.oficina.agentes) || [];
+    if (!a && t) a = App.agente(t.agente);
+    var elegido = a || (agentes.length === 1 ? agentes[0] : null);
+    function nom() { return elegido ? elegido.nombre : 'el agente'; }
+    function tituloHoja() { return t ? 'Editar tarea' : (elegido ? 'Nueva tarea de ' + elegido.nombre : 'Nueva tarea'); }
+    var hj = App.hoja({ titulo: tituloHoja(), ancho: 540 });
     var nombre = h('input.campo', { value: t ? t.nombre : (pre.nombre || ''), maxlength: 80, placeholder: 'Por ejemplo: Informe de la mañana', autofocus: true });
     var consigna = h('textarea.campo', { rows: 6, maxlength: 4000 });
     consigna.value = t ? t.consigna : (pre.consigna || '');
@@ -617,45 +673,27 @@
     var hecha = !!(t && t.hecha);
     var ahora = !t;   // al crear una de una sola vez, por defecto «Ahora»
 
-    /* chips de una sola elección: [[valor, texto]], elegido, alCambiar */
-    function grupo(opciones, elegido, alCambiar) {
-      var bs = opciones.map(function (op) {
-        return h('button.chip', { type: 'button', onclick: function () { elegido = op[0]; pintarGrupo(); alCambiar(elegido); } }, op[1]);
-      });
-      function pintarGrupo() {
-        bs.forEach(function (b, i) {
-          var si = opciones[i][0] === elegido;
-          b.style.background = si ? 'var(--acento)' : ''; b.style.color = si ? 'var(--sobre-acento)' : '';
-          b.style.borderColor = si ? 'var(--acento)' : ''; b.setAttribute('aria-pressed', si ? 'true' : 'false');
-        });
-      }
-      pintarGrupo();
-      return h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } }, bs);
-    }
     function hoyISO() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
-    var dias = {};
-    (t ? t.dias : [1, 2, 3, 4, 5]).forEach(function (n) { dias[n] = true; });
-    var chips = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } }, DIAS.map(function (d) {
-      var b = h('button.chip', { type: 'button', title: d[2], style: { width: '34px', justifyContent: 'center', padding: 0 }, onclick: function () {
-        dias[d[0]] = !dias[d[0]]; pintarChip();
-      } }, d[1]);
-      function pintarChip() {
-        b.style.background = dias[d[0]] ? 'var(--acento)' : '';
-        b.style.color = dias[d[0]] ? 'var(--sobre-acento)' : '';
-        b.style.borderColor = dias[d[0]] ? 'var(--acento)' : '';
-        b.setAttribute('aria-pressed', dias[d[0]] ? 'true' : 'false');
-      }
-      pintarChip();
-      return b;
-    }));
+    function campo(etq, ayuda, control) { return h('div.fila-campo', h('label.etiqueta-campo', etq), ayuda || null, control); }
+
+    var agenteEl = a ? null : App.elegir({ etiqueta: 'Para quién', valor: elegido ? elegido.id : null,
+      opciones: agentes.map(function (x) { return { valor: x.id, titulo: x.nombre, retrato: x }; }),
+      alCambiar: function (id) { elegido = App.agente(id); hj.titulo(tituloHoja()); pintarTipo(); } });
+    var tipoEl = App.elegir({ etiqueta: 'Tipo', valor: unica, opciones: [{ valor: false, titulo: 'Se repite' }, { valor: true, titulo: 'Una sola vez' }],
+      alCambiar: function (v) { unica = v; pintarTipo(); } });
+    var cuandoEl = t ? null : App.elegir({ etiqueta: 'Cuándo', valor: ahora, opciones: [{ valor: true, titulo: 'Ahora' }, { valor: false, titulo: 'En una fecha' }],
+      alCambiar: function (v) { ahora = v; pintarTipo(); } });
+    var diasEl = App.elegir({ multiple: true, forma: 'chips', etiqueta: 'Días', valor: (t ? t.dias : [1, 2, 3, 4, 5]),
+      opciones: DIAS.map(function (d) { return { valor: d[0], titulo: DIAS_CORTO[d[0]].charAt(0).toUpperCase() + DIAS_CORTO[d[0]].slice(1), sub: d[2] }; }) });
     var hora = h('input.campo', { type: 'time', value: t ? t.hora : '08:00', step: 60, style: { width: '130px' } });
     var fecha = h('input.campo', { type: 'date', value: t && t.fecha ? t.fecha : hoyISO(), style: { width: '170px' } });
     var zona = h('input.campo', { value: t ? t.zona : zonaSistema(), placeholder: 'America/Argentina/Buenos_Aires', list: 'hq-zonas', autocomplete: 'off', spellcheck: 'false' });
     var lista = h('datalist', { id: 'hq-zonas' });
     try { (Intl.supportedValuesOf('timeZone') || []).forEach(function (z) { lista.appendChild(h('option', { value: z })); }); } catch (e) { /* sin lista: se escribe a mano */ }
+    var zonaAbierta = !!(t && t.zona && t.zona !== zonaSistema());
     var activa = h('input', { type: 'checkbox', checked: t ? t.activa !== false : true });
     var err = h('div.error-txt');
-    var ayudaConsigna = h('div.ayuda');
+    var ayudaTipo = h('div.ayuda'), ayudaConsigna = h('div.ayuda'), ayudaArchivos = h('div.ayuda');
     /* archivos: los que ya lleva la tarea (se pueden sacar) y los nuevos */
     var adj = App.Adjuntos({ texto: 'Adjuntar archivos', error: err });
     adj.zona(hj.cuerpo, consigna);
@@ -667,41 +705,47 @@
     }
     pintarGuardados();
 
-    var filaDias = h('div.fila-campo', h('label.etiqueta-campo', 'Días'), chips);
-    var filaCuando = t ? null : h('div.fila-campo', h('label.etiqueta-campo', 'Cuándo'),
-      grupo([[true, 'Ahora'], [false, 'En una fecha']], ahora, function (v) { ahora = v; pintarTipo(); }));
-    var filaFecha = h('div.fila-campo', h('label.etiqueta-campo', 'Fecha'), fecha);
-    var filaHora = h('div.fila-campo', h('label.etiqueta-campo', 'Hora'), hora);
-    var filaZona = h('div.fila-campo', { style: { flex: 1 } }, h('label.etiqueta-campo', 'Zona horaria'), zona, lista);
+    var filaAgente = agenteEl ? campo('Para quién', h('div.ayuda', 'Quién se encarga de la tarea.'), agenteEl) : null;
+    var filaDias = campo('Días', null, diasEl);
+    var filaCuando = t ? null : campo('Cuándo', null, cuandoEl);
+    var filaFecha = campo('Fecha', null, fecha);
+    var filaHora = campo('Hora', null, hora);
+    var zonaCaja = campo('Zona horaria', h('div.ayuda', 'Por defecto la de tu compu.'), [zona, lista]);
+    var zonaLink = h('div.ayuda', 'Hora de ' + (zonaSistema() || 'tu compu') + ' · ',
+      h('button.btn.fantasma.chico', { type: 'button', onclick: function () { zonaAbierta = true; pintarTipo(); } }, 'Otra zona horaria'));
     var filaActiva = h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', cursor: 'pointer' } }, activa, 'Activa');
     var notaHecha = h('div.ayuda', 'Esta tarea ya se hizo. Si le cambiás la fecha o la hora, se vuelve a hacer (y deja otra entrega).');
     function ver(el, si) { if (el) el.style.display = si ? '' : 'none'; }
     function pintarTipo() {
       var unaYa = unica && !t && ahora;
       ver(filaDias, !unica); ver(filaCuando, unica); ver(filaFecha, unica && !unaYa);
-      ver(filaHora, !unaYa); ver(filaZona, !unaYa); ver(filaActiva, !unaYa && !hecha); ver(notaHecha, unica && hecha);
-      consigna.placeholder = unica ? 'Lo que ' + a.nombre + ' tiene que hacer y entregar, como si se lo escribieras en el chat.'
-        : 'Lo que ' + a.nombre + ' tiene que hacer cada vez, como si se lo escribieras en el chat.';
+      ver(filaHora, !unaYa); ver(zonaLink, !unaYa && !zonaAbierta); ver(zonaCaja, !unaYa && zonaAbierta);
+      ver(filaActiva, !unaYa && !hecha); ver(notaHecha, unica && hecha);
+      ayudaTipo.textContent = unica ? 'Se hace una vez y la tarea queda hecha.' : 'Corre los días y a la hora que elijas, todas las semanas.';
+      consigna.placeholder = unica ? 'Lo que ' + nom() + ' tiene que hacer y entregar, como si se lo escribieras en el chat.'
+        : 'Lo que ' + nom() + ' tiene que hacer cada vez, como si se lo escribieras en el chat.';
       ayudaConsigna.textContent = unica
-        ? 'Se hace una sola vez, en una conversación nueva y con sus permisos de siempre. Deja una entrega para revisar y la tarea queda hecha.'
+        ? 'Se hace en una conversación nueva y con sus permisos de siempre. Deja una entrega para revisar.'
         : 'Se le pide al agente en una conversación nueva cada vez, con sus permisos de siempre. Cada vez deja una entrega.';
+      ayudaArchivos.textContent = 'Lo que ' + nom() + ' tiene que mirar cada vez que haga la tarea (fotos, documentos…).';
       guardar.textContent = t ? 'Guardar cambios' : (unaYa ? 'Encargar ahora' : 'Crear tarea');
     }
 
     App.add(hj.cuerpo,
-      h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), nombre),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Consigna'), consigna, ayudaConsigna),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Archivos'), guardados, h('div', adj.boton, adj.input), adj.lista,
-        h('div.ayuda', 'Lo que ' + a.nombre + ' tiene que mirar cada vez que haga la tarea (fotos, documentos…).')),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Tipo'),
-        grupo([[false, 'Se repite'], [true, 'Una sola vez']], unica, function (v) { unica = v; pintarTipo(); })),
-      filaDias, filaCuando,
-      h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' } }, filaFecha, filaHora, filaZona),
+      filaAgente,
+      campo('Tipo', ayudaTipo, tipoEl),
+      campo('Nombre', null, nombre),
+      campo('Consigna', ayudaConsigna, consigna),
+      campo('Archivos', ayudaArchivos, [guardados, h('div', adj.boton, adj.input), adj.lista]),
+      filaCuando, filaDias,
+      h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' } }, filaFecha, filaHora),
+      zonaLink, zonaCaja,
       filaActiva, notaHecha,
       err);
     var guardar = h('button.btn.primario', { onclick: function () {
-      var d = Object.keys(dias).filter(function (k) { return dias[k]; }).map(Number).sort();
-      var cuerpo = { nombre: nombre.value.trim(), consigna: consigna.value.trim(), zona: zona.value.trim() || zonaSistema() };
+      if (!elegido) { err.textContent = 'Elegí para quién es la tarea.'; return; }
+      var d = diasEl.valor().map(Number).sort(function (x, y) { return x - y; });
+      var cuerpo = { nombre: nombre.value.trim(), consigna: consigna.value.trim(), zona: (zonaAbierta ? zona.value.trim() : '') || (t ? t.zona : '') || zonaSistema() };
       if (!cuerpo.nombre) { err.textContent = 'Poné un nombre.'; return; }
       if (!cuerpo.consigna) { err.textContent = 'Escribí la consigna.'; return; }
       if (unica && !t && ahora) {
@@ -725,11 +769,11 @@
         leidos = archivos;
         if (archivos.length) cuerpo.archivos = archivos;
         return t ? api.patch('/api/tareas/' + encodeURIComponent(t.id), cuerpo)
-          : api.post('/api/tareas', Object.assign({ agente: a.id }, pre.origen ? { origen: pre.origen } : {}, cuerpo));
+          : api.post('/api/tareas', Object.assign({ agente: elegido.id }, pre.origen ? { origen: pre.origen } : {}, cuerpo));
       }).then(function (r) { adj.guardarEnBiblioteca(leidos); return r; });
       p.then(function () {
         hj.cerrar();
-        App.aviso(t ? 'Cambios guardados.' : (cuerpo.ahora ? a.nombre + ' se puso a trabajar en eso.' : 'Tarea creada.'));
+        App.aviso(t ? 'Cambios guardados.' : (cuerpo.ahora ? elegido.nombre + ' se puso a trabajar en eso.' : 'Tarea creada.'));
         if (cuerpo.ahora && App.Actividad) setTimeout(App.Actividad.ya, 300);
         if (alGuardar) alGuardar();
       }).catch(function (e) { err.textContent = e.message; guardar.disabled = false; });
@@ -741,12 +785,12 @@
   function cerrar() { if (App.modoDerecho() === 'agente') App.cerrarDerecho(); else alCerrar(); }
   function alCerrar() { actual = null; App.Oficina3D.elegir(null); App.marcarEstados(); }
 
-  /* abre la hoja de «Nueva tarea» de un agente con datos precargados (desde un pendiente de reunión) */
+  /* abre la hoja de «Nueva tarea» (de un agente, o sin agente: arriba se elige) con datos precargados (desde un pendiente de reunión) */
   function nuevaTarea(id, pre, alGuardar) {
-    var a = App.agente(id); if (!a) return;
+    var a = id ? App.agente(id) : null;
+    if (id && !a) return;
     hojaTarea(a, null, alGuardar, pre);
   }
-
   /* abre la hoja de «Editar tarea» desde fuera de la ficha (el panel global de Tareas) */
   function editarTarea(t, alGuardar) {
     var a = App.agente(t.agente); if (!a) return;

@@ -38,7 +38,7 @@ App.Parte = (function () {
   function cargar(conGiro) {
     if (!abiertoPanel()) return;
     var n = ++pedido, der = App.dom.derecho;
-    if (conGiro) App.add(App.vaciar(der), cabecera(''), h('div.der-cuerpo', h('div.vacio', h('span.giro'))));
+    if (conGiro) App.add(App.vaciar(der), cabecera(''), h('div.der-cuerpo', App.cargando('Trayendo lo que te espera…')));
     api().get('/api/parte').then(function (p) {
       if (n === pedido && abiertoPanel()) pintar(p);
     }).catch(function (e) {
@@ -54,19 +54,19 @@ App.Parte = (function () {
 
   function quienMarca(id) {
     var a = id && id !== 'persona' && App.agente(id);
-    if (a) return App.retratoImg(a, 'retrato', 64);
-    return h('div.retrato.parte-vos', 'Vos');
+    return a || App.Yo.retrato('retrato', 64);
   }
-  function quienNombre(id) {
-    if (!id || id === 'persona') return 'Vos';
-    var a = App.agente(id); return a ? a.nombre : id;
+  function quienNombre(id) { return App.humano.quien(id || 'persona'); }
+
+  /* todas las filas del parte son la misma pieza: marca · qué · bajada · estado · UN botón principal; tocarla hace lo mismo */
+  function fila(marca, titulo, sub, estado, texto, accion) {
+    return App.filaDecision({ marca: marca, titulo: titulo, sub: sub, estado: estado, alTocar: accion || null,
+      principal: accion && texto ? h('button.btn.chico', { onclick: accion }, texto) : null });
   }
 
   function filaAviso(a) {
     var ag = a.agente && App.agente(a.agente);
-    var marca = ag ? App.retratoImg(ag, 'retrato', 64) : h('div.retrato.parte-ico', App.icono(a.tipo === 'flujo' ? 'flujo' : 'parte'));
-    return h('button.parte-fila', { onclick: function () { abrirAviso(a); } }, marca,
-      h('div.parte-txt', h('div.parte-tit', a.texto), a.creado ? h('div.parte-sub', App.hace(a.creado)) : null));
+    return fila(ag || (a.tipo === 'flujo' ? 'flujo' : 'parte'), a.texto, a.creado ? App.hace(a.creado) : null, null, 'Ver', function () { abrirAviso(a); });
   }
   function abrirAviso(a) {
     /* App.Avisos.abrir ya manda los de flujo a App.Flujos.verCorrida y los marca vistos sin desincronizar el banner */
@@ -76,19 +76,15 @@ App.Parte = (function () {
 
   function filaEntrega(e) {
     var ag = e.agente && App.agente(e.agente);
-    return h('button.parte-fila', { onclick: function () { App.Entregables.abrir(e.id); } },
-      ag ? App.retratoImg(ag, 'retrato', 64) : h('div.retrato.parte-ico', App.icono('libro')),
-      h('div.parte-txt', h('div.parte-tit', e.titulo), h('div.parte-sub', (ag ? ag.nombre + ' · ' : '') + App.hace(e.creada))));
+    return fila(ag || 'libro', e.titulo, (ag ? ag.nombre + ' · ' : '') + App.hace(e.creada), null, 'Revisar', function () { App.Entregables.abrir(e.id); });
   }
 
   function filaFlujo(f) {
     var trabado = f.dias > 1;
-    return h('button.parte-fila', { onclick: function () { if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(f.corrida); } },
-      quienMarca(f.quien),
-      h('div.parte-txt',
-        h('div.parte-tit', f.nombre || f.flujoNombre),
-        h('div.parte-sub', (f.flujoNombre ? f.flujoNombre + ' · ' : '') + 'paso ' + (f.paso + 1) + (f.pasoNombre ? ': ' + f.pasoNombre : '') + ' · ' + quienNombre(f.quien))),
-      trabado ? h('span.insignia.aviso', 'trabado hace ' + diasTxt(f.dias)) : null);
+    return fila(quienMarca(f.quien), f.nombre || f.flujoNombre,
+      (f.flujoNombre ? f.flujoNombre + ' · ' : '') + 'paso ' + (f.paso + 1) + (f.pasoNombre ? ': ' + f.pasoNombre : '') + ' · ' + quienNombre(f.quien),
+      trabado ? h('span.insignia.aviso', 'trabado hace ' + diasTxt(f.dias)) : null,
+      'Ver', function () { if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(f.corrida); });
   }
 
   /* una cadena que se repite (A espera seguido a B): se ofrece pasarla a flujo; el borrador se abre en el editor y se guarda ahí */
@@ -97,7 +93,9 @@ App.Parte = (function () {
     cuerpo.appendChild(caja);
     api().get('/api/esperas/patrones').then(function (r) {
       if (!abiertoPanel() || !caja.parentNode) return;
-      (r.patrones || []).forEach(function (x) {
+      var ps = r.patrones || [];
+      if (!ps.length) return;
+      caja.appendChild(seccion('Se repite' + (ps.length > 1 ? ' (' + ps.length + ')' : ''), h('div.parte-filas', ps.map(function (x) {
         var btn = h('button.btn.chico', { onclick: function () {
           btn.disabled = true;
           api().post('/api/esperas/flujo', { agente: x.agente, esperaA: x.esperaA }).then(function (d) {
@@ -105,10 +103,9 @@ App.Parte = (function () {
             if (App.Flujos && App.Flujos.editor) App.Flujos.editor(null, d.borrador);
           }).catch(function (e) { App.fallo(e); btn.disabled = false; });
         } }, 'Armar un flujo');
-        caja.appendChild(seccion('Se repite', h('div.parte-fila.quieta',
-          h('div.parte-txt', h('div.parte-tit', quienNombre(x.agente) + ' espera seguido a ' + quienNombre(x.esperaA) + ': ¿armar un flujo?'),
-            h('div.parte-sub', x.veces + ' veces en el último mes')), btn)));
-      });
+        return App.filaDecision({ marca: quienMarca(x.agente), titulo: quienNombre(x.agente) + ' espera seguido a ' + quienNombre(x.esperaA),
+          sub: x.veces + ' veces en el último mes · ¿armar un flujo?', principal: btn });
+      }))));
     }).catch(function () { /* sin tarjeta */ });
   }
 
@@ -129,9 +126,7 @@ App.Parte = (function () {
   function filaEspera(x) {
     var ag = App.agente(x.agente);
     var estado = x.estado === 'lista' ? 'ya llegó, falta relanzar' : x.estado === 'relanzada' ? 'haciendo la versión completa' : (x.vencida ? 'vencida hace ' + diasTxt(x.dias) : App.hace(x.creada));
-    return h('button.parte-fila', { onclick: function () { abrirEspera(x); } },
-      ag ? App.retratoImg(ag, 'retrato', 64) : h('div.retrato.parte-ico', App.icono('reloj')),
-      h('div.parte-txt', h('div.parte-tit', x.agenteNombre + ' espera a ' + x.esperaANombre), h('div.parte-sub', x.que + ' · ' + estado)));
+    return fila(ag || 'reloj', x.agenteNombre + ' espera a ' + x.esperaANombre, x.que + ' · ' + estado, null, 'Ver', function () { abrirEspera(x); });
   }
 
   function filaBloqueo(b, esperas) {
@@ -139,17 +134,13 @@ App.Parte = (function () {
       : b.tipo === 'corrida' ? function () { if (App.Flujos && App.Flujos.verCorrida) App.Flujos.verCorrida(+b.ref); }
       : b.tipo === 'entrega' ? function () { App.Entregables.abrir(+b.ref); }
       : b.tipo === 'tarea' ? function () { var t = b.ref && b.ref.split(':')[0]; if (App.agente(t)) App.Agente.abrir(t, 'tareas'); } : null;
-    return h('button.parte-fila' + (abre ? '' : '.quieta'), { onclick: abre || null },
-      h('div.retrato.parte-ico.aviso', App.icono(b.tipo === 'corrida' ? 'flujo' : b.tipo === 'espera' ? 'reloj' : 'cerrar')),
-      h('div.parte-txt', h('div.parte-tit', b.texto)),
-      typeof b.dias === 'number' ? h('span.insignia.aviso', diasTxt(b.dias)) : null);
+    return fila(b.tipo === 'corrida' ? 'flujo' : b.tipo === 'espera' ? 'reloj' : 'cerrar', b.texto, null,
+      typeof b.dias === 'number' ? h('span.insignia.aviso', diasTxt(b.dias)) : null, 'Ver', abre);
   }
 
   function filaProxima(t) {
     var ag = App.agente(t.agente);
-    return h('button.parte-fila', { onclick: function () { if (ag) App.Agente.abrir(t.agente, 'tareas'); } },
-      ag ? App.retratoImg(ag, 'retrato', 64) : h('div.retrato.parte-ico', App.icono('parte')),
-      h('div.parte-txt', h('div.parte-tit', t.nombre || t.tarea), h('div.parte-sub', (ag ? ag.nombre + ' · ' : '') + cuando(t.cuando))));
+    return fila(ag || 'parte', t.nombre || t.tarea, (ag ? ag.nombre + ' · ' : '') + cuando(t.cuando), null, null, ag ? function () { App.Agente.abrir(t.agente, 'tareas'); } : null);
   }
   function cuando(iso) {
     var d = new Date(iso); if (isNaN(d)) return '';

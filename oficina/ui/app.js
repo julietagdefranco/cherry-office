@@ -43,18 +43,19 @@
       h('h1', 'Armá tu oficina'),
       h('p.bajada', 'Un equipo de agentes de Claude que trabaja para vos: los contratás contándoles qué necesitás, les hablás y los juntás a debatir.'),
       E.estado && !E.estado.claude ? h('p.error-txt', { style: { marginBottom: '14px' } }, 'No encontré Claude Code en esta compu. Vas a poder armar la oficina, pero los agentes no van a responder hasta instalarlo.') : null,
+      recientes,
       opcionesOficina().map(function (o) {
         return h('button.opcion', { onclick: o.accion }, App.icono(o.icono), h('div', h('b', o.texto), h('span', o.bajada)));
-      }),
-      recientes
+      })
     ))));
     api.get('/api/oficinas').then(function (r) {
       if (!r.oficinas || !r.oficinas.length) return;
       recientes.appendChild(h('div.etiqueta-campo', 'Recientes'));
       r.oficinas.forEach(function (o) {
-        recientes.appendChild(h('div.reciente', { onclick: function () { abrirCarpeta(o.carpeta); } },
-          App.icono('edificio'), h('div', { style: { minWidth: 0 } }, h('div', o.nombre), h('div.ruta', o.carpeta))));
+        recientes.appendChild(h('div.reciente', { title: o.carpeta, onclick: function () { abrirCarpeta(o.carpeta); } },
+          App.icono('edificio'), h('div', { style: { minWidth: 0 } }, h('div', o.nombre), h('div.ruta', { title: o.carpeta }, App.humano.ruta(o.carpeta).completa))));
       });
+      recientes.appendChild(h('div.etiqueta-campo', { style: { marginTop: '14px' } }, 'O empezá otra'));
     }).catch(function () {});
   }
 
@@ -214,8 +215,11 @@
   function importarOficina() {
     App.elegirZip('Elegí el .zip de la oficina').then(function (archivo) {
       if (!archivo) return;
-      App.aviso('Importando la oficina…');
+      /* un aviso que se queda hasta que termina (App.aviso se apaga solo a los segundos) */
+      var espera = h('div.tostadas', h('div.tostada', h('span.giro'), h('span', ' Importando la oficina… puede tardar un poco.')));
+      document.body.appendChild(espera);
       api.post('/api/oficinas/importar', { archivo: archivo }).then(function (r) {
+        espera.remove();
         App.Agente && App.Agente.cerrar && E.oficina && App.Agente.cerrar();
         montar(r.carpeta, r.oficina);
         if (r.avisos && r.avisos.length) {
@@ -225,7 +229,7 @@
         } else {
           App.aviso('Oficina importada: «' + r.oficina.nombre + '».');
         }
-      }).catch(App.fallo);
+      }).catch(function (e) { espera.remove(); App.fallo(e); });
     });
   }
   App.exportarOficina = exportarOficina;
@@ -256,13 +260,13 @@
   /* «+»: todo lo que empieza algo nuevo, en un solo botón (arriba del riel) */
   function menuNuevo(ancla) {
     App.menu(ancla, [
-      { texto: 'Charlar con alguien…', icono: 'charla', accion: function () { App.Nav.elegirAgente(ancla, function (id) { App.Agente.nueva(id); }); } },
+      { texto: 'Charlar con alguien…', icono: 'charla', accion: function () { App.Nav.elegirAgente(ancla, function (id) { App.Agente.nueva(id); }, 'Charlar con'); } },
       { texto: 'Llamar a reunión…', icono: 'reunion', accion: function () { App.Reunion.nueva(); } },
-      { texto: 'Nueva tarea…', icono: 'reloj', accion: function () { App.Nav.elegirAgente(ancla, function (id) { App.Agente.nuevaTarea(id, {}); }); } },
+      { texto: 'Nueva tarea…', icono: 'reloj', accion: function () { App.Agente.nuevaTarea(null, {}); } },
       { texto: 'Nueva corrida de flujo…', icono: 'flujo', accion: function () { App.Flujos.abrir(); App.Flujos.nueva(); } },
       '-',
-      { texto: 'Contratar un agente…', icono: 'personas', accion: function () { App.Contratar.abrir(); } },
-      { texto: 'Armar con el Creador…', icono: 'chispa', accion: function () { App.Creador.abrir(); } },
+      { texto: 'Contratar un agente…', icono: 'personas', accion: function () { App.Nav.ir('#/equipo/contratar'); } },
+      { texto: 'Armar con el Creador…', icono: 'chispa', accion: function () { App.Nav.ir('#/equipo/creador'); } },
       { texto: 'Nuevo departamento…', icono: 'capas', accion: function () { App.Deptos.agregar(); } },
     ]);
   }
@@ -399,7 +403,9 @@
       lista.forEach(function (o) {
         items.push({ texto: o.nombre, icono: 'edificio', nota: o.carpeta === E.carpeta ? 'actual' : '', accion: function () { if (o.carpeta !== E.carpeta) { App.Agente.cerrar(); abrirCarpeta(o.carpeta); } } });
       });
-      items.push({ texto: 'Otra oficina…', icono: 'mas', accion: otraOficina });
+      /* crear, armar charlando, abrir o importar: las mismas cuatro opciones que la pantalla de inicio, sin hoja intermedia */
+      items.push('-');
+      opcionesOficina().forEach(function (o) { items.push({ texto: o.texto, icono: o.icono, accion: o.accion }); });
       /* Ajustes no va acá: tiene su lugar fijo abajo en el riel */
       App.menu(ancla, items);
     });

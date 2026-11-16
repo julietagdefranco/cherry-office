@@ -86,3 +86,14 @@
 .insignia-link { cursor: pointer; font: inherit; font-size: 11px; gap: 5px; }
 .insignia-link:hover { border-color: var(--suave); }
 .insignia-link svg { width: 12px; height: 12px; }
+
+/* filas de decisión dentro del parte: los botones no llevan el margen de las tarjetas viejas */
+.parte-sec .fila-dec .btn.chico { margin-top: 0; }
+/* reunión: preguntas abiertas como chips que se leen enteros, pendientes hechos plegados, opciones avanzadas */
+.chips-preguntas { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 8px; }
+.chips-preguntas .chip.pregunta { white-space: normal; height: auto; min-height: 26px; padding: 4px 10px; text-align: left; line-height: 1.35; }
+.pendientes .seccion-ui { margin-top: 12px; }
+.pend-hechos > summary { cursor: pointer; color: var(--suave); font-size: 12px; padding: 4px 0; }
+.pend-hechos .fila-dec { opacity: .75; }
+details.avanzado > summary { cursor: pointer; color: var(--suave); font-size: 12px; padding: 4px 0; }
+details.avanzado[open] > summary { margin-bottom: 6px; }

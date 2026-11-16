@@ -1,4 +1,5 @@
 /* Creador de flujos: estilos propios de la sección. */
+.hoja-panel-cuerpo.creador-cuerpo { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
 .creador { display: grid; grid-template-columns: 420px 1fr; flex: 1; min-height: 0; border-top: 1px solid var(--linea); }
 .creador-col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .creador-chat { border-right: 1px solid var(--linea); background: var(--panel-2); }
@@ -56,7 +57,19 @@
 .tb-acciones { display: flex; justify-content: flex-end; gap: 6px; padding: 0 12px 10px; }
 .tb-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
 
-/* hoja de edición */
+/* «Le falta»: cada faltante es una fila con su botón */
+.tb-falta { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.tb-falta > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tb-falta .btn { flex: none; }
+.tb-acciones { align-items: center; }
+
+/* edición en la tarjeta */
+.tb-edicion { padding-bottom: 10px; }
+.tb-edicion .fila-campo { margin-bottom: 10px; }
+.tb-edicion .acciones { margin-top: 6px; }
+.zona-caja { margin: 2px 0 8px; }
+.zona-caja .campo { max-width: 320px; }
+.creador-paso .elegir-chips { gap: 5px; }
 .creador-dias { display: flex; flex-wrap: wrap; gap: 6px; }
 .creador-paso { border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
 .creador-paso-cab { display: flex; align-items: center; gap: 4px; }

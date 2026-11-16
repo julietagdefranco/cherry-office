@@ -34,7 +34,7 @@
       App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), btn);
 
       function ir(r) {
-        App.vaciar(carpetas).appendChild(h('div.vacio', h('span.giro')));
+        App.vaciar(carpetas).appendChild(App.cargando('Trayendo las carpetas…'));
         api.get('/api/fs/carpetas', { ruta: r || '', archivos: op.zip ? 'zip' : '' }).then(function (d) {
           actual = d.ruta;
           btn.disabled = false;
@@ -88,7 +88,7 @@
   App.verArchivosOficina = function () { App.Nav.ir('#/archivos/carpeta'); };
   function pintar() {
     var E = App.E, partes = rutaActual.split('/').filter(Boolean);
-    var lista = h('div.carpetas.carpeta-panel', h('div.vacio', h('span.giro')));
+    var lista = h('div.carpetas.carpeta-panel', App.cargando('Trayendo los archivos…'));
     var migas = h('div.ruta-actual',
       h('button.btn.chico.fantasma', { onclick: function () { App.Carpeta.abrir(''); } }, App.icono('carpeta'), E.oficina.nombre),
       partes.map(function (p, i) {
@@ -97,7 +97,7 @@
     var mostrar = App.nativo.hay ? h('button.btn.chico', { onclick: function () { App.nativo.revelar(E.carpeta.replace(/\/$/, '') + (rutaActual ? '/' + rutaActual : '')); } },
       App.icono('abrir'), 'Mostrar ' + App.nativo.enExplorador) : null;
     App.add(App.vaciar(App.dom.derecho),
-      App.cabPanel({ icono: 'carpeta', titulo: 'Carpeta de la oficina', sub: E.carpeta, acciones: mostrar ? [mostrar] : null,
+      App.cabPanel({ icono: 'carpeta', titulo: 'Carpeta de la oficina', acciones: mostrar ? [mostrar] : null,
         volver: partes.length ? { texto: 'Subir', titulo: 'Carpeta de arriba', accion: function () { App.Carpeta.abrir(partes.slice(0, -1).join('/')); } } : null }),
       h('div.der-cuerpo', migas, lista));
     var pedida = rutaActual;

@@ -8,6 +8,7 @@ App.Flujos = (function () {
   var api = function () { return App.api; };
   var filtro = 'abiertas';          // abiertas | terminadas | todas
   var abierta = null;               // id de la corrida que muestra el panel (null = lista)
+  var idDelFlujoAbierto = null;     // id del flujo que muestra el editor (null = uno nuevo); lo lee la ruta
   var firmaDetalle = '';            // para repintar el detalle solo si algo cambió
   var relojDetalle = null;
   var conocidas = null;             // id -> {paso, quien, estado}; null hasta la primera actividad (la primera no anima)
@@ -66,40 +67,64 @@ App.Flujos = (function () {
     if (!abiertoPanel()) return;
     clearTimeout(relojDetalle);
     if (abierta !== null) { abierta = null; App.Nav.alAbrir('flujos'); }
-    var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie'), lista = h('div.corridas', h('div.vacio', h('span.giro')));
+    var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
+    var zona = h('div', App.cargando('Trayendo las corridas y los flujos…'));
     function chip(est, txt) {
       return h('button.chip' + (filtro === est ? '.sel' : ''), { onclick: function () { filtro = est; pintarLista(); } }, txt);
     }
-    App.add(App.vaciar(der), cabecera('Flujos', 'Lo que está en marcha en la oficina'), cuerpo, pie);
-    App.add(cuerpo, h('div.entregas-filtros', chip('abiertas', 'En curso'), chip('terminadas', 'Terminadas'), chip('todas', 'Todas')), lista);
-    App.add(pie, App.acciones([h('button.btn', { onclick: function () { editor(); } }, App.icono('lapiz'), 'Editar los flujos…')],
-      h('button.btn.primario', { onclick: function () { nuevaCorrida(); } }, App.icono('mas'), 'Nueva corrida')));
-    api().get('/api/flujos/corridas', { estado: filtro, limite: 100 }).then(function (r) {
+    App.add(App.vaciar(der), cabecera('Flujos', 'Lo que está en marcha y los flujos de la oficina'), cuerpo, pie);
+    App.add(cuerpo, zona);
+    App.add(pie, App.acciones(null, h('button.btn.primario', { onclick: function () { nuevaCorrida(); } }, App.icono('mas'), 'Nueva corrida')));
+    Promise.all([
+      api().get('/api/flujos/corridas', { estado: filtro, limite: 100 }),
+      api().get('/api/flujos').then(function (r) { return r.flujos || []; }).catch(function () { return null; })
+    ]).then(function (rs) {
       if (!abiertoPanel() || abierta !== null) return;
-      App.vaciar(lista);
-      var cs = r.corridas || [];
+      var cs = rs[0].corridas || [], fs = rs[1];
+      /* En marcha: las corridas, con su filtro */
+      var lista = h('div.corridas');
       if (!cs.length) {
-        lista.appendChild(filtro === 'abiertas'
-          ? App.vacio('flujo', 'Nada en marcha', 'Un flujo pasa un trabajo de agente en agente, con tu aprobación donde haga falta.',
-            [h('button.btn', { onclick: function () { App.Creador.abrir(); } }, App.icono('chispa'), 'Armar un flujo con el Creador'),
-              h('button.btn.primario', { onclick: function () { nuevaCorrida(); } }, App.icono('mas'), 'Nueva corrida')])
-          : h('div.vacio', 'Todavía no hay corridas terminadas.'));
-        return;
-      }
-      cs.forEach(function (c) { lista.appendChild(fila(c)); });
-    }).catch(function (e) { App.vaciar(lista).appendChild(h('div.error-txt', e.message)); });
+        lista.appendChild(h('div.vacio', filtro === 'terminadas' ? 'Todavía no hay corridas terminadas.'
+          : fs && fs.length ? 'Nada en marcha. Elegí un flujo de abajo y tocá «Correr».' : 'Nada en marcha.'));
+      } else cs.forEach(function (c) { lista.appendChild(fila(c)); });
+      /* Flujos de la oficina: los definidos, cada uno con «Correr» */
+      var catalogo = h('div.flu-catalogo');
+      if (fs === null) catalogo.appendChild(h('div.error-txt', 'No pude traer los flujos.'));
+      else if (!fs.length) {
+        catalogo.appendChild(App.vacio('flujo', 'Todavía no hay flujos', 'Un flujo pasa un trabajo de agente en agente, con tu aprobación donde haga falta.',
+          [h('button.btn', { onclick: function () { App.Creador.abrir(); } }, App.icono('chispa'), 'Armar un flujo con el Creador'),
+            h('button.btn.primario', { onclick: function () { editor(null); } }, App.icono('mas'), 'Crear uno')]));
+      } else fs.forEach(function (f) { catalogo.appendChild(filaFlujo(f)); });
+      App.add(App.vaciar(zona),
+        App.seccion('En marcha', [h('div.entregas-filtros', chip('abiertas', 'En curso'), chip('terminadas', 'Terminadas'), chip('todas', 'Todas')), lista]),
+        App.seccion('Flujos de la oficina', catalogo, { accion: fs && fs.length ? h('button.btn.chico.fantasma', { onclick: function () { editor(null); } }, App.icono('mas'), 'Nuevo flujo') : null }));
+    }).catch(function (e) { App.vaciar(zona).appendChild(h('div.error-txt', e.message)); });
+  }
+
+  /* un flujo definido: «N pasos · descripción», «Correr» y ⋯ con Editar */
+  function filaFlujo(f) {
+    var n = (f.pasos || []).length, activo = f.activo !== false;
+    var txt = n + (n === 1 ? ' paso' : ' pasos') + (f.descripcion ? ' · ' + f.descripcion : '');
+    return App.filaDecision({
+      marca: 'flujo', titulo: f.nombre, sub: txt, clase: 'flu-def', alTocar: function () { editor(f.id); },
+      estado: activo ? null : h('span.insignia', 'Pausado'),
+      principal: activo ? h('button.btn.chico.primario', { onclick: function () { nuevaCorrida(f.id); } }, 'Correr')
+        : h('button.btn.chico', { onclick: function () { editor(f.id); } }, 'Editar'),
+      mas: [{ texto: 'Editar…', icono: 'lapiz', accion: function () { editor(f.id); } }]
+    });
   }
 
   function fila(c) {
     var toca = c.estado === 'esperando_persona' || c.estado === 'trabada';
     var cerrada = c.estado === 'terminada' || c.estado === 'cancelada';
-    var paso = cerrada ? (c.estado === 'terminada' ? 'Completo' : 'Cancelada') : (c.pasoNombre || 'Paso ' + ((c.paso | 0) + 1));
+    var paso = cerrada ? (c.estado === 'terminada' ? 'Completo' : 'Cancelada') : (c.pasoNombre || 'Paso ' + ((c.paso | 0) + 1)) + (c.total ? ' (' + ((c.paso | 0) + 1) + ' de ' + c.total + ')' : '');
+    /* una sola bajada: flujo · paso · quién · cuándo */
+    var sub = (c.flujoNombre || c.flujo) + ' · ' + paso + (cerrada || !c.quien ? '' : ' · ' + (nombreQuien(c.quien) || 'Sin asignar')) + ' · ' + App.hace(c.actualizada);
     return h('button.corrida-fila' + (toca ? '.nueva' : ''), { onclick: function () { verCorrida(c.id); } },
       cerrada ? h('div.retrato.flu-icono', App.icono('flujo')) : marca(c.quien, 64),
       h('div.entrega-txt',
         h('div.entrega-tit', c.nombre),
-        h('div.entrega-sub', (c.flujoNombre || c.flujo) + ' · ' + paso + (cerrada ? '' : (c.total ? ' (' + ((c.paso | 0) + 1) + ' de ' + c.total + ')' : ''))),
-        h('div.entrega-sub', (cerrada || !c.quien ? '' : (nombreQuien(c.quien) || 'Sin asignar') + ' · ') + App.hace(c.actualizada))),
+        h('div.entrega-sub', { title: sub }, sub)),
       insigniaCorrida(c.estado));
   }
 
@@ -112,7 +137,7 @@ App.Flujos = (function () {
     prepararPanel();
     if (yaAbierto && cambio) App.Nav.alAbrir('flujos');
     if (borrador.corrida !== id) borrador = { corrida: id, nota: '', archivos: [] };
-    App.vaciar(App.dom.derecho).appendChild(h('div.vacio', h('span.giro')));
+    App.vaciar(App.dom.derecho).appendChild(App.cargando('Trayendo la corrida…'));
     cargarDetalle(id, true);
   }
 
@@ -158,8 +183,7 @@ App.Flujos = (function () {
     var sub = (c.flujoNombre || c.flujo) + ' · ' + App.hace(c.creada);
     App.add(App.vaciar(der), cabecera(c.nombre, sub, volverLista), cuerpo, pie);
     var abiertaC = c.estado !== 'terminada' && c.estado !== 'cancelada';
-    var meta = h('div.entrega-meta', insigniaCorrida(c.estado),
-      c.estado === 'en_curso' ? h('span.insignia', 'Paso ' + (c.paso + 1) + ' de ' + c.total) : null);
+    var meta = h('div.entrega-meta', insigniaCorrida(c.estado));
     App.add(cuerpo, meta);
     if (c.contexto) {
       var sp = App.Adjuntos.separar(c.contexto);
@@ -371,38 +395,48 @@ App.Flujos = (function () {
   /* ---------------- hoja: nueva corrida ---------------- */
   function nuevaCorrida(flujoId) {
     var hj = App.hoja({ titulo: 'Nueva corrida', ancho: 520 });
-    App.add(hj.cuerpo, h('div.vacio', h('span.giro')));
+    App.add(hj.cuerpo, App.cargando('Trayendo los flujos…'));
     api().get('/api/flujos').then(function (r) {
       var fs = (r.flujos || []).filter(function (f) { return f.activo !== false; });
       App.vaciar(hj.cuerpo);
       if (!fs.length) {
-        App.add(hj.cuerpo, h('div.vacio', 'Todavía no hay flujos para correr. Armalos con el Creador o a mano.'));
+        App.add(hj.cuerpo, App.vacio('flujo', 'Todavía no hay flujos para correr', 'Armalos con el Creador o a mano.'));
         App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cerrar'),
           h('button.btn', { onclick: function () { hj.cerrar(); App.Creador.abrir(); } }, App.icono('chispa'), 'Armar con el Creador'),
           h('button.btn.primario', { onclick: function () { hj.cerrar(); editor(); } }, 'Crear un flujo'));
         return;
       }
-      var sel = h('select.campo', { onchange: resumen }, fs.map(function (f) { return h('option', { value: f.id }, f.nombre); }));
-      if (flujoId) sel.value = flujoId;
+      /* el flujo: si ya viene elegido, un resumen con «Cambiar»; si no, la lista para elegir (sin <select>) */
+      var elegido = flujoId && fs.some(function (f) { return f.id === flujoId; }) ? flujoId : (fs.length === 1 ? fs[0].id : null);
+      var zonaFlujo = h('div');
+      function textoFlujo(f) { return f.pasos.length + (f.pasos.length === 1 ? ' paso' : ' pasos') + (f.descripcion ? ' · ' + f.descripcion : ''); }
+      function pintarFlujo() {
+        App.vaciar(zonaFlujo);
+        var f = fs.filter(function (x) { return x.id === elegido; })[0];
+        if (f) {
+          zonaFlujo.appendChild(h('div.flu-resumen', App.icono('flujo'), h('div.flu-resumen-txt', h('b', f.nombre), h('span', textoFlujo(f))),
+            fs.length > 1 ? h('button.btn.chico.fantasma', { type: 'button', onclick: function () { elegido = null; pintarFlujo(); } }, 'Cambiar') : null));
+        } else {
+          zonaFlujo.appendChild(App.elegir({ forma: 'lista', etiqueta: 'Flujo', valor: null,
+            opciones: fs.map(function (x) { return { valor: x.id, titulo: x.nombre, sub: textoFlujo(x), icono: 'flujo' }; }),
+            alCambiar: function (v) { elegido = v; pintarFlujo(); } }));
+        }
+      }
+      pintarFlujo();
       var nombre = h('input.campo', { maxlength: 80, placeholder: 'Clase 7', autofocus: true });
       var ctx = h('textarea.campo', { rows: 4, maxlength: 4000, placeholder: 'Lo que el equipo tiene que saber para arrancar: el tema, el público, las fechas…' });
-      var res = h('div.ayuda'), err = h('div.error-txt');
+      var err = h('div.error-txt');
       var adj = App.Adjuntos({ texto: 'Adjuntar archivos', error: err });
       adj.zona(hj.cuerpo, ctx);
-      function resumen() {
-        var f = fs.filter(function (x) { return x.id === sel.value; })[0];
-        res.textContent = f ? (f.pasos.length + (f.pasos.length === 1 ? ' paso' : ' pasos') + (f.descripcion ? ' · ' + f.descripcion : '')) : '';
-      }
-      resumen();
       App.add(hj.cuerpo,
-        h('div.fila-campo', h('label.etiqueta-campo', 'Flujo'), sel, res),
+        h('div.fila-campo', h('label.etiqueta-campo', 'Flujo'), zonaFlujo),
         h('div.fila-campo', h('label.etiqueta-campo', 'Nombre de esta corrida'), nombre),
         h('div.fila-campo', h('label.etiqueta-campo', 'Contexto'), ctx),
-        h('div.fila-campo', h('label.etiqueta-campo', 'Archivos'), h('div', adj.boton, adj.input), adj.lista,
-          h('div.ayuda', 'Fotos, documentos o lo que el equipo tenga que mirar. Los ven todos los pasos.')), err);
+        h('div.fila-campo', h('label.etiqueta-campo', 'Archivos'), h('div.ayuda', 'Fotos, documentos o lo que el equipo tenga que mirar. Los ven todos los pasos.'), h('div', adj.boton, adj.input), adj.lista), err);
       var ok = h('button.btn.primario', { onclick: empezar }, 'Empezar');
       function empezar() {
         var n = nombre.value.trim();
+        if (!elegido) { err.textContent = 'Elegí qué flujo querés correr.'; return; }
         if (!n) { err.textContent = 'Ponele un nombre a la corrida, por ejemplo «Clase 7».'; nombre.focus(); return; }
         ok.disabled = true; err.textContent = '';
         var leidos = [];
@@ -410,7 +444,7 @@ App.Flujos = (function () {
           leidos = archivos;
           var cuerpo = { nombre: n, contexto: ctx.value.trim() };
           if (archivos.length) cuerpo.archivos = archivos;
-          return api().post('/api/flujos/' + sel.value + '/correr', cuerpo);
+          return api().post('/api/flujos/' + elegido + '/correr', cuerpo);
         }).then(function (rr) {
           adj.guardarEnBiblioteca(leidos);
           hj.cerrar();
@@ -424,31 +458,47 @@ App.Flujos = (function () {
     }).catch(function (e) { App.vaciar(hj.cuerpo).appendChild(h('div.error-txt', e.message)); });
   }
 
-  /* ---------------- hoja: flujos de la oficina (editor) ---------------- */
+  /* ---------------- pantalla: flujos de la oficina (editor) ---------------- */
   /* `borrador` (opcional): un FlujoDef armado por el servidor (desde una reunión o desde esperas repetidas); se abre como un flujo
      nuevo ya cargado y sin guardar, y la persona lo guarda con el botón de siempre */
   function editor(idInicial, borrador) {
-    var hj = App.hoja({ titulo: 'Flujos de la oficina', ancho: 720 });
+    var hj = App.hojaEnPanel({ titulo: 'Flujos de la oficina', icono: 'flujo' }, 'flujos-editor');
     var flujos = [], ed = null, sucio = false, err = h('div.error-txt'), borradorPendiente = borrador || null;
     var selector = h('div.flu-selector'), formulario = h('div'), pie = hj.pie;
     App.add(hj.cuerpo, selector, formulario, err);
+    App.add(hj.cuerpo, App.cargando('Trayendo los flujos…'));
+    var carga = hj.cuerpo.lastChild;
+    idDelFlujoAbierto = idInicial || null;
+
+    /* «Volver» a la lista de corridas (la pantalla es una sección: se sale por acá o por el riel) */
+    if (hj.enPanel) {
+      var volver = h('button.btn.fantasma.chico.volver', { title: 'Volver a la lista de flujos', onclick: function () { cambiarA(function () { abrir(); }); } }, App.icono('atras'), 'Flujos');
+      hj.cab.insertBefore(volver, hj.cab.firstChild);
+    }
 
     function vacioEd() {
-      return { id: null, nombre: '', descripcion: '', activo: true, abrirTodo: true,
-        pasos: [pasoNuevo()] };
+      return { id: null, nombre: '', descripcion: '', activo: true, pasos: [pasoNuevo()] };
     }
     function pasoNuevo() {
       return { id: null, nombre: '', quien: '', consigna: '', recibe: '', entrega: '', aprobacion: false, plazoDias: '', esperaDias: '', recibeDe: [], recibeNada: false, abierto: true };
     }
     function desdeFlujo(f) {
       return { id: f.id, nombre: f.nombre || '', descripcion: f.descripcion || '', activo: f.activo !== false, origen: f.origen,
-        pasos: (f.pasos || []).map(function (p, i) {
+        pasos: (f.pasos || []).map(function (p) {
           return { id: p.id, nombre: p.nombre || '', quien: p.quien || '', consigna: p.consigna || '', recibe: p.recibe || '', entrega: p.entrega || '',
             aprobacion: !!p.aprobacion, plazoDias: p.plazoDias || '', esperaDias: p.esperaDias || '', recibeDe: (p.recibeDe || []).slice(),
             /* `recibeDe: []` explícito = no recibe nada (sin él, recibe del paso anterior): hay que mandarlo tal cual al guardar */
-            recibeNada: Array.isArray(p.recibeDe) && p.recibeDe.length === 0, abierto: (f.pasos || []).length <= 3 };
+            recibeNada: Array.isArray(p.recibeDe) && p.recibeDe.length === 0, abierto: false };
         }) };
     }
+    /* la ruta lleva el flujo que se está editando */
+    function marcarRuta() {
+      var nuevo = ed && ed.id ? ed.id : null;
+      if (nuevo === idDelFlujoAbierto && !primera) return;
+      idDelFlujoAbierto = nuevo;
+      if (App.Nav && App.Nav.alAbrir) App.Nav.alAbrir('flujos-editor');
+    }
+    var primera = true;   // la primera vez siempre se avisa: la ruta se armó antes de saber qué flujo se abría
 
     function cargar(elegirId) {
       return api().get('/api/flujos').then(function (r) {
@@ -456,40 +506,51 @@ App.Flujos = (function () {
         var f = elegirId && flujos.filter(function (x) { return x.id === elegirId; })[0];
         ed = f ? desdeFlujo(f) : (flujos.length && elegirId !== null ? desdeFlujo(flujos[0]) : vacioEd());
         sucio = false;
-        if (borradorPendiente) { ed = desdeFlujo(borradorPendiente); ed.id = null; sucio = true; borradorPendiente = null; }
+        if (borradorPendiente) { ed = desdeFlujo(borradorPendiente); ed.id = null; ed.pasos.forEach(function (p) { p.abierto = false; }); sucio = true; borradorPendiente = null; }
+        if (carga.parentNode) carga.remove();
         pintar();
-      }).catch(function (e) { err.textContent = e.message; });
+        marcarRuta(); primera = false;
+      }).catch(function (e) { if (carga.parentNode) carga.remove(); err.textContent = e.message; });
     }
 
     function cambiarA(fn) {
       if (!sucio) { fn(); return; }
       App.confirmar('Descartar los cambios', 'Tenés cambios sin guardar en este flujo.', 'Descartar').then(function (si) { if (si) fn(); });
     }
+    function irA(f) {
+      ed = f ? desdeFlujo(f) : vacioEd(); sucio = false; pintar(); marcarRuta();
+    }
+
+    /* texto de una ayuda antes del campo */
+    function campo(etiqueta, ayuda, control) {
+      return h('div.fila-campo', h('label.etiqueta-campo', etiqueta), ayuda ? h('div.ayuda', ayuda) : null, control);
+    }
 
     function pintar() {
       err.textContent = '';
       App.vaciar(selector); App.vaciar(formulario); App.vaciar(pie);
-      var sel = h('select.campo', { onchange: function () {
-        var v = sel.value;
-        cambiarA(function () {
-          if (v === '__nuevo') { ed = vacioEd(); sucio = false; pintar(); }
-          else { ed = desdeFlujo(flujos.filter(function (x) { return x.id === v; })[0]); sucio = false; pintar(); }
-        });
-        sel.value = ed.id || '__nuevo';
-      } }, flujos.map(function (f) { return h('option', { value: f.id }, f.nombre + (f.activo === false ? ' (pausado)' : '')); })
-        .concat([h('option', { value: '__nuevo' }, '+ Flujo nuevo')]));
-      sel.value = ed.id || '__nuevo';
-      App.add(selector, h('label.etiqueta-campo', 'Flujo'), sel);
+      /* maestro: los flujos como chips y «Flujo nuevo» aparte */
+      var elegirFlujo = App.elegir({ forma: 'chips', etiqueta: 'Flujos', valor: ed.id,
+        opciones: flujos.map(function (f) { return { valor: f.id, titulo: f.nombre + (f.activo === false ? ' · pausado' : ''), icono: 'flujo' }; }),
+        alCambiar: function (v) {
+          cambiarA(function () { irA(flujos.filter(function (x) { return x.id === v; })[0]); });
+          elegirFlujo.poner(ed.id);   // si no se confirmó el cambio, queda marcado el que se está editando
+        } });
+      App.add(selector, h('div.flu-selector-fila', flujos.length ? elegirFlujo : h('div.ayuda', 'Todavía no hay flujos.'),
+        h('button.btn.chico' + (ed.id ? '' : '.sel'), { type: 'button', onclick: function () { cambiarA(function () { irA(null); }); } }, App.icono('mas'), 'Flujo nuevo')));
 
       var nombre = h('input.campo', { value: ed.nombre, maxlength: 80, placeholder: 'Producción de una clase', oninput: function () { ed.nombre = nombre.value; sucio = true; } });
       var desc = h('textarea.campo', { rows: 2, maxlength: 600, placeholder: 'Para qué sirve este flujo (opcional)', oninput: function () { ed.descripcion = desc.value; sucio = true; } });
       desc.value = ed.descripcion;
-      var activo = h('input', { type: 'checkbox', checked: ed.activo, onchange: function () { ed.activo = activo.checked; sucio = true; } });
+      var estado = App.elegir({ forma: 'chips', etiqueta: 'Estado', valor: ed.activo,
+        opciones: [{ valor: true, titulo: 'Activo' }, { valor: false, titulo: 'Pausado' }],
+        alCambiar: function (v) { ed.activo = v; sucio = true; } });
       App.add(formulario,
-        h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), nombre),
-        h('div.fila-campo', h('label.etiqueta-campo', 'Descripción'), desc),
-        h('label.flu-check', activo, 'Se puede correr (si lo desmarcás queda pausado)'),
-        h('div.etiqueta-campo', { style: { marginTop: '12px' } }, 'Pasos'));
+        campo('Nombre', null, nombre),
+        campo('Descripción', null, desc),
+        campo('Estado', 'Un flujo pausado queda guardado pero no se puede correr.', estado),
+        h('div.etiqueta-campo', { style: { marginTop: '12px' } }, 'Pasos'),
+        h('div.ayuda', 'Tocá un paso para ver o cambiar sus detalles.'));
       var lista = h('div.lista-ed.flu-pasos-ed');
       formulario.appendChild(lista);
       ed.pasos.forEach(function (p, i) { lista.appendChild(filaPaso(p, i)); });
@@ -498,44 +559,59 @@ App.Flujos = (function () {
         ed.pasos.push(pasoNuevo()); sucio = true; pintar();
       } }, App.icono('mas'), 'Agregar un paso'));
 
-      if (ed.id) App.add(pie, h('button.btn.peligro-suave.izq', { onclick: borrar }, App.icono('papelera'), 'Borrar el flujo'));
+      var izq = ed.id ? [h('button.btn.peligro-suave', { onclick: borrar }, App.icono('papelera'), 'Borrar el flujo')] : null;
       var guardarBtn = h('button.btn.primario', { onclick: function () { guardar(guardarBtn); } }, 'Guardar');
-      App.add(pie, h('button.btn', { onclick: hj.cerrar }, 'Cerrar'), guardarBtn);
+      App.add(pie, App.acciones(izq, [hj.enPanel ? null : h('button.btn', { onclick: hj.cerrar }, 'Cerrar'), guardarBtn]));
     }
 
-    function agentesOpc(actual) {
-      var o = oficina(), ops = [h('option', { value: '' }, 'Elegí quién…'), h('option', { value: 'persona' }, 'Vos (una persona)')];
-      (o.agentes || []).forEach(function (a) { ops.push(h('option', { value: a.id }, a.nombre + ' · ' + a.rol)); });
-      if (actual && actual !== 'persona' && !App.agente(actual)) ops.push(h('option', { value: actual }, 'Sin asignar (' + actual + ')'));
-      return ops;
+    /* «Quién hace»: chips con retrato (Vos y cada agente); si el agente ya no está, un chip que lo dice */
+    function elegirQuien(p) {
+      var o = oficina(), ops = [{ valor: 'persona', titulo: 'Vos', sub: 'Lo hacés vos y marcás «Hecho»', icono: 'personas' }];
+      (o.agentes || []).forEach(function (a) { ops.push({ valor: a.id, titulo: a.nombre, sub: a.rol, retrato: a }); });
+      if (p.quien && p.quien !== 'persona' && !App.agente(p.quien)) ops.push({ valor: p.quien, titulo: App.humano.quien(p.quien), sub: 'Ese agente ya no está: elegí otro', icono: 'cerrar' });
+      return App.elegir({ forma: 'chips', etiqueta: 'Quién hace', opciones: ops, valor: p.quien,
+        alCambiar: function (v) { p.quien = v; sucio = true; pintar(); } });
     }
 
+    /* la fila plegada: número · nombre · quién · qué entrega, y las flechas y el tacho */
+    function resumenPaso(p, i, n) {
+      var a = p.quien && p.quien !== 'persona' && App.agente(p.quien);
+      var quien = p.quien ? h('span.flu-paso-quien', a ? App.retratoImg(a, 'retrato-mini', 48) : null, App.humano.quien(p.quien)) : h('span.flu-paso-quien.sin', 'Sin elegir quién');
+      var alternar = function () { p.abierto = !p.abierto; pintar(); };
+      var parar = function (fn) { return function (ev) { ev.stopPropagation(); fn(); }; };
+      return h('div.fila-ed.flu-paso-cab.tocable', { role: 'button', tabindex: 0, 'aria-expanded': p.abierto ? 'true' : 'false', onclick: alternar,
+          onkeydown: function (ev) { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === ev.currentTarget) { ev.preventDefault(); alternar(); } } },
+        h('b.flu-num', (i + 1) + '.'),
+        h('div.flu-paso-res', h('div.flu-paso-nom', p.nombre || 'Paso sin nombre'),
+          h('div.flu-paso-sub', quien, p.entrega ? h('span.flu-paso-entrega', { title: p.entrega }, 'entrega: ' + p.entrega) : null)),
+        h('button.btn.fantasma.icono.chico', { type: 'button', title: 'Subir', disabled: i === 0, onclick: parar(function () { mover(i, -1); }) }, '↑'),
+        h('button.btn.fantasma.icono.chico', { type: 'button', title: 'Bajar', disabled: i === n - 1, onclick: parar(function () { mover(i, 1); }) }, '↓'),
+        h('button.btn.fantasma.icono.chico', { type: 'button', title: 'Quitar el paso', disabled: n === 1, onclick: parar(function () { quitarPaso(i); }) }, App.icono('cerrar')),
+        h('span.flu-chev', p.abierto ? '▾' : '▸'));
+    }
     function filaPaso(p, i) {
       var n = ed.pasos.length;
-      var nom = h('input.campo', { value: p.nombre, maxlength: 80, placeholder: 'Nombre del paso', oninput: function () { p.nombre = nom.value; sucio = true; } });
-      var quien = h('select.campo', { onchange: function () { p.quien = quien.value; sucio = true; } }, agentesOpc(p.quien));
-      quien.value = p.quien;
-      var subir = h('button.btn.fantasma.icono', { title: 'Subir', disabled: i === 0, onclick: function () { mover(i, -1); } }, '↑');
-      var bajar = h('button.btn.fantasma.icono', { title: 'Bajar', disabled: i === n - 1, onclick: function () { mover(i, 1); } }, '↓');
-      var quitar = h('button.btn.fantasma.icono', { title: 'Quitar', disabled: n === 1, onclick: function () { quitarPaso(i); } }, App.icono('cerrar'));
-      var det = h('button.btn.fantasma.icono', { title: p.abierto ? 'Cerrar el detalle' : 'Abrir el detalle', onclick: function () { p.abierto = !p.abierto; pintar(); } }, p.abierto ? '▾' : '▸');
-      var cab = h('div.fila-ed.flu-paso-cab', h('b.flu-num', (i + 1) + '.'), nom, quien, subir, bajar, quitar, det);
-      var caja = h('div.flu-paso-ed', cab);
+      var caja = h('div.flu-paso-ed' + (p.abierto ? '.abierto' : ''), resumenPaso(p, i, n));
       if (!p.abierto) return caja;
+      var nom = h('input.campo', { value: p.nombre, maxlength: 80, placeholder: 'Por ejemplo: Armar el guion', oninput: function () { p.nombre = nom.value; sucio = true; } });
       var consigna = h('textarea.campo', { rows: 3, maxlength: 4000, placeholder: 'Qué tiene que hacer, con tus palabras', oninput: function () { p.consigna = consigna.value; sucio = true; } });
       consigna.value = p.consigna;
-      var recibe = h('input.campo', { value: p.recibe, maxlength: 600, placeholder: 'Qué recibe (por ejemplo: el tema de la clase)', oninput: function () { p.recibe = recibe.value; sucio = true; } });
-      var entrega = h('input.campo', { value: p.entrega, maxlength: 600, placeholder: 'Qué entrega (por ejemplo: ficha, guion y ejercicios)', oninput: function () { p.entrega = entrega.value; sucio = true; } });
-      var aprob = h('input', { type: 'checkbox', checked: p.aprobacion, onchange: function () { p.aprobacion = aprob.checked; sucio = true; } });
+      var recibe = h('input.campo', { value: p.recibe, maxlength: 600, placeholder: 'Por ejemplo: el tema de la clase', oninput: function () { p.recibe = recibe.value; sucio = true; } });
+      var entrega = h('input.campo', { value: p.entrega, maxlength: 600, placeholder: 'Por ejemplo: ficha, guion y ejercicios', oninput: function () { p.entrega = entrega.value; sucio = true; } });
+      var aprob = App.elegir({ forma: 'chips', etiqueta: 'Aprobación', valor: !!p.aprobacion,
+        opciones: [{ valor: false, titulo: 'Sigue solo' }, { valor: true, titulo: 'Espera tu OK', icono: 'escudo' }],
+        alCambiar: function (v) { p.aprobacion = v; sucio = true; } });
       var plazo = h('input.campo', { type: 'number', min: 1, max: 60, value: p.plazoDias, placeholder: '2', oninput: function () { p.plazoDias = plazo.value; sucio = true; } });
       var espera = h('input.campo', { type: 'number', min: 1, max: 90, value: p.esperaDias, placeholder: 'Enseguida', oninput: function () { p.esperaDias = espera.value; sucio = true; } });
       var cuerpo = h('div.flu-paso-form',
-        h('div.fila-campo', h('label.etiqueta-campo', 'Consigna'), consigna),
-        h('div.flu-dos', h('div', h('label.etiqueta-campo', 'Recibe'), recibe), h('div', h('label.etiqueta-campo', 'Entrega'), entrega)),
-        h('label.flu-check', aprob, 'Requiere tu aprobación'),
+        campo('Nombre del paso', null, nom),
+        campo('Quién hace', 'Un agente lo hace solo; «Vos» te lo deja a vos.', elegirQuien(p)),
+        campo('Consigna', 'Lo que se le pide a quien lo hace.', consigna),
+        h('div.flu-dos', campo('Recibe', 'Con qué arranca.', recibe), campo('Entrega', 'Qué tiene que dejar listo.', entrega)),
+        campo('Aprobación', 'Si espera tu OK, el flujo se frena hasta que revises lo que entregó.', aprob),
         h('div.flu-dos',
-          h('div', h('label.etiqueta-campo', 'Plazo (días)'), plazo, h('div.ayuda', 'Pasados estos días sin avance, se marca como bloqueado. Si lo dejás vacío, 2.')),
-          h('div', h('label.etiqueta-campo', 'Arranca después de (días)'), espera, h('div.ayuda', 'Espera estos días desde que termina el paso anterior.'))));
+          campo('Plazo (días)', 'Pasados estos días sin avance, se marca como bloqueado. Si lo dejás vacío, 2.', plazo),
+          campo('Arranca después de (días)', 'Espera estos días desde que termina el paso anterior.', espera)));
       if (i > 0) {
         var previos = h('div.flu-previos');
         ed.pasos.slice(0, i).forEach(function (q, j) {
@@ -549,8 +625,8 @@ App.Flujos = (function () {
             sucio = true; pintar();
           } }, (j + 1) + '. ' + (q.nombre || 'Paso')));
         });
-        cuerpo.appendChild(h('div.fila-campo', h('label.etiqueta-campo', 'Recibe lo que entregaron'),
-          previos, h('div.ayuda', p.recibeNada && !(p.recibeDe || []).length ? 'Este paso no recibe nada de los anteriores. Si elegís alguno, recibe solo lo de ese.' : 'Sin elegir ninguno, recibe lo del paso inmediato anterior.')));
+        cuerpo.appendChild(campo('Recibe lo que entregaron',
+          p.recibeNada && !(p.recibeDe || []).length ? 'Este paso no recibe nada de los anteriores. Si elegís alguno, recibe solo lo de ese.' : 'Sin elegir ninguno, recibe lo del paso inmediato anterior.', previos));
       }
       caja.appendChild(cuerpo);
       return caja;
@@ -576,9 +652,9 @@ App.Flujos = (function () {
     function payload() {
       var pasos = [];
       ed.pasos.forEach(function (p, i) {
-        if (!p.nombre.trim()) throw new Error('Al paso ' + (i + 1) + ' le falta el nombre.');
-        if (!p.quien) throw new Error('Elegí quién hace «' + p.nombre.trim() + '».');
-        if (!p.entrega.trim()) throw new Error('Contá qué entrega «' + p.nombre.trim() + '».');
+        if (!p.nombre.trim()) { p.abierto = true; throw new Error('Al paso ' + (i + 1) + ' le falta el nombre.'); }
+        if (!p.quien) { p.abierto = true; throw new Error('Elegí quién hace «' + p.nombre.trim() + '».'); }
+        if (!p.entrega.trim()) { p.abierto = true; throw new Error('Contá qué entrega «' + p.nombre.trim() + '».'); }
         asegurarId(p);
       });
       ed.pasos.forEach(function (p, i) {
@@ -604,13 +680,12 @@ App.Flujos = (function () {
     function guardar(btn) {
       var cuerpo;
       err.textContent = '';
-      try { cuerpo = payload(); } catch (e) { err.textContent = e.message; return; }
+      try { cuerpo = payload(); } catch (e) { pintar(); err.textContent = e.message; return; }
       btn.disabled = true;
       var pedido = ed.id ? api().patch('/api/flujos/' + ed.id, cuerpo) : api().post('/api/flujos', cuerpo);
       pedido.then(function (r) {
         App.aviso('Flujo guardado.');
         sucio = false;
-        if (abiertoPanel() && abierta === null) pintarLista();
         return cargar(r.flujo.id);
       }).catch(function (e) { err.textContent = e.message; btn.disabled = false; });
     }
@@ -621,7 +696,6 @@ App.Flujos = (function () {
         if (!si) return;
         api().del('/api/flujos/' + id).then(function () {
           App.aviso('Flujo borrado.');
-          if (abiertoPanel() && abierta === null) pintarLista();
           return cargar(undefined);
         }).catch(function (e) { err.textContent = e.message; });
       });
@@ -669,6 +743,7 @@ App.Flujos = (function () {
     abrir: abrir,
     verCorrida: verCorrida,
     corridaAbierta: function () { return abierta; },
+    editando: function () { return idDelFlujoAbierto || null; },
     definiciones: function () { editor(); },
     nueva: nuevaCorrida,
     editor: editor,

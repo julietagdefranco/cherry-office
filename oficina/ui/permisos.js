@@ -50,25 +50,35 @@ App.Permisos = (function () {
     cuerpo.appendChild(h('div.permisos-lista', lista.map(tarjeta)));
   }
 
+  /* «correr git pull», «escribir en notas/x»: lo que guarda «Siempre», en palabras (la regla cruda va en el title) */
+  function textoGrupo(g) {
+    return g.tipo === 'correr' ? 'correr ' + g.texto : g.tipo === 'escribir' ? 'escribir en ' + g.texto : g.texto.charAt(0).toLowerCase() + g.texto.slice(1);
+  }
+  function queQuiere(p) {
+    if (QUE[p.herramienta]) return QUE[p.herramienta];
+    return 'Quiere usar ' + App.humano.herramienta(p.herramienta);
+  }
+
   function tarjeta(p) {
-    var a = App.agente(p.agente) || { nombre: p.agente };
+    var a = App.agente(p.agente) || { nombre: App.humano.quien(p.agente) };
     var ocupado = !!enviando[p.id];
     var reglas = p.reglas || [];
-    function boton(sel, texto, decision, titulo, apagado) {
-      return h('button.btn.chico' + sel, { disabled: ocupado || !!apagado, title: titulo || '', onclick: function () { responder(p, decision); } }, texto);
+    var grupos = App.humano.reglas(reglas), siempre = grupos.map(textoGrupo).join(' · ');
+    function boton(sel, texto, decision, titulo) {
+      return h('button.btn.chico' + sel, { disabled: ocupado, title: titulo || '', onclick: function () { responder(p, decision); } }, texto);
     }
     return h('div.permiso',
       h('div.permiso-cab', App.agente(p.agente) ? App.retratoImg(a, 'retrato-mini', 48) : null,
-        h('div', h('b', a.nombre), h('span', QUE[p.herramienta] || 'Quiere usar ' + p.herramienta))),
+        h('div', h('b', a.nombre), h('span', queQuiere(p)))),
       p.tarea ? h('div.permiso-desc', 'Tarea «' + p.tarea + '»: sigue cuando respondas.') : null,
       p.descripcion ? h('div.permiso-desc', p.descripcion) : null,
       h('code.permiso-det', p.detalle),
       h('div.permiso-acciones',
         boton('.primario', 'Permitir una vez', 'una_vez'),
-        reglas.length ? boton('', 'Permitir siempre', 'siempre', 'Guarda el permiso: ' + reglas.join(' · '))
-          : boton('', 'Permitir siempre', 'siempre', 'Esto no se puede guardar como permiso fijo: solo se puede permitir una vez.', true),
+        /* si no se puede guardar como permiso fijo, el botón no está (y la nota de abajo lo dice una sola vez) */
+        reglas.length ? boton('', 'Permitir siempre', 'siempre', 'Siempre: ' + siempre) : null,
         boton('.fantasma', 'No', 'rechazar')),
-      h('div.permiso-regla', reglas.length ? 'Siempre guarda: ' + reglas.join(' · ') : 'Esto solo se puede permitir una vez.'));
+      h('div.permiso-regla', { title: reglas.join(' · ') }, reglas.length ? 'Siempre: ' + siempre : 'Esto solo se puede permitir una vez.'));
   }
 
   function responder(p, decision) {
@@ -100,29 +110,34 @@ App.Permisos = (function () {
       bajada: 'Cada comando o archivo que el agente no tenga permitido te llega como tarjeta para aprobar.' },
   ];
 
-  /* `alGuardar(modo)` (opcional): avisa a quien la abrió, p. ej. la sección de Ajustes para mostrar el modo nuevo */
+  /* Las dos opciones a la vista (App.elegir en lista). `alElegir(id)` se llama al tocar una. */
+  function opcionesModo(actual, alElegir) {
+    return App.elegir({ forma: 'lista', etiqueta: 'Modo de permisos', valor: actual,
+      opciones: MODOS.map(function (m) { return { valor: m.id, titulo: m.titulo + (m.nota ? ' · ' + m.nota : ''), sub: m.bajada }; }),
+      alCambiar: alElegir });
+  }
+  function avisoAutomatico() {
+    return h('div.modo-aviso',
+      h('b', 'En automático tené en cuenta que:'),
+      h('ul',
+        h('li', 'Un agente puede escribir archivos de la oficina fuera de su carpeta si a Claude le parece razonable para la tarea.'),
+        h('li', 'Las tareas programadas avanzan solas, sin esperarte, salvo en lo que Claude frene.'),
+        h('li', 'Cada acción pasa por una revisión extra de Claude: suma un poco de costo y de tiempo.'),
+        h('li', 'Lo que sale de la oficina (mandar un mail, publicar, gastar) sigue siendo una propuesta que aprobás vos.')));
+  }
+
+  /* `alGuardar(modo)` (opcional): avisa a quien la abrió. Es la ventana de la primera vez (con «Empezar»);
+     después se cambia desde Ajustes, adentro de la sección (pintarModo). */
   function elegirModo(actual, primeraVez, alGuardar) {
     var elegido = actual || 'auto';
     var hj = App.hoja({ titulo: primeraVez ? 'Antes de empezar: los permisos' : 'Permisos de los agentes', ancho: 520, modal: !!primeraVez });
-    var err = h('div.error-txt');
-    var opciones = MODOS.map(function (m) {
-      var b = h('button.opcion.modo-permiso', { onclick: function () { elegido = m.id; marcar(); } },
-        h('div', h('b', m.titulo, m.nota ? h('span.modo-nota', m.nota) : null), h('div.ayuda', { style: { margin: '2px 0 0' } }, m.bajada)));
-      b.dataset.modo = m.id;
-      return b;
-    });
-    function marcar() { opciones.forEach(function (b) { b.classList.toggle('elegida', b.dataset.modo === elegido); }); }
-    marcar();
+    var err = h('div.error-txt'), aviso = h('div');
+    function marcarAviso() { App.vaciar(aviso); if (elegido === 'auto') aviso.appendChild(avisoAutomatico()); }
+    marcarAviso();
     App.add(hj.cuerpo,
       h('p', { style: { marginTop: 0, color: 'var(--suave)' } }, 'Los agentes corren comandos y escriben archivos en tu compu para hacer su trabajo. Elegí cuánto querés que te pregunten.'),
-      opciones,
-      h('div.modo-aviso',
-        h('b', 'En automático tené en cuenta que:'),
-        h('ul',
-          h('li', 'Un agente puede escribir archivos de la oficina fuera de su carpeta si a Claude le parece razonable para la tarea.'),
-          h('li', 'Las tareas programadas avanzan solas, sin esperarte, salvo en lo que Claude frene.'),
-          h('li', 'Cada acción pasa por una revisión extra de Claude: suma un poco de costo y de tiempo.'),
-          h('li', 'Lo que sale de la oficina (mandar un mail, publicar, gastar) sigue siendo una propuesta que aprobás vos.'))),
+      opcionesModo(elegido, function (id) { elegido = id; marcarAviso(); }),
+      aviso,
       h('div.ayuda', 'Lo podés cambiar cuando quieras desde Ajustes › Permisos de los agentes.'),
       err);
     var guardar = h('button.btn.primario', { autofocus: true, onclick: function () {
@@ -138,11 +153,38 @@ App.Permisos = (function () {
     hj.pie.appendChild(guardar);
   }
 
+  /** Ajustes › Permisos de los agentes: las dos opciones adentro de la sección, que se guardan al tocarlas (con «Deshacer»).
+      `crear` es el de la ventana de Ajustes (App.hoja si no se pasa). */
+  function pintarModo(crear) {
+    var hj = (crear || App.hoja)({ titulo: 'Permisos de los agentes' });
+    var err = h('div.error-txt'), aviso = h('div'), elegir = null;
+    var actual = (App.E.estado && App.E.estado.modo_permisos) || null;
+    function marcarAviso() { App.vaciar(aviso); if (actual === 'auto') aviso.appendChild(avisoAutomatico()); }
+    function guardarModo(id, silencioso) {
+      err.textContent = '';
+      var antes = actual;
+      return App.api.put('/api/preferencias', { modo_permisos: id }).then(function () {
+        if (App.E && App.E.estado) App.E.estado.modo_permisos = id;
+        actual = id; marcarAviso();
+        if (!silencioso) App.guardado(id === 'auto' ? 'Modo automático.' : 'Te voy a preguntar cada permiso.', antes ? function () { elegir.poner(antes); guardarModo(antes, true); } : null);
+      }).catch(function (e) { err.textContent = e.message; elegir.poner(actual); });
+    }
+    elegir = opcionesModo(actual, function (id) { guardarModo(id); });
+    App.add(hj.cuerpo,
+      h('p', { style: { marginTop: 0, color: 'var(--suave)' } }, 'Vale para todas tus oficinas. Los agentes corren comandos y escriben archivos en tu compu: elegí cuánto querés que te pregunten.'),
+      elegir, aviso, err);
+    marcarAviso();
+    /* por si cambió desde otro lado, se vuelve a leer */
+    App.api.get('/api/preferencias').then(function (r) {
+      if (r.modo_permisos && r.modo_permisos !== actual) { actual = r.modo_permisos; elegir.poner(actual); marcarAviso(); }
+    }).catch(function () {});
+  }
+
   /** Desde el menú: lee lo guardado y abre la hoja. */
   function abrirModo(alGuardar) {
     App.api.get('/api/preferencias').then(function (r) { elegirModo(r.modo_permisos, false, alGuardar); }).catch(App.fallo);
   }
 
   if (App.on) App.on('actividad', function (r) { aplicar(r.permisos || []); });
-  return { pendientes: function () { return lista.slice(); }, cuantos: function () { return lista.length; }, tarjeta: function (p) { return tarjeta(p); }, abrirPanel: abrirPanel, repintar: function () { pintar(true); }, elegirModo: elegirModo, abrirModo: abrirModo };
+  return { pendientes: function () { return lista.slice(); }, cuantos: function () { return lista.length; }, tarjeta: function (p) { return tarjeta(p); }, abrirPanel: abrirPanel, repintar: function () { pintar(true); }, elegirModo: elegirModo, abrirModo: abrirModo, pintarModo: pintarModo, MODOS: MODOS };
 })();

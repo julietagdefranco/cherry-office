@@ -140,3 +140,30 @@ etiqueta; los textos fijos al estado vacío o a la bajada de la cabecera; nada i
 2. **Los tres casos reportados** con esas piezas: pendientes de reunión, pestaña Permisos, Flujos con catálogo visible.
 3. **Barrido por tipo** en el resto de la app (tablas de arriba).
 4. **Ventanas a pantallas:** editor de flujos, Llamar a reunión, tarea, Contratar, Creador.
+
+## Lo implementado
+
+**Piezas comunes** (base.js, estilo.css): `App.elegir`, `App.filaDecision`, `App.seccion`, `App.chipsEditables`,
+`App.humano` (regla/reglas/herramienta/conector/ruta/carpeta/quien), `App.ajuste`, `App.cargando`, `App.guardado`
+(aviso con «Deshacer»), `App.menu` con tope, ↑↓, Enter y filtro desde 9 ítems. CSS por área: `ficha.css`, `archivos.css`.
+
+**Pantallas con ruta** (antes ventanas): Llamar a reunión (`#/charlas/nueva-reunion`), editor de flujos
+(`#/trabajo/flujos/editar/<id>`), Contratar (`#/equipo/contratar`), Creador (`#/equipo/creador`). La ventana de tarea
+queda como ventana corta, ahora con el agente elegible arriba.
+
+**Por área**
+- Reuniones y Hoy: pendientes en secciones por quién actúa con un botón principal y «⋯», dependencias por nombre,
+  «Encargar todo» en la sección; «Esperan tu respuesta» como chips; tipo de reunión, rondas y líder a la vista; el banner
+  de avisos resume («N te necesitan · Ver»).
+- Flujos, tareas y entregas: catálogo de flujos con «Correr»; «Nueva corrida» con el flujo ya elegido o una lista;
+  editor maestro-detalle con pasos plegados; filtros de entregas con chips; esperas y tareas como filas de decisión;
+  acción propuesta como tabla legible con «Detalle técnico».
+- Ficha y ajustes: Permisos en lenguaje humano con chips y guardado automático; Perfil agrupado; modelos en una sola
+  lista (`App.MODELOS`); conectores con resumen y detalle plegado; modo de permisos dentro de Ajustes; Departamentos con
+  alta en línea y avisos de guardado; lápices siempre visibles.
+- Archivos, Creador, chat y ⌘K: Sugerencias y Preguntas con el mismo orden de botones; filtros con chips; rutas cortas;
+  «Usó Google Calendar: …»; ⌘K agrupado, sin duplicados, con pendientes primero y «Buscar en Conocimiento/Biblioteca»;
+  «Otra oficina» en un solo paso; Recientes arriba en el inicio.
+
+**Pendiente:** escala de radios y tipografía; spinners dentro de botones e insignias; el Perfil sigue con «Guardar
+cambios» (es un formulario de varios campos).

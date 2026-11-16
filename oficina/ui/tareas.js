@@ -29,7 +29,7 @@ App.Tareas = (function () {
     if (!abiertoPanel()) return;
     clearTimeout(sondeo);
     var n = ++pedido, der = App.dom.derecho;
-    if (conGiro) App.add(App.vaciar(der), cabecera(''), h('div.der-cuerpo', h('div.vacio', h('span.giro'))));
+    if (conGiro) App.add(App.vaciar(der), cabecera(''), h('div.der-cuerpo', App.cargando('Trayendo las tareas…')));
     api().get('/api/tareas').then(function (r) {
       if (n !== pedido || !abiertoPanel()) return;
       var ts = r.tareas || [];
@@ -103,58 +103,52 @@ App.Tareas = (function () {
   }
 
   /* ---------------- filas ---------------- */
+  /* misma forma que las de la ficha: retrato · nombre · bajada · estado · UN botón principal · «⋯» */
   function fila(t, g) {
     var ag = App.agente(t.agente);
     var unica = t.tipo === 'unica', activa = t.activa !== false;
     var abrirFicha = function () { if (ag) App.Agente.abrir(t.agente, 'tareas'); };
 
-    var acciones = [];
+    var principal = null;
     if (g !== 'corriendo' && g !== 'permiso') {
-      var correr = h('button.btn.chico', { title: unica ? 'Hacerla ahora' : 'Correrla ahora, fuera de horario', onclick: function (ev) {
-        ev.stopPropagation(); correr.disabled = true;
+      principal = h('button.btn.chico', { title: unica ? 'Hacerla ahora' : 'Correrla ahora, fuera de horario', onclick: function () {
+        principal.disabled = true;
         api().post('/api/tareas/' + encodeURIComponent(t.id) + '/correr').then(function () {
           App.aviso((ag ? ag.nombre + ' se puso con' : 'Corriendo') + ' «' + t.nombre + '».');
           recargarDespues();
-        }).catch(function (e) { App.fallo(e); correr.disabled = false; });
+        }).catch(function (e) { App.fallo(e); principal.disabled = false; });
       } }, g === 'hechas' ? 'Hacer de nuevo' : (unica ? 'Hacer ahora' : 'Correr ahora'));
-      acciones.push(correr);
+    } else if (ag) {
+      principal = h('button.btn.chico', { onclick: abrirFicha }, g === 'permiso' ? 'Revisar' : 'Ver');
     }
-    var mas = h('button.btn.chico.fantasma.icono', { title: 'Más', onclick: function (ev) {
-      ev.stopPropagation();
-      var items = [];
-      if (ag) items.push({ texto: 'Editar…', icono: 'lapiz', accion: function () { App.Agente.editarTarea(t, function () { cargar(false); }); } });
-      if (ag) items.push({ texto: 'Ver en la ficha de ' + ag.nombre, icono: 'personas', accion: abrirFicha });
-      if (g !== 'hechas') items.push({ texto: activa ? 'Pausar' : 'Reanudar', icono: 'reloj', accion: function () {
-        api().patch('/api/tareas/' + encodeURIComponent(t.id), { activa: !activa }).then(function () {
-          App.aviso(activa ? 'Tarea en pausa.' : 'Tarea reanudada.'); cargar(false);
-        }).catch(App.fallo);
-      } });
-      items.push('-');
-      items.push({ texto: 'Borrar…', icono: 'cerrar', accion: function () {
-        App.confirmar('¿Borrar «' + t.nombre + '»?', 'Deja de correr y se borra su historial de ejecuciones. Las conversaciones que ya generó quedan en el chat' + (ag ? ' de ' + ag.nombre : '') + '.', 'Borrar', true).then(function (si) {
-          if (!si) return;
-          api().del('/api/tareas/' + encodeURIComponent(t.id)).then(function () { App.aviso('Tarea borrada.'); cargar(false); }).catch(App.fallo);
-        });
-      } });
-      App.menu(ev.currentTarget, items);
-    } }, App.icono('puntos'));
-    acciones.push(mas);
 
-    var marca = g === 'corriendo' ? h('span.insignia.aviso', h('span.giro'), 'Corriendo')
+    var mas = [];
+    if (ag) mas.push({ texto: 'Editar…', icono: 'lapiz', accion: function () { App.Agente.editarTarea(t, function () { cargar(false); }); } });
+    if (ag) mas.push({ texto: 'Ver en la ficha de ' + ag.nombre, icono: 'personas', accion: abrirFicha });
+    if (g !== 'hechas') mas.push({ texto: activa ? 'Pausar' : 'Reanudar', icono: 'reloj', accion: function () {
+      api().patch('/api/tareas/' + encodeURIComponent(t.id), { activa: !activa }).then(function () {
+        App.aviso(activa ? 'Tarea en pausa.' : 'Tarea reanudada.'); cargar(false);
+      }).catch(App.fallo);
+    } });
+    mas.push('-');
+    mas.push({ texto: 'Borrar…', icono: 'cerrar', peligro: true, accion: function () {
+      App.confirmar('¿Borrar «' + t.nombre + '»?', 'Deja de correr y se borra su historial de ejecuciones. Las conversaciones que ya generó quedan en el chat' + (ag ? ' de ' + ag.nombre : '') + '.', 'Borrar', true).then(function (si) {
+        if (!si) return;
+        api().del('/api/tareas/' + encodeURIComponent(t.id)).then(function () { App.aviso('Tarea borrada.'); cargar(false); }).catch(App.fallo);
+      });
+    } });
+
+    var estado = g === 'corriendo' ? h('span.insignia.aviso', h('span.giro'), 'Corriendo')
       : g === 'permiso' ? h('span.insignia.aviso', 'Tu permiso')
       : g === 'error' ? h('span.insignia.error', 'Con error') : null;
 
-    return h('div.parte-fila.tarea-fila', { role: 'button', tabindex: 0, onclick: abrirFicha,
-        onkeydown: function (ev) { if (ev.key === 'Enter' && ev.target === ev.currentTarget) abrirFicha(); },
-        style: { opacity: g === 'pausa' || g === 'hechas' ? 0.75 : 1 } },
-      ag ? App.retratoImg(ag, 'retrato', 64) : h('div.retrato.parte-ico', App.icono('reloj')),
-      h('div.parte-txt',
-        h('div.parte-tit', t.nombre),
-        h('div.parte-sub', (ag ? ag.nombre : t.agente + ' (ya no está)') + ' · ' + detalle(t, g))),
-      marca, h('div.tarea-acciones', acciones));
+    var el = App.filaDecision({ marca: ag || 'reloj', titulo: t.nombre, clase: 'tarea-fila', alTocar: ag ? abrirFicha : null,
+      sub: (ag ? ag.nombre : App.humano.quien(t.agente)) + ' · ' + detalle(t, g), estado: estado, principal: principal, mas: mas });
+    if (g === 'pausa' || g === 'hechas') el.style.opacity = 0.75;
+    return el;
   }
 
-  function seccion(titulo, filas) { return h('div.det-sec.parte-sec', h('h4', titulo), h('div.parte-filas', filas)); }
+  function seccion(titulo, filas, ayuda) { return App.seccion(titulo, filas, { ayuda: ayuda }); }
 
   /* ---------------- panel ---------------- */
   function pintar(ts) {
@@ -177,20 +171,21 @@ App.Tareas = (function () {
       var hoy = g.proximas.filter(function (t) { return instante(t) <= finHoy.getTime(); });
       var semana = g.proximas.filter(function (t) { var i = instante(t); return i > finHoy.getTime() && i <= ahora + 7 * 864e5; });
       var despues = g.proximas.filter(function (t) { return instante(t) > ahora + 7 * 864e5; });
-      if (g.corriendo.length) App.add(cuerpo, seccion('Corriendo ahora', g.corriendo.map(function (t) { return fila(t, 'corriendo'); })));
-      if (g.permiso.length) App.add(cuerpo, seccion('Esperan tu permiso', g.permiso.map(function (t) { return fila(t, 'permiso'); })));
-      if (g.error.length) App.add(cuerpo, seccion('Con error', g.error.map(function (t) { return fila(t, 'error'); })));
-      if (hoy.length) App.add(cuerpo, seccion('Hoy', hoy.map(function (t) { return fila(t, 'proximas'); })));
-      if (semana.length) App.add(cuerpo, seccion('Próximos 7 días', semana.map(function (t) { return fila(t, 'proximas'); })));
-      if (despues.length) App.add(cuerpo, seccion('Más adelante', despues.map(function (t) { return fila(t, 'proximas'); })));
-      if (g.pausa.length) App.add(cuerpo, seccion('En pausa', g.pausa.map(function (t) { return fila(t, 'pausa'); })));
+      /* lo que antes era un párrafo fijo al pie va como ayuda de la primera sección */
+      var ayuda = 'Las tareas corren mientras Oficina está abierta (aunque cierres la ventana). Las horas son las de esta compu.';
+      var sec = function (titulo, filas) { var x = seccion(titulo, filas, ayuda); ayuda = null; App.add(cuerpo, x); };
+      if (g.corriendo.length) sec('Corriendo ahora', g.corriendo.map(function (t) { return fila(t, 'corriendo'); }));
+      if (g.permiso.length) sec('Esperan tu permiso', g.permiso.map(function (t) { return fila(t, 'permiso'); }));
+      if (g.error.length) sec('Con error', g.error.map(function (t) { return fila(t, 'error'); }));
+      if (hoy.length) sec('Hoy', hoy.map(function (t) { return fila(t, 'proximas'); }));
+      if (semana.length) sec('Próximos 7 días', semana.map(function (t) { return fila(t, 'proximas'); }));
+      if (despues.length) sec('Más adelante', despues.map(function (t) { return fila(t, 'proximas'); }));
+      if (g.pausa.length) sec('En pausa', g.pausa.map(function (t) { return fila(t, 'pausa'); }));
       if (g.hechas.length) {
         var btn = h('button.btn.chico.fantasma', { onclick: function () { verHechas = !verHechas; cargar(false); } },
           verHechas ? 'Ocultar' : (g.hechas.length === 1 ? 'Ver la que ya se hizo' : 'Ver las ' + g.hechas.length + ' que ya se hicieron'));
-        App.add(cuerpo, h('div.det-sec.parte-sec', h('h4', 'Hechas'),
-          verHechas ? h('div.parte-filas', g.hechas.map(function (t) { return fila(t, 'hechas'); })) : null, btn));
+        App.add(cuerpo, App.seccion('Hechas', verHechas ? g.hechas.map(function (t) { return fila(t, 'hechas'); }) : null, { cuenta: String(g.hechas.length), accion: btn, ayuda: ayuda }));
       }
-      App.add(cuerpo, h('div.ayuda', { style: { padding: '14px' } }, 'Las tareas corren mientras Oficina está abierta (aunque cierres la ventana). Las horas se muestran en la hora de esta compu.'));
     }
 
     var nueva = h('button.btn.primario', { onclick: function (ev) { elegirAgente(ev.currentTarget); } }, App.icono('mas'), 'Nueva tarea');
@@ -202,10 +197,8 @@ App.Tareas = (function () {
     var ags = (App.E.oficina && App.E.oficina.agentes) || [];
     if (!ags.length) { App.aviso('Primero contratá un agente.', true); return; }
     var listo = function () { cargar(false); };
-    if (ags.length === 1) { App.Agente.nuevaTarea(ags[0].id, {}, listo); return; }
-    App.menu(ancla, [{ titulo: '¿Para quién?' }].concat(ags.map(function (a) {
-      return { texto: a.nombre, accion: function () { App.Agente.nuevaTarea(a.id, {}, listo); } };
-    })));
+    /* la hoja elige el agente arriba, con sus caras (si hay uno solo, ya viene elegido) */
+    App.Agente.nuevaTarea(ags.length === 1 ? ags[0].id : null, {}, listo);
   }
 
   /* ---------------- insignia en la barra lateral ---------------- */

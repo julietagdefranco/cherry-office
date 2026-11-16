@@ -12,10 +12,13 @@ App.Avisos = (function () {
   function nombre(a) { var ag = a.agente && App.agente(a.agente); return ag ? ag.nombre : ''; }
   function titulo(a) {
     if (a.tipo === 'reunion') return 'Reunión esperándote';
-    if (a.tipo === 'propuestas') return 'Biblioteca';
+    if (a.tipo === 'propuestas') return 'Propuesta de cambio en un documento';
     if (a.tipo === 'pendiente') return 'Pendientes para vos';
     if (a.tipo === 'flujo') return 'Te toca en un flujo';
-    if (a.tipo === 'espera') return 'Algo trabado';
+    if (a.tipo === 'espera') {
+      var m = /espera a ([^«(.]+?)\s*(?:\(|«|hace\b|\.|$)/.exec(a.texto || '');
+      return (nombre(a) || 'Un agente') + ' espera' + (m ? ' a ' + m[1] : ' una entrega');
+    }
     return (nombre(a) || 'Un agente') + (TITULO[a.tipo] || '');
   }
   function guardado(a) { return /^a\d+$/.test(a.id) || /^flujo:/.test(a.id); }
@@ -63,11 +66,17 @@ App.Avisos = (function () {
     App.vaciar(banner);
     if (!lista.length) { banner.classList.add('oculto'); return; }
     banner.classList.remove('oculto');
-    var a = lista[indice] || lista[0];
+    if (lista.length > 1) {
+      /* varios: un resumen que lleva a Bandeja › Hoy, donde se ven todos juntos */
+      banner.appendChild(h('span.avisos-faro'));
+      banner.appendChild(h('div.avisos-txt', h('b', lista.length + ' te necesitan'), h('small', 'El más reciente: ' + (App.hace(lista.reduce(function (m, x) { return Math.max(m, x.creado || 0); }, 0)) || 'ahora'))));
+      banner.appendChild(h('button.btn.chico.primario', { onclick: function () { if (App.Nav && App.Nav.ir) App.Nav.ir('#/bandeja/hoy'); } }, 'Ver'));
+      return;
+    }
+    var a = lista[0];
     banner.appendChild(h('span.avisos-faro'));
     banner.appendChild(h('div.avisos-txt', h('b', titulo(a)), h('span', a.texto), h('small', App.hace(a.creado))));
     banner.appendChild(h('button.btn.chico.primario', { onclick: function () { abrir(a.id); } }, 'Ver'));
-    if (lista.length > 1) banner.appendChild(h('button.btn.chico', { title: 'Siguiente (N)', onclick: siguiente }, (indice + 1) + ' de ' + lista.length, h('kbd', 'N')));
     if (guardado(a) || a.tipo === 'espera') banner.appendChild(h('button.btn.fantasma.icono', { title: 'Descartar', onclick: function () { visto({ id: a.id }); } }, App.icono('cerrar')));
   }
 

@@ -3,11 +3,18 @@
 (function () {
   'use strict';
   var h = App.h, api = App.api;
-  var MODELOS = [['sonnet', 'Sonnet (equilibrado)'], ['opus', 'Opus (el más capaz)'], ['haiku', 'Haiku (rápido)'], ['inherit', 'El que use Claude Code']];
+  /* Los modelos para elegir, una sola lista para toda la app (Ajustes › Modelos y la ficha de cada agente) */
+  App.MODELOS = [
+    { valor: 'sonnet', titulo: 'Sonnet', sub: 'Equilibrado: la mejor opción para casi todo.' },
+    { valor: 'opus', titulo: 'Opus', sub: 'El más capaz, para trabajos difíciles. Gasta más.' },
+    { valor: 'haiku', titulo: 'Haiku', sub: 'Rápido y barato, para cosas simples.' },
+    { valor: 'inherit', titulo: 'El de Claude Code', sub: 'El que tengas elegido en tu Claude Code.' },
+  ];
 
   /* ---------------- editor de minifig (agentes y tu perfil) ----------------
      avatar: objeto inicial; semilla(): de dónde salen los valores que falten. Devuelve {el, valor(), retratar()}. */
-  App.EditorAvatar = function (avatar, semilla) {
+  App.EditorAvatar = function (avatar, semilla, op) {
+    op = op || {};
     var av = JSON.parse(JSON.stringify(avatar || {}));
     var img = h('img.grande', { alt: '' }), controles = h('div'), catalogo = null;
     var retratar = App.debounce(function () {
@@ -68,7 +75,9 @@
         App.Piezas.completar({ semilla: App.uuid().slice(0, 8) }, null, true).then(function (a) { av = a; pintarControles(); retratar(); });
       }
     }, App.icono('dado'), 'Otro aspecto');
-    return { el: h('div.editor-avatar', img, azar, controles), valor: function () { return av; }, retratar: retratar };
+    /* `plegable`: la figura y «Otro aspecto» siempre a la vista; las piezas, detrás de «Apariencia» */
+    var cuerpoControles = op.plegable ? h('details.ap-plegable', h('summary', 'Apariencia: piezas y colores'), controles) : controles;
+    return { el: h('div.editor-avatar', img, azar, cuerpoControles), valor: function () { return av; }, retratar: retratar };
   };
 
   /* ---------------- editor ---------------- */
@@ -84,45 +93,72 @@
   }
   App.temas = temas;
 
+  /* chips de temas: lo que se pega separado por comas se parte en varios (sin repetidos) */
+  function chipsTemas(items, op) {
+    var caja = App.chipsEditables(items, Object.assign({}, op, { alCambiar: function (lista, c) {
+      if (c && c.agregado && /[,;\n]/.test(c.agregado)) {
+        lista.splice(lista.indexOf(c.agregado), 1);
+        temas(lista.concat(c.agregado.split(/[,;\n]/))).forEach(function (t) { if (lista.indexOf(t) < 0) lista.push(t); });
+        caja.repintar();
+      }
+    } }));
+    return caja;
+  }
+
   App.EditorAgente = function (dato, op) {
     op = op || {};
     var d = JSON.parse(JSON.stringify(dato || {}));
     d.avatar = d.avatar || { semilla: d.id || App.uuid().slice(0, 8) };
     var usados = App.E.oficina.agentes.map(function (a) { return a.id; });
     var idTocado = !!op.editar;
-    function campo(etq, el, ayuda) { return h('div.fila-campo', h('label.etiqueta-campo', etq), el, ayuda ? h('div.ayuda', ayuda) : null); }
+    /* la ayuda va antes del campo, como bajada de la etiqueta */
+    function campo(etq, el, ayuda) { return h('div.fila-campo', h('label.etiqueta-campo', etq), ayuda ? h('div.ayuda', ayuda) : null, el); }
+    function grupo(titulo, hijos) { return h('section.ficha-grupo', h('h4.ficha-grupo-tit', titulo), hijos); }
+    var deptos = App.E.oficina.departamentos;
     var nombre = h('input.campo', { value: d.nombre || '', maxlength: 80, placeholder: 'Ej.: Lu' });
-    var id = h('input.campo', { value: d.id || '', maxlength: 41, disabled: !!op.editar, spellcheck: 'false' });
+    var id = h('input.campo.chico.ficha-id-campo', { value: d.id || '', maxlength: 41, spellcheck: 'false' });
     var rol = h('input.campo', { value: d.rol || '', maxlength: 160, placeholder: 'Ej.: Analista de ventas' });
-    var dep = h('select.campo', App.E.oficina.departamentos.map(function (x) { return h('option', { value: x.id, selected: x.id === d.departamento }, x.nombre); }));
-    var modelo = h('select.campo', MODELOS.map(function (m) { return h('option', { value: m[0], selected: m[0] === (d.modelo || 'sonnet') }, m[1]); }));
+    var dep = App.elegir({ etiqueta: 'Departamento', valor: d.departamento || (deptos[0] && deptos[0].id),
+      opciones: deptos.map(function (x) { return { valor: x.id, titulo: x.nombre, color: x.color }; }) });
+    var modelo = App.elegir({ etiqueta: 'Modelo', forma: 'lista', valor: d.modelo || 'sonnet',
+      opciones: App.MODELOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; }) });
     var desc = h('input.campo', { value: d.description || '', maxlength: 1000, placeholder: 'En una línea, para qué sirve' });
     var prompt = h('textarea.campo', { rows: 9, maxlength: 20000 }); prompt.value = d.prompt || '';
-    var sabe = h('input.campo', { value: (d.sabeDe || []).join(', '), maxlength: 800, placeholder: 'Ej.: métricas de Instagram, Reels, presupuesto de anuncios' });
-    var chips = [0, 1, 2].map(function (i) { return h('input.campo', { value: (d.chips || [])[i] || '', maxlength: 200, placeholder: i === 0 ? 'Pedido de ejemplo' : '', style: { marginBottom: '6px' } }); });
-    var ava = App.EditorAvatar(d.avatar, function () { return d.avatar.semilla || id.value; });
+    var sabeItems = temas((d.sabeDe || []).join(', '));
+    var sabe = chipsTemas(sabeItems, { placeholder: 'Un tema, por ejemplo: Reels', max: 12, largo: 60 });
+    var chipsItems = (d.chips || []).filter(Boolean).slice(0, 3);
+    var pedidos = App.chipsEditables(chipsItems, { placeholder: 'Un pedido de ejemplo', max: 3, largo: 200 });
+    var ava = App.EditorAvatar(d.avatar, function () { return d.avatar.semilla || id.value; }, { plegable: true });
     if (!op.editar) nombre.addEventListener('input', function () { if (!idTocado) id.value = App.slug(nombre.value, usados); ava.retratar(); });
     id.addEventListener('input', function () { idTocado = true; });
+    /* el identificador es un dato técnico: texto chico y secundario (editable solo al contratar) */
+    var idFila = op.editar
+      ? h('div.ficha-id', 'Identificador: ', h('code', d.id || ''), ' · no se puede cambiar')
+      : h('div.ficha-id', h('label', 'Identificador'), id, h('span', 'Así se llama el agente en Claude Code.'));
 
     var el = h('div.editor',
       ava.el,
       h('div',
-        h('div.dos', campo('Nombre', nombre), campo('Identificador', id, op.editar ? 'No se puede cambiar.' : 'Así se llama el agente en Claude Code.')),
-        campo('Rol', rol),
-        h('div.dos', campo('Departamento', dep), campo('Modelo', modelo)),
-        campo('Descripción corta', desc),
-        campo('Sabe de', sabe, 'Temas separados por coma (hasta 12). Sus colegas los usan para saber a quién preguntarle.'),
-        campo('Instrucciones', prompt, 'Cómo trabaja, qué entrega y cómo habla. Es el texto que recibe Claude.'),
-        campo('Pedidos sugeridos', h('div', chips))));
+        grupo('Quién es', [
+          campo('Nombre', nombre),
+          campo('Rol', rol),
+          campo('Departamento', dep, 'La sala de la oficina donde trabaja.'),
+          campo('Descripción corta', desc)]),
+        grupo('Cómo trabaja', [
+          campo('Instrucciones', prompt, 'Cómo trabaja, qué entrega y cómo habla. Es el texto que recibe Claude.'),
+          campo('Modelo', modelo, 'Cambia cuánto gasta y qué tan bien resuelve. Vale desde la próxima vez que trabaje.'),
+          campo('Sabe de', sabe, 'Hasta 12 temas. Sus colegas los usan para saber a quién preguntarle.'),
+          campo('Pedidos sugeridos', pedidos, 'Hasta 3 frases que aparecen como botones al abrir su charla.')]),
+        idFila));
 
     return {
       el: el,
       valor: function () {
         return {
-          id: id.value.trim(), nombre: nombre.value.trim(), rol: rol.value.trim(), departamento: dep.value, modelo: modelo.value,
+          id: id.value.trim() || d.id || '', nombre: nombre.value.trim(), rol: rol.value.trim(), departamento: dep.valor() || '', modelo: modelo.valor(),
           description: desc.value.trim() || rol.value.trim(), prompt: prompt.value.trim(),
-          chips: chips.map(function (c) { return c.value.trim(); }).filter(Boolean), avatar: ava.valor(), brief: d.brief || undefined,
-          sabeDe: temas(sabe.value)
+          chips: chipsItems.map(function (c) { return c.trim(); }).filter(Boolean), avatar: ava.valor(), brief: d.brief || undefined,
+          sabeDe: sabeItems.slice()
         };
       },
       validar: function () {
@@ -140,36 +176,39 @@
     };
   };
 
-  /* ---------------- flujo de contratación ---------------- */
+  /* ---------------- flujo de contratación ----------------
+     Es una pantalla (#/equipo/contratar): primero se cuenta qué hace falta y después se revisa el perfil, en el mismo lugar. */
   App.Contratar = {
     abrir: function (op) {
       op = op || {};
       if (!App.E.oficina.departamentos.length) { App.aviso('Primero creá un departamento.', true); App.Nav.ir('#/equipo/departamentos'); return; }
-      var hj = App.hoja({ titulo: 'Contratar', ancho: 620 });
+      var hj = App.hojaEnPanel({ titulo: 'Contratar', icono: 'personas' }, 'contratar');
       var desc = h('textarea.campo', { rows: 5, autofocus: true, maxlength: 4000, placeholder: 'Ej.: alguien que mire las ventas de cada semana, me diga qué productos se mueven y arme un resumen corto para el lunes.' });
-      var dep = h('select.campo', App.E.oficina.departamentos.map(function (x) { return h('option', { value: x.id, selected: x.id === op.departamento }, x.nombre); }));
-      var err = h('div.error-txt');
+      var deptos = App.E.oficina.departamentos;
+      var dep = App.elegir({ etiqueta: 'Departamento', valor: op.departamento || deptos[0].id,
+        opciones: deptos.map(function (x) { return { valor: x.id, titulo: x.nombre, color: x.color }; }) });
+      var err = h('div.error-txt'), estado = h('div');
       var pedir = h('button.btn.primario', { onclick: borrador }, App.icono('chispa'), 'Proponer con Claude');
-      App.add(hj.cuerpo, 
-        h('p', { style: { color: 'var(--suave)', marginBottom: '14px' } }, 'Contá con tus palabras qué necesitás. Claude arma el perfil del agente y lo revisás antes de contratarlo.'),
+      App.add(hj.cuerpo,
+        h('p', { style: { color: 'var(--suave)', marginTop: '4px', marginBottom: '14px' } }, 'Contá con tus palabras qué necesitás. Claude arma el perfil del agente y lo revisás antes de contratarlo.'),
         h('div.fila-campo', h('label.etiqueta-campo', '¿Qué tiene que hacer?'), desc),
-        h('div.fila-campo', h('label.etiqueta-campo', 'Departamento'), dep), err);
-      App.add(hj.pie, h('button.btn.izq.fantasma', { onclick: function () { paso2({ departamento: dep.value, brief: desc.value.trim() }); } }, 'Completar a mano'),
-        h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), pedir);
+        h('div.fila-campo', h('label.etiqueta-campo', 'Departamento'), h('div.ayuda', 'Dónde se sienta en la oficina.'), dep), estado, err);
+      App.add(hj.pie, App.acciones(
+        [h('button.btn.fantasma', { onclick: function () { paso2({ departamento: dep.valor(), brief: desc.value.trim() }); } }, 'Completar a mano')],
+        [h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), pedir]));
       function borrador() {
         err.textContent = '';
         if (desc.value.trim().length < 8) { err.textContent = 'Contá un poco más qué necesitás.'; desc.focus(); return; }
-        pedir.disabled = true; App.add(App.vaciar(pedir), h('span.giro'), 'Pensando el perfil…');
-        api.post('/api/agentes/borrador', { descripcion: desc.value.trim(), departamento: dep.value })
-          .then(function (b) { b.brief = desc.value.trim(); b.departamento = b.departamento || dep.value; paso2(b); })
-          .catch(function (e) { err.textContent = e.message; pedir.disabled = false; App.add(App.vaciar(pedir), App.icono('chispa'), 'Proponer con Claude'); });
+        pedir.disabled = true; App.add(App.vaciar(estado), App.cargando('Claude está armando el perfil… puede tardar unos segundos.'));
+        api.post('/api/agentes/borrador', { descripcion: desc.value.trim(), departamento: dep.valor() })
+          .then(function (b) { b.brief = desc.value.trim(); b.departamento = b.departamento || dep.valor(); paso2(b); })
+          .catch(function (e) { err.textContent = e.message; pedir.disabled = false; App.vaciar(estado); });
       }
       function paso2(datos) {
         hj.titulo('Revisá el perfil');
-        hj.el.style.width = '880px';
         var ed = App.EditorAgente(datos, {});
         var err2 = h('div.error-txt');
-        App.add(App.vaciar(hj.cuerpo), ed.el, err2);
+        App.add(App.vaciar(hj.cuerpo), h('p', { style: { color: 'var(--suave)', marginTop: '4px', marginBottom: '14px' } }, 'Cambiá lo que quieras: después se puede editar en su ficha.'), ed.el, err2);
         var ok = h('button.btn.primario', {
           onclick: function () {
             var m = ed.validar(); if (m) { err2.textContent = m; return; }
@@ -182,7 +221,7 @@
             }).catch(function (e) { err2.textContent = e.message; ok.disabled = false; ok.textContent = 'Contratar'; });
           }
         }, 'Contratar');
-        App.add(App.vaciar(hj.pie), h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), ok);
+        App.add(App.vaciar(hj.pie), App.acciones(null, [h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), ok]));
       }
     }
   };

@@ -1,1 +1,17 @@
 /* Biblioteca, conocimiento, carpeta, paleta (⌘K), inicio y navegación */
+
+/* Biblioteca: dueños como chips, sugerencias tocables, propuestas con su documento */
+.chips-fila { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chips-fila .chip .biblio-punto { flex: none; }
+.biblio-sugerencia { margin-top: 10px; font-size: 12px; color: var(--suave); }
+.propuesta-origen { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; font-size: 12px; color: var(--suave); }
+.propuesta-origen > svg { flex: none; }
+.propuesta-origen > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* Conocimiento: filas de decisión dentro de las secciones */
+.seccion-ui .con-item .acciones { margin-top: 8px; }
+
+/* ⌘K: encabezados de grupo */
+.cmdk-grupo { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--tenue); padding: 8px 10px 3px; }
+.cmdk-grupo:first-child { padding-top: 2px; }
+.cmdk-item .insignia { flex: none; }

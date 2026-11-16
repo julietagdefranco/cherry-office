@@ -425,7 +425,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
       hj.cuerpo.appendChild(h('p', { style: { color: 'var(--suave)' } }, texto));
       hj.pie.appendChild(h('button.btn', { onclick: function () { hj.cerrar(); } }, 'Cancelar'));
       hj.pie.appendChild(h('button.btn.primario' + (peligro ? '.peligro' : ''), {
-        autofocus: true, style: peligro ? { background: 'var(--peligro)', borderColor: 'var(--peligro)', color: '#fff' } : null,
+        autofocus: true,
         onclick: function () { res = true; hj.cerrar(); }
       }, boton || 'Aceptar'));
     });

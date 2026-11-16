@@ -206,11 +206,20 @@
   function verbo(nombre) {
     if (VERBOS[nombre]) return VERBOS[nombre];
     var m = /^mcp__(.+?)__(.+)$/.exec(nombre || '');
-    if (m) return /consult|colega/i.test(m[2]) ? 'Consultó a un colega' : 'Usó ' + m[2].replace(/[_-]+/g, ' ');
-    return 'Usó ' + nombre;
+    /* «Usó Google Calendar: list events» en vez del nombre interno de la herramienta */
+    if (m) return /consult|colega/i.test(m[2]) ? 'Consultó a un colega' : 'Usó ' + App.humano.herramienta(nombre);
+    return 'Usó ' + String(nombre || 'una herramienta').replace(/[_-]+/g, ' ');
+  }
+  /* el objetivo de un paso: si es una ruta, el nombre corto (la ruta completa va en el title) */
+  var DE_ARCHIVO = /^(Read|Write|Edit|MultiEdit|NotebookEdit|LS|Glob)$/;
+  function objetivoCorto(p) {
+    var o = p.objetivo;
+    if (!o) return '';
+    return DE_ARCHIVO.test(p.nombre) || (/\//.test(o) && !/\s/.test(o)) ? App.humano.ruta(o).corta : o;
   }
   function lineaHerramienta(p) {
-    return h('div.paso-herr', h('span.paso-punto'), h('span', verbo(p.nombre)), p.objetivo ? h('span.paso-obj', p.objetivo) : null);
+    var o = objetivoCorto(p);
+    return h('div.paso-herr', h('span.paso-punto'), h('span', verbo(p.nombre)), o ? h('span.paso-obj', { title: p.objetivo !== o ? App.humano.ruta(p.objetivo).completa : '' }, o) : null);
   }
   /* los pasos en orden: textos intermedios formateados y una línea por herramienta (los archivos van en tarjetas) */
   function listaPasos(pasos) {
@@ -225,7 +234,7 @@
     var herr = (pasos || []).filter(function (p) { return p.t === 'herramienta'; });
     if (!herr.length) return 'Lo que fue pensando';
     var ult = herr[herr.length - 1];
-    return herr.length + (herr.length === 1 ? ' paso' : ' pasos') + ' · ' + verbo(ult.nombre) + (ult.objetivo ? ' ' + ult.objetivo : '');
+    return herr.length + (herr.length === 1 ? ' paso' : ' pasos') + ' · ' + verbo(ult.nombre) + (objetivoCorto(ult) ? ' ' + objetivoCorto(ult) : '');
   }
   /* plegado arriba de una respuesta terminada */
   function pasosPlegados(pasos) {
@@ -252,7 +261,7 @@
         type: 'button', title: dentro ? p.rel : 'Fuera de la oficina',
         onclick: dentro ? function () { abrirArchivo(p.rel); } : null
       }, mini, h('div.archivo-chat-txt', h('div.archivo-chat-nom', p.nombre),
-        h('div.archivo-chat-sub', !dentro ? 'fuera de la oficina' : EXT_ARTEFACTO[e] ? 'Clic para ver' : EXT_IMAGEN[e] ? 'Imagen' : p.rel)));
+        h('div.archivo-chat-sub', !dentro ? 'fuera de la oficina' : EXT_ARTEFACTO[e] ? 'Clic para ver' : EXT_IMAGEN[e] ? 'Imagen' : (p.rel.split('/').slice(0, -1).pop() ? 'En ' + p.rel.split('/').slice(0, -1).pop() : 'En la carpeta de la oficina'))));
     }));
   }
 
@@ -266,7 +275,7 @@
     b.appendChild(listaPasos(pasos));
     var ult = pasos[pasos.length - 1];
     b.appendChild(h('div.escribiendo', h('span.puntos', h('i'), h('i'), h('i')),
-      ult.t === 'herramienta' ? (GERUNDIOS[ult.nombre] || (/^mcp__.*(consult|colega)/i.test(ult.nombre) ? 'Consultando a un colega' : 'Trabajando')) + (ult.objetivo ? ' ' + ult.objetivo : '') + '…' : 'escribiendo…'));
+      ult.t === 'herramienta' ? (GERUNDIOS[ult.nombre] || (/^mcp__.*(consult|colega)/i.test(ult.nombre) ? 'Consultando a un colega' : 'Trabajando')) + (objetivoCorto(ult) ? ' ' + objetivoCorto(ult) : '') + '…' : 'escribiendo…'));
     var arch = tarjetasArchivos(pasos);
     if (arch) b.appendChild(arch);
     return b;

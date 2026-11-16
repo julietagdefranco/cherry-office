@@ -27,7 +27,7 @@
 
   /* ---- dueños: «compartido» (toda la oficina) o ids de departamento ---- */
   function deptos() { return App.E.oficina.departamentos || []; }
-  function nombreDueno(id) { if (id === OFICINA) return 'Toda la oficina'; var d = App.depto(id); return d ? d.nombre : id; }
+  function nombreDueno(id) { if (id === OFICINA) return 'Toda la oficina'; var d = App.depto(id); return d ? d.nombre : 'un departamento que ya no está'; }
   function frase(ids) {
     var n = ids.map(nombreDueno);
     return n.length < 2 ? (n[0] || '') : n.slice(0, -1).join(', ') + ' y ' + n[n.length - 1];
@@ -51,7 +51,7 @@
     return ds.length ? ds : [OFICINA];
   }
   function duenosArchivo(f) { return f.departamentos && f.departamentos.length ? f.departamentos : [f.departamento || OFICINA]; }
-  function nombreAgente(id) { var a = id && App.agente(id); return a ? a.nombre : (id || 'una reunión'); }
+  function nombreAgente(id) { return id ? App.humano.quien(id) : 'una reunión'; }
   function iniciales(n) { return String(n || '?').trim().slice(0, 2).toUpperCase(); }
 
   /* `slug` (opcional): abre con ese documento elegido (por ejemplo, recién guardado desde una entrega) */
@@ -63,9 +63,15 @@
     var abiertas = {};             // carpetas vinculadas desplegadas en la lista
     var archivos = [], vinculos = [];
     var buscar = h('input.campo', { placeholder: 'Buscar en todos los documentos…', style: { maxWidth: '320px' } });
+    /* ⌘K deja la búsqueda en App.Biblioteca.busquedaPendiente antes de navegar acá */
+    if (App.Biblioteca && App.Biblioteca.busquedaPendiente) { buscar.value = App.Biblioteca.busquedaPendiente; App.Biblioteca.busquedaPendiente = ''; }
+    /* el buscador respeta lo que se está mirando: que el texto lo diga */
+    function placeholderBuscar() {
+      buscar.placeholder = App.depto(vista) ? 'Buscar en ' + nombreDueno(vista) + '…' : vista === OFICINA ? 'Buscar en lo de toda la oficina…' : 'Buscar en todos los documentos…';
+    }
     var input = h('input', { type: 'file', multiple: true, style: { display: 'none' }, onchange: function () { subir(input.files); input.value = ''; } });
     var btnSubir = h('button.btn.primario', { onclick: function () { input.click(); } });
-    var nav = h('div.biblio-nav'), lista = h('div.biblio-lista'), det = h('div.biblio-det');
+    var nav = h('div.biblio-nav'), lista = h('div.biblio-lista', App.cargando('Trayendo la biblioteca…')), det = h('div.biblio-det');
     var biblio = h('div.biblio', nav, lista, det);
     var zona = h('div', { style: { position: 'relative', flex: 1, minHeight: 0 } }, biblio);
     hj.cuerpo.style.cssText = 'padding:0;display:flex;flex-direction:column;overflow:hidden';
@@ -95,6 +101,7 @@
     }
 
     function pintar() {
+      placeholderBuscar();
       App.vaciar(btnSubir);
       App.add(btnSubir, App.icono('subir'), 'Subir a ' + textoDestino());
       pintarNav();
@@ -152,7 +159,7 @@
 
     function etiqueta(duenos, alCambiar, deCarpeta) {
       var txt = duenos[0] === OFICINA ? [marca(OFICINA), 'Oficina'] : duenos.length === 1 ? [marca(duenos[0]), nombreDueno(duenos[0])]
-        : [h('span.biblio-puntos', duenos.map(marca)), duenos.length + ' deptos'];
+        : [h('span.biblio-puntos', duenos.map(marca)), duenos.slice(0, 2).map(nombreDueno).join(', ') + (duenos.length > 2 ? ' +' + (duenos.length - 2) : '')];
       var b = h('button.biblio-dueno', { title: (deCarpeta ? 'Acceso: ' : 'Es de ') + frase(duenos) + ' · cambiar', onclick: function (e) { e.stopPropagation(); menuDueno(b, duenos, alCambiar, deCarpeta); } },
         txt, App.icono('flecha'));
       return b;
@@ -275,6 +282,7 @@
       var cambiar = h('button.btn.chico.fantasma', { onclick: function () { menuDueno(cambiar, duenos, alCambiar, deCarpeta); } }, 'Cambiar');
       return h('div.biblio-dueno-tarjeta',
         h('div.biblio-dueno-cab', h('span.biblio-puntos', duenos.map(marca)), h('b', titulo), cambiar),
+        duenos.length > 1 ? h('div.chips-fila', duenos.map(function (id) { return h('span.chip.fijo', marca(id), nombreDueno(id)); })) : null,
         extra);
     }
 
@@ -286,10 +294,12 @@
       var sugeridos = (fi.util_para || []).filter(function (d) { return App.depto(d) && duenos.indexOf(d) < 0; });
       var sugerencia = null;
       if (sugeridos.length && !vinc) {
-        sugerencia = h('div.biblio-sugerencia', duenos[0] === OFICINA ? 'Le sirve sobre todo a ' : 'El bibliotecario cree que también le sirve a ', frase(sugeridos), ' · ',
-          duenos[0] === OFICINA
-            ? h('a', { href: '#', onclick: function (e) { e.preventDefault(); asignarArchivo(f, sugeridos); } }, 'Asignárselo')
-            : h('a', { href: '#', onclick: function (e) { e.preventDefault(); asignarArchivo(f, duenos.concat(sugeridos)); } }, 'Sumar'));
+        sugerencia = h('div.biblio-sugerencia', duenos[0] === OFICINA ? 'Le sirve sobre todo a:' : 'El bibliotecario cree que también le sirve a:',
+          h('div.chips-fila', sugeridos.map(function (id) {
+            return h('button.chip', { type: 'button', title: duenos[0] === OFICINA ? 'Asignárselo a ' + nombreDueno(id) : 'Sumar a ' + nombreDueno(id), onclick: function () {
+              asignarArchivo(f, duenos[0] === OFICINA ? [id] : duenos.concat([id]));
+            } }, App.icono('mas'), marca(id), nombreDueno(id));
+          })));
       }
       var cambiar = vinc
         ? function () { if (v) asignarCarpeta(v, arguments[0]); }
@@ -304,15 +314,14 @@
           App.Entregables ? h('a', { href: '#', onclick: function (e) { e.preventDefault(); hj.cerrar(); App.Entregables.abrir(f.entrega.id); } }, 'Ver la entrega') : null)) : null,
         tarjetaDueno(duenos, vinc ? 'Su carpeta es de ' + (duenos[0] === OFICINA ? 'toda la oficina' : frase(duenos)) : titulo, cambiar, vinc,
           [gente(f, duenos), sugerencia]),
-        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '12px 0 14px' } },
-          h('button.btn.chico', { onclick: function () { api.get('/api/archivos/' + encodeURIComponent(slug) + '/original').then(App.abrirContenido).catch(App.fallo); } }, App.icono('abrir'), 'Abrir'),
-          f.estado === 'listo' ? h('button.btn.chico', { onclick: function () { api.post('/api/archivos/' + encodeURIComponent(slug) + '/leer', {}).then(function (r) { App.aviso('Lo van a leer ' + (r.agentes || []).map(function (id) { var a = App.agente(id); return a ? a.nombre : id; }).join(', ') + '.'); vigilarEstado(); cargar(); }).catch(App.fallo); } }, 'Que lo lean') : null,
-          f.estado === 'error' ? h('button.btn.chico', { onclick: function () { api.post('/api/archivos/' + encodeURIComponent(slug) + '/reprocesar', {}).then(function () { vigilarEstado(); cargar(); }).catch(App.fallo); } }, App.icono('recargar'), 'Reintentar') : null,
-          !vinc ? h('button.btn.chico.peligro', { onclick: function () {
+        h('div', { style: { margin: '12px 0 14px' } }, App.acciones(!vinc ? [h('button.btn.chico.fantasma', { onclick: function () {
             App.confirmar('¿Quitar ' + f.nombre + '?', 'Va a la papelera de la oficina (no se borra) y sale del catálogo.', 'Quitar', true).then(function (si) {
               if (si) api.del('/api/archivos/' + encodeURIComponent(slug)).then(function () { sel = null; cargar(); }).catch(App.fallo);
             });
-          } }, 'Quitar') : null),
+          } }, App.icono('papelera'), 'Quitar')] : null, [
+          h('button.btn.chico', { onclick: function () { api.get('/api/archivos/' + encodeURIComponent(slug) + '/original').then(App.abrirContenido).catch(App.fallo); } }, App.icono('abrir'), 'Abrir'),
+          f.estado === 'listo' ? h('button.btn.chico', { onclick: function () { api.post('/api/archivos/' + encodeURIComponent(slug) + '/leer', {}).then(function (r) { App.aviso('Lo van a leer ' + (r.agentes || []).map(function (id) { return App.humano.quien(id); }).join(', ') + '.'); vigilarEstado(); cargar(); }).catch(App.fallo); } }, 'Que lo lean') : null,
+          f.estado === 'error' ? h('button.btn.chico', { onclick: function () { api.post('/api/archivos/' + encodeURIComponent(slug) + '/reprocesar', {}).then(function () { vigilarEstado(); cargar(); }).catch(App.fallo); } }, App.icono('recargar'), 'Reintentar') : null])),
         f.error ? h('div.error-txt', { style: { marginBottom: '12px' } }, f.error) : null,
         f.aviso ? h('div.ayuda', { style: { marginBottom: '12px' } }, f.aviso) : null,
         sec('Resumen', fi.resumen ? h('p', fi.resumen) : (f.estado !== 'listo' ? h('p.ayuda', PROCESANDO[f.estado] || 'Sin ficha todavía.') : null)),
@@ -325,19 +334,18 @@
       var duenos = duenosVinculo(v), suyos = archivos.filter(function (f) { return f.vinculo === v.id; });
       var titulo = duenos[0] === OFICINA ? 'Es de toda la oficina' : 'Es de ' + frase(duenos);
       var quienes = duenos[0] === OFICINA ? 'Cualquier agente puede abrir los originales.'
-        : (v.alcance && v.alcance.agentes ? 'Solo ' + v.alcance.agentes.map(function (id) { var a = App.agente(id); return a ? a.nombre : id; }).join(', ') : 'Solo los agentes de ' + frase(duenos)) + ' pueden abrir los originales. Las fichas las puede consultar cualquiera.';
+        : (v.alcance && v.alcance.agentes ? 'Solo ' + v.alcance.agentes.map(App.humano.quien).join(', ') : 'Solo los agentes de ' + frase(duenos)) + ' pueden abrir los originales. Las fichas las puede consultar cualquiera.';
       App.add(App.vaciar(det),
         volver(),
         h('h3', { style: { fontSize: '15px', marginBottom: '4px' } }, nombreCarpeta(v)),
-        h('div.ayuda', { style: { marginBottom: '12px', wordBreak: 'break-all' } }, v.ruta),
+        h('div.ayuda', { style: { marginBottom: '12px', wordBreak: 'break-all' }, title: v.ruta }, App.humano.ruta(v.ruta).completa),
         tarjetaDueno(duenos, titulo, function (d) { asignarCarpeta(v, d); }, true, h('div.ayuda', { style: { marginTop: '8px' } }, quienes)),
-        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '12px 0 14px' } },
-          h('button.btn.chico', { onclick: function () { escanear(v.id); } }, App.icono('recargar'), 'Actualizar'),
-          h('button.btn.chico.fantasma', { onclick: function () {
+        h('div', { style: { margin: '12px 0 14px' } }, App.acciones([h('button.btn.chico.fantasma', { onclick: function () {
             App.confirmar('¿Desvincular la carpeta?', 'La carpeta y sus archivos no se tocan; solo deja de estar en la biblioteca.', 'Desvincular', true).then(function (si) {
               if (si) api.del('/api/vinculos/' + encodeURIComponent(v.id)).then(function () { sel = null; cargar(); }).catch(App.fallo);
             });
-          } }, 'Desvincular')),
+          } }, App.icono('enlace'), 'Desvincular')], [
+          h('button.btn.chico', { onclick: function () { escanear(v.id); } }, App.icono('recargar'), 'Actualizar')])),
         v.existe === false ? h('div.error-txt', { style: { marginBottom: '12px' } }, 'No encuentro la carpeta en esa ubicación.') : null,
         h('div.det-sec', h('h4', 'Archivos'), suyos.length
           ? h('div', suyos.map(function (f) { return h('button.archivo-fila', { onclick: function () { sel = { tipo: 'archivo', id: f.slug }; pintar(); } }, h('span', { style: { flex: 1 } }, f.titulo), metaEstado(f)); }))
@@ -395,16 +403,21 @@
     /* ---- propuestas de cambio al conocimiento ---- */
     function cargarPropuestas() {
       det.style.display = 'none'; biblio.classList.remove('con-sel');
+      App.vaciar(lista).appendChild(App.cargando('Trayendo las propuestas…'));
       api.get('/api/biblioteca/propuestas').then(function (r) {
         App.vaciar(lista);
         lista.appendChild(h('p.ayuda', { style: { padding: '12px 18px 8px' } }, 'Cuando un documento contradice lo que la oficina tiene anotado, el bibliotecario propone un cambio. Nada se modifica sin tu OK.'));
         if (!r.propuestas.length) lista.appendChild(h('div.vacio', 'No hay propuestas pendientes.'));
         r.propuestas.forEach(function (p) {
-          lista.appendChild(h('div.propuesta', h('b', p.titulo || 'Propuesta'), p.sugerencia ? h('p.ayuda', p.sugerencia) : null,
+          var doc = p.archivo ? archivos.filter(function (f) { return f.slug === p.archivo; })[0] : null;
+          lista.appendChild(h('div.propuesta', h('b', p.titulo || 'Propuesta'),
+            p.archivo ? h('div.propuesta-origen', App.icono('libro'), h('span', 'Sale de ', h('b', doc ? doc.titulo : App.humano.ruta(p.archivo).corta)),
+              h('button.btn.chico.fantasma', { onclick: function () { vista = 'todo'; sel = { tipo: 'archivo', id: p.archivo }; pintar(); } }, 'Ver el documento')) : null,
+            p.sugerencia ? h('p.ayuda', p.sugerencia) : null,
             h('div.difs', h('div', h('div.ayuda', 'Hoy dice'), p.actual || '—'), h('div', h('div.ayuda', 'Propuesta'), p.nuevo || '—')),
-            h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
-              h('button.btn.chico', { onclick: function () { resolver(p.id, false); } }, 'Rechazar'),
-              h('button.btn.chico.primario', { onclick: function () { resolver(p.id, true); } }, 'Aceptar'))));
+            App.acciones(null, [
+              h('button.btn.chico.fantasma', { onclick: function () { resolver(p.id, false); } }, 'Rechazar'),
+              h('button.btn.chico.primario', { onclick: function () { resolver(p.id, true); } }, 'Aceptar')])));
         });
       }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
     }
@@ -417,5 +430,5 @@
     cargar();
   }
 
-  App.Biblioteca = { abrir: abrir, vigilarEstado: vigilarEstado };
+  App.Biblioteca = { abrir: abrir, vigilarEstado: vigilarEstado, busquedaPendiente: '' };
 })();

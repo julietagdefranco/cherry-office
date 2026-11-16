@@ -298,7 +298,7 @@ App.Nav = (function () {
       App.vaciar(caja);
       var q = buscar.trim().toLowerCase();
       caja.appendChild(bloqueReuniones(q));
-      if (!sesiones) { caja.appendChild(h('div.vacio', h('span.giro'))); return; }
+      if (!sesiones) { caja.appendChild(App.cargando('Trayendo las charlas…')); return; }
       caja.appendChild(h('div.lista-grupo', 'Charlas'));
       var ss = sesiones.filter(function (s) {
         var a = App.agente(s.agente); if (!a) return false;
@@ -327,7 +327,7 @@ App.Nav = (function () {
   }
   function titulo(s) {
     var t = App.Adjuntos && App.Adjuntos.separar ? App.Adjuntos.separar(s.titulo || '').texto : s.titulo;
-    return (t || '').trim() || 'Archivos';
+    return (t || '').trim() || 'Charla con archivos';
   }
   function filaSesion(s) {
     var a = App.agente(s.agente);
@@ -346,10 +346,10 @@ App.Nav = (function () {
     if (d < 86400) return Math.round(d / 3600) + ' h';
     return Math.round(d / 86400) + ' d';
   }
-  function elegirAgente(ancla, alElegir) {
-    var items = [{ titulo: 'Charlar con' }];
-    (App.E.oficina.agentes || []).forEach(function (a) { items.push({ texto: a.nombre, nota: a.rol, accion: function () { alElegir(a.id); } }); });
-    if (items.length === 1) { App.Contratar.abrir(); return; }
+  function elegirAgente(ancla, alElegir, titulo) {
+    var items = [{ titulo: titulo || 'Charlar con' }];
+    (App.E.oficina.agentes || []).forEach(function (a) { items.push({ texto: a.nombre, nota: a.rol, retrato: a, accion: function () { alElegir(a.id); } }); });
+    if (items.length === 1) { ir('#/equipo/contratar'); return; }
     App.menu(ancla, items);
   }
   function nuevaCharla(id) { App.Agente.nueva(id); }
@@ -387,10 +387,10 @@ App.Nav = (function () {
   /* «Nueva»: una charla con alguien o una reunión */
   function menuNueva(ancla) {
     var items = [{ titulo: 'Charlar con' }];
-    (App.E.oficina.agentes || []).forEach(function (a) { items.push({ texto: a.nombre, nota: a.rol, accion: function () { nuevaCharla(a.id); } }); });
+    (App.E.oficina.agentes || []).forEach(function (a) { items.push({ texto: a.nombre, nota: a.rol, retrato: a, accion: function () { nuevaCharla(a.id); } }); });
     items.push('-');
     items.push({ texto: 'Llamar a reunión…', icono: 'reunion', accion: function () { App.Reunion.nueva(); } });
-    if ((App.E.oficina.agentes || []).length === 0) items = [{ texto: 'Contratar un agente…', icono: 'mas', accion: function () { App.Contratar.abrir(); } }];
+    if ((App.E.oficina.agentes || []).length === 0) items = [{ texto: 'Contratar un agente…', icono: 'mas', accion: function () { ir('#/equipo/contratar'); } }];
     App.menu(ancla, items);
   }
 
@@ -408,7 +408,7 @@ App.Nav = (function () {
   /* --- Equipo: vos, los agentes por departamento y los departamentos. Tocar a alguien abre su ficha. --- */
   function pintarEquipo(col) {
     App.add(App.vaciar(col),
-      cabecera('Equipo', h('button.btn.chico', { title: 'Contratar un agente', onclick: function () { App.Contratar.abrir(); } }, App.icono('mas'), 'Contratar')),
+      cabecera('Equipo', h('button.btn.chico', { title: 'Contratar un agente', onclick: function () { ir('#/equipo/contratar'); } }, App.icono('mas'), 'Contratar')),
       h('div.lista-cuerpo', App.dom.equipo,
         h('div.lista-grupo', 'La oficina'),
         filtroFila('capas', 'Departamentos', sub === 'departamentos', function () { ir('#/equipo/departamentos'); })));
@@ -438,7 +438,7 @@ App.Nav = (function () {
   function pintarTrabajo(col) {
     var d = App.dom;
     App.add(App.vaciar(col), cabecera('Trabajo'), h('div.lista-cuerpo',
-      filtroFila('reloj', 'Tareas', sub === 'tareas', function () { ir('#/trabajo/tareas'); }, null),
+      filtroFila('reloj', 'Tareas', sub === 'tareas', function () { ir('#/trabajo/tareas'); }, d.navTar && d.navTar.textContent ? h('span.insignia', d.navTar.textContent) : null),
       filtroFila('flujo', 'Flujos', sub === 'flujos', function () { ir('#/trabajo/flujos'); }, d.navFlu)));
   }
 
@@ -476,8 +476,8 @@ App.Nav = (function () {
     }).catch(function () { App.vaciar(tareas); });
     App.add(caja,
       h('div.rel-sec.primera', h('h4', 'Otras charlas con ' + a.nombre), charlas),
-      h('div.rel-sec', h('h4', 'Lo que te entregó', h('button', { onclick: function () { ir('#/bandeja/revisar'); } }, 'Todo')), entregas),
-      h('div.rel-sec', h('h4', 'Sus tareas', h('button', { onclick: function () { App.Agente.nuevaTarea(id, {}); } }, '+ Nueva')), tareas));
+      h('div.rel-sec', h('h4', 'Lo que te entregó', h('button.btn.chico.fantasma', { onclick: function () { ir('#/bandeja/revisar'); } }, 'Todo')), entregas),
+      h('div.rel-sec', h('h4', 'Sus tareas', h('button.btn.chico.fantasma', { onclick: function () { App.Agente.nuevaTarea(id, {}); } }, '+ Nueva')), tareas));
     return caja;
   }
 

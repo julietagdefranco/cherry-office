@@ -5,14 +5,14 @@
   var h = App.h, api = App.api;
   var CADA_MS = 120000;
   var VENTANAS = [
-    { clave: 'cinco_horas', corto: '5 h', nombre: 'Ventana de 5 horas', largo: 5 * 3600 },
-    { clave: 'semana', corto: 'sem', nombre: 'Semana', largo: 7 * 86400 },
-    { clave: 'semana_opus', corto: null, nombre: 'Semana (Opus)', largo: 7 * 86400 },
+    { clave: 'cinco_horas', corto: '5 horas', nombre: 'Últimas 5 horas', largo: 5 * 3600 },
+    { clave: 'semana', corto: 'semana', nombre: 'Semana', largo: 7 * 86400 },
+    { clave: 'semana_opus', corto: null, nombre: 'Semana, solo Opus', largo: 7 * 86400 },
   ];
   var MOTIVOS = {
-    sin_sesion: 'No encontré la sesión de Claude Code en esta compu. Iniciá sesión con «claude» en la terminal.',
-    vencido: 'La sesión de Claude Code venció. Se renueva sola la próxima vez que trabaje un agente (o al abrir «claude»).',
-    error: 'Tu cuenta de Claude no respondió. Vuelvo a probar en un rato.',
+    sin_sesion: 'No encontré tu cuenta de Claude en esta compu. Abrí «claude» en la terminal e iniciá sesión.',
+    vencido: 'Tu sesión de Claude venció. Se renueva sola la próxima vez que trabaje un agente (o al abrir «claude» en la terminal).',
+    error: 'Tu cuenta de Claude no respondió. Pruebo de nuevo en un rato.',
   };
   var uso = null, chip = null, txt = null;
 
@@ -38,8 +38,8 @@
     if (p >= 100) return { txt: 'Llegaste al tope. Se libera ' + cuando(v.reinicia) + '.', mal: true };
     if (paso < largo * 0.05 || p <= 0) return null;
     var porSeg = p / paso, alFinal = p + porSeg * resta;
-    if (alFinal < 100) return { txt: 'A este ritmo llegás al reinicio con ~' + Math.round(alFinal) + '%.' };
-    return { txt: 'A este ritmo se termina ' + cuando(new Date(Date.now() + (100 - p) / porSeg * 1000).toISOString()) + ', antes del reinicio.', mal: true };
+    if (alFinal < 100) return { txt: 'Si seguís a este ritmo, llegás al reinicio con ~' + Math.round(alFinal) + '% usado.' };
+    return { txt: 'Si seguís a este ritmo, se termina ' + cuando(new Date(Date.now() + (100 - p) / porSeg * 1000).toISOString()) + ', antes del reinicio.', mal: true };
   }
 
   function pintarChip() {
@@ -68,17 +68,17 @@
       filas.push(h('div.uso-fila',
         h('div.uso-cab', h('span', w.nombre), h('b' + (c ? '.' + c : ''), p + '%')),
         h('div.uso-barra' + (c ? '.' + c : ''), h('i', { style: { width: Math.min(100, p) + '%' } })),
-        v.reinicia ? h('div.uso-nota', 'Se reinicia ' + cuando(v.reinicia)) : null,
+        v.reinicia ? h('div.uso-nota', 'Vuelve a cero ' + cuando(v.reinicia)) : null,
         r ? h('div.uso-nota' + (r.mal ? '.mal' : ''), r.txt) : null));
     });
     var pie = [];
-    if (uso && uso.fuente === 'corridas') pie.push('Según lo último que avisó Claude en una corrida (' + App.hace(uso.actualizado) + ').');
+    if (uso && uso.fuente === 'corridas') pie.push('Según lo último que informó Claude en el trabajo de un agente (' + App.hace(uso.actualizado) + ').');
     else if (uso && uso.actualizado) pie.push('Actualizado ' + App.hace(uso.actualizado) + '.');
     if (uso && uso.motivo && (!filas.length || uso.fuente === 'corridas')) pie.unshift(MOTIVOS[uso.motivo] || MOTIVOS.error);
     var recargar = h('button.btn.chico.icono', { title: 'Actualizar', onclick: function () { refrescar(true); } }, App.icono('recargar'));
     return h('div',
       h('div.uso-tit', h('b', 'Uso de Claude'), recargar),
-      filas.length ? filas : h('div.uso-nota', uso ? '' : 'Cargando…'),
+      filas.length ? filas : h('div.uso-nota', uso ? '' : App.cargando('Trayendo tu uso…')),
       pie.length ? h('div.uso-pie', pie.join(' ')) : null);
   }
 

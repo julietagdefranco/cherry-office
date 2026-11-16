@@ -777,11 +777,11 @@ button.adjunto:hover { background: var(--panel-2); }
 .app.en-seccion .carga3d, .app.en-seccion .herramientas, .app.en-seccion .pista, .app.en-seccion .vista > .marca, .app.en-seccion .aviso-reunion { display: none; }
 .app.en-seccion .derecho { width: 100%; transform: none; visibility: visible; box-shadow: none; border-left: 0; transition: none; }
 /* Dos formatos de pantalla: «lectura» (todo en una columna de --ancho-lectura: cabecera, cuerpo y pie alineados) y
-   «trabajo» (todo el ancho, con columnas propias: biblioteca y conocimiento). */
-.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]) .der-cab,
-.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]) .pestanas,
-.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]) .der-cuerpo > *,
-.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]) .der-pie > * { width: 100%; max-width: var(--ancho-lectura); margin-left: auto; margin-right: auto; }
+   «trabajo» (todo el ancho, con columnas propias: biblioteca, conocimiento y el Creador). */
+.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]):not([data-modo="creador"]) .der-cab,
+.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]):not([data-modo="creador"]) .pestanas,
+.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]):not([data-modo="creador"]) .der-cuerpo > *,
+.app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]):not([data-modo="creador"]) .der-pie > * { width: 100%; max-width: var(--ancho-lectura); margin-left: auto; margin-right: auto; }
 .app.en-seccion .der-cab { padding-top: 16px; }
 .app.en-seccion .der-pie { padding-bottom: 14px; }
 .app.en-seccion .cerrar-panel { display: none; }
@@ -894,6 +894,7 @@ button.adjunto:hover { background: var(--panel-2); }
 .fila-tit { font-weight: 500; overflow-wrap: anywhere; }
 .fila-sub { color: var(--suave); font-size: 12px; margin-top: 1px; overflow-wrap: anywhere; }
 .fila-acc { display: flex; gap: 6px; flex: none; }
+.fila-dec > .btn.icono svg { stroke-width: 3; color: var(--suave); }
 .fila-dec > .insignia { flex: none; }
 
 /* sección con título, cuenta y acción */
@@ -922,3 +923,11 @@ button.adjunto:hover { background: var(--panel-2); }
 .ajuste-ayuda { color: var(--suave); font-size: 12px; margin-top: 2px; }
 .resumen-ui { background: var(--panel-2); border: 1px solid var(--linea); border-radius: var(--radio); padding: 9px 12px; color: var(--suave); font-size: 12.5px; margin: 4px 0 8px; }
 @media (max-width: 720px) { .ajuste { grid-template-columns: minmax(0, 1fr); } }
+
+/* celular: las acciones de la cabecera bajan a su propia fila y las pestañas se deslizan */
+@media (max-width: 720px) {
+  .der-cab { flex-wrap: wrap; }
+  .der-cab > .der-acciones { order: 10; width: 100%; flex-wrap: wrap; }
+  .pestanas { overflow-x: auto; scrollbar-width: none; }
+  .pestana { flex: none; }
+}

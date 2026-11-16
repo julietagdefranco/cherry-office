@@ -37,16 +37,17 @@
   function nombre(id) { var a = App.agente(id); return a ? a.nombre : id; }
 
   /* ---------------- nueva ---------------- */
-  /* `con`: ids que arrancan elegidos (p. ej. desde la ficha de un agente) */
+  /* `con`: ids que arrancan elegidos (p. ej. desde la ficha de un agente). Es una pantalla con ruta (#/charlas/nueva-reunion) */
   function nueva(con) {
     if (activa(E.reunion)) { App.aviso('Ya hay una reunión en curso.'); panel(E.reunion.id); return; }
     var o = E.oficina;
     if (o.agentes.length < 2) { App.aviso('Para una reunión hacen falta al menos dos agentes.', true); return; }
-    var hj = App.hoja({ titulo: 'Llamar a reunión', ancho: 620 });
+    var hj = App.hojaEnPanel({ titulo: 'Llamar a reunión', icono: 'reunion', sub: 'Elegí el tema, quiénes participan y cómo se habla' }, 'reunion-nueva');
+    function cancelar() { if (App.Nav && App.Nav.ir) App.Nav.ir('#/charlas'); else hj.cerrar(); }
     var tema = h('textarea.campo', { rows: 3, maxlength: 500, autofocus: true, placeholder: 'Ej.: ¿Cómo lanzamos la colección de verano? Presupuesto, canales y fechas.' });
     var elegidos = [], grilla = h('div.elegir-agentes');
     o.agentes.forEach(function (a) {
-      var b = h('button.elegible', { onclick: function () {
+      var b = h('button.elegible', { type: 'button', onclick: function () {
         var i = elegidos.indexOf(a.id);
         if (i >= 0) elegidos.splice(i, 1); else if (elegidos.length < 10) elegidos.push(a.id); else App.aviso('Hasta 10 por reunión.');
         b.classList.toggle('sel', elegidos.indexOf(a.id) >= 0);
@@ -55,26 +56,29 @@
       grilla.appendChild(b);
       if (Array.isArray(con) && con.indexOf(a.id) >= 0) { elegidos.push(a.id); b.classList.add('sel'); }
     });
-    var rondas = h('select.campo', [1, 2, 3].map(function (n) { return h('option', { value: n, selected: n === 1 }, n === 1 ? 'Una ronda' : n + ' rondas'); }));
+    var rondas = App.elegir({ etiqueta: 'Rondas', valor: 1, forma: 'chips',
+      opciones: [1, 2, 3].map(function (n) { return { valor: n, titulo: n === 1 ? 'Una ronda' : n + ' rondas' }; }) });
     var docs = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } }), docsSel = [];
     var err = h('div.error-txt');
     /* patrón, líder o bandos según el patrón, y archivo de salida */
-    var bando = {}, editoSalida = false;
-    var patron = h('select.campo', PATRONES.map(function (p) { return h('option', { value: p.id }, p.nombre); }));
-    var patronAyuda = h('div.ayuda', PATRONES[0].txt);
-    var liderSel = h('select.campo'), liderFila = h('div.fila-campo.oculto', h('label.etiqueta-campo', 'Líder'), liderSel);
+    var bando = {}, editoSalida = false, lider = null;
+    var patron = App.elegir({ etiqueta: 'Tipo de reunión', forma: 'lista', valor: PATRONES[0].id, alCambiar: function () { extras(); },
+      opciones: PATRONES.map(function (p) { return { valor: p.id, titulo: p.nombre, sub: p.txt }; }) });
+    var liderCaja = h('div'), liderFila = h('div.fila-campo.oculto', h('label.etiqueta-campo', 'Líder'), h('div.ayuda', 'Abre y encuadra la reunión, y la cierra con su posición.'), liderCaja);
     var bandosCaja = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } });
-    var bandosFila = h('div.fila-campo.oculto', h('label.etiqueta-campo', 'Bandos'), bandosCaja,
-      h('div.ayuda', 'A defiende la propuesta del tema; B la critica. Tiene que haber al menos uno en cada bando.'));
+    var bandosFila = h('div.fila-campo.oculto', h('label.etiqueta-campo', 'Bandos'),
+      h('div.ayuda', 'A defiende la propuesta del tema; B la critica. Tiene que haber al menos uno en cada bando.'), bandosCaja);
     var salida = h('input.campo', { type: 'text', maxlength: 200, value: salidaSugerida(''), oninput: function () { editoSalida = true; } });
     function extras() {
-      var p = patron.value;
-      patronAyuda.textContent = patronDe(p).txt;
+      var p = patron.valor();
       liderFila.classList.toggle('oculto', p !== 'lider');
       bandosFila.classList.toggle('oculto', p !== 'redblue');
-      var previo = liderSel.value;
-      App.vaciar(liderSel);
-      elegidos.forEach(function (id) { liderSel.appendChild(h('option', { value: id, selected: id === previo }, nombre(id))); });
+      if (lider && elegidos.indexOf(lider) < 0) lider = null;
+      if (!lider && elegidos.length) lider = elegidos[0];
+      App.vaciar(liderCaja);
+      if (!elegidos.length) liderCaja.appendChild(h('span.ayuda', 'Elegí primero a los participantes.'));
+      else liderCaja.appendChild(App.elegir({ etiqueta: 'Líder', forma: 'chips', valor: lider, alCambiar: function (v) { lider = v; },
+        opciones: elegidos.map(function (id) { var a = App.agente(id); return { valor: id, titulo: nombre(id), retrato: a }; }) }));
       App.vaciar(bandosCaja);
       elegidos.forEach(function (id, i) {
         if (!bando[id]) bando[id] = i % 2 === 0 ? 'a' : 'b';
@@ -86,49 +90,58 @@
         bandosCaja.appendChild(fila);
       });
     }
-    patron.onchange = extras;
     tema.addEventListener('input', function () { if (!editoSalida) salida.value = salidaSugerida(tema.value); });
-    App.add(hj.cuerpo, 
+    var docsAviso = h('div.ayuda.oculto');
+    App.add(hj.cuerpo,
       h('div.fila-campo', h('label.etiqueta-campo', 'Tema'), tema),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Quiénes participan'), grilla),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Tipo de reunión'), patron, patronAyuda),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Quiénes participan'), h('div.ayuda', 'Entre 2 y 10.'), grilla),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Tipo de reunión'), patron),
       liderFila, bandosFila,
-      h('div.dos', h('div.fila-campo', h('label.etiqueta-campo', 'Rondas'), rondas, h('div.ayuda', 'En cada ronda habla cada uno una vez. Después podés pedir otra.')),
-        h('div.fila-campo', h('label.etiqueta-campo', 'Documentos de la biblioteca (opcional)'), docs)),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Archivo de salida'), salida,
-        h('div.ayuda', 'Al cerrar se guarda acá un resumen en markdown (dentro de archivos/). Si ya existe, se agrega -2, -3…')), err);
+      h('div.fila-campo', h('label.etiqueta-campo', 'Rondas'), h('div.ayuda', 'En cada ronda habla cada uno una vez. Después podés pedir otra.'), rondas),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Documentos de la biblioteca (opcional)'), h('div.ayuda', 'Los participantes los leen antes de opinar.'), docs, docsAviso),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Dónde queda el acta'),
+        h('div.ayuda', 'Al cerrar se guarda un resumen en Entregables › Reuniones.'),
+        h('details.avanzado', h('summary', 'Opciones avanzadas'),
+          h('div.ayuda', 'Ruta del archivo (dentro de archivos/). Si ya existe, se agrega -2, -3…'), salida)),
+      err);
     api.get('/api/archivos').then(function (r) {
       var listos = (r.archivos || []).filter(function (f) { return f.estado === 'listo'; });
       if (!listos.length) { docs.appendChild(h('span.ayuda', 'No hay documentos listos.')); return; }
       listos.slice(0, 30).forEach(function (f) {
-        var c = h('button.chip', { onclick: function () { var i = docsSel.indexOf(f.slug); if (i >= 0) docsSel.splice(i, 1); else docsSel.push(f.slug); c.style.borderColor = docsSel.indexOf(f.slug) >= 0 ? 'var(--texto)' : ''; } }, f.titulo);
+        var c = h('button.chip', { type: 'button', onclick: function () {
+          var i = docsSel.indexOf(f.slug); if (i >= 0) docsSel.splice(i, 1); else docsSel.push(f.slug);
+          c.classList.toggle('sel', docsSel.indexOf(f.slug) >= 0);
+        } }, f.titulo);
         docs.appendChild(c);
       });
-    }).catch(function () { docs.appendChild(h('span.ayuda', '—')); });
+      if (listos.length > 30) { docsAviso.textContent = 'Se muestran los primeros 30 de ' + listos.length + ' documentos listos.'; docsAviso.classList.remove('oculto'); }
+    }).catch(function () { docs.appendChild(h('span.ayuda', 'No se pudieron traer los documentos.')); });
     var ir = h('button.btn.primario', {
       onclick: function () {
         err.textContent = '';
         if (!tema.value.trim()) { err.textContent = 'Escribí el tema.'; return; }
         if (elegidos.length < 2) { err.textContent = 'Elegí al menos dos participantes.'; return; }
-        var cuerpo = { tema: tema.value.trim(), agentes: elegidos, rondas: +rondas.value, documentos: docsSel.length ? docsSel : undefined, patron: patron.value };
-        if (patron.value === 'lider') {
-          if (!liderSel.value) { err.textContent = 'Elegí quién lidera.'; return; }
-          cuerpo.lider = liderSel.value;
+        var pat = patron.valor();
+        var cuerpo = { tema: tema.value.trim(), agentes: elegidos, rondas: +rondas.valor(), documentos: docsSel.length ? docsSel : undefined, patron: pat };
+        if (pat === 'lider') {
+          if (!lider) { err.textContent = 'Elegí quién lidera.'; return; }
+          cuerpo.lider = lider;
         }
-        if (patron.value === 'redblue') {
+        if (pat === 'redblue') {
           var a = elegidos.filter(function (id) { return bando[id] === 'a'; }), b = elegidos.filter(function (id) { return bando[id] === 'b'; });
           if (!a.length || !b.length) { err.textContent = 'Poné al menos uno en cada bando.'; return; }
           cuerpo.bandos = { a: a, b: b };
         }
-        if (patron.value === 'revision' && !docsSel.length) { err.textContent = 'El panel de revisión necesita al menos un documento.'; return; }
+        if (pat === 'revision' && !docsSel.length) { err.textContent = 'El panel de revisión necesita al menos un documento.'; return; }
         if (editoSalida && salida.value.trim()) cuerpo.salida = salida.value.trim();
         ir.disabled = true;
         api.post('/api/reuniones', cuerpo)
-          .then(function (r) { hj.cerrar(); E.reunion = r; sincronizar(); panel(r.id); vigilar(r.id); })
+          .then(function (r) { E.reunion = r; sincronizar(); panel(r.id); vigilar(r.id); })
           .catch(function (e) { err.textContent = e.message; ir.disabled = false; });
       }
     }, 'Empezar reunión');
-    App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), ir);
+    App.add(hj.pie, App.acciones([h('button.btn', { onclick: cancelar }, 'Cancelar')], ir));
+    extras();
   }
 
   /* ---------------- seguimiento en vivo ---------------- */
@@ -187,7 +200,7 @@
     var r = E.reunion && E.reunion.id === id ? E.reunion : null;
     if (r) pintarPanel(r);
     else {
-      App.vaciar(App.dom.derecho).appendChild(h('div.vacio', h('span.giro')));
+      App.vaciar(App.dom.derecho).appendChild(App.cargando('Abriendo la reunión…'));
       api.get('/api/reuniones/' + id).then(function (d) { if (activa(d)) { E.reunion = d; sincronizar(); if (d.estado === 'en_curso') vigilar(d.id); } pintarPanel(d); }).catch(App.fallo);
     }
     sincronizar();
@@ -279,15 +292,27 @@
   /* resumen de lo dicho hasta ahora, sin cerrar: para pensar qué contestar */
   function resumenParcial(r) {
     var s = r.resumenParcial;
-    if (!s) return h('div.sintesis', h('div.ayuda', { style: { margin: 0 } }, h('span.giro'), ' Armando un resumen de lo dicho hasta ahora…'));
+    if (!s) return h('div.sintesis', App.cargando('Armando un resumen de lo dicho hasta ahora…'));
     var nuevos = r.turnos.length - (s.turnos || 0);
     return h('div.sintesis',
       h('h4', 'Resumen hasta acá'),
       h('div.ayuda', { style: { marginTop: 0 } }, App.fecha(s.ts) + (nuevos > 0 ? ' · desde entonces hubo ' + (nuevos === 1 ? '1 intervención más' : nuevos + ' intervenciones más') : '') + ' · la reunión sigue abierta'),
       h('p', s.resumen || '—'),
-      s.abiertas && s.abiertas.length ? [h('h4', 'Esperan tu respuesta'), h('ul', s.abiertas.map(function (d) { return h('li', d); }))] : null,
+      s.abiertas && s.abiertas.length ? [h('h4', 'Esperan tu respuesta'), h('div.ayuda', { style: { marginTop: 0 } }, 'Tocá una para responderla.'),
+        h('div.chips-preguntas', s.abiertas.map(function (d) { return h('button.chip.pregunta', { type: 'button', title: 'Responder esto', onclick: function () { responderA(r, d); } }, d); }))] : null,
       s.decisiones && s.decisiones.length ? [h('h4', 'Lo que ya parece acordado'), h('ul', s.decisiones.map(function (d) { return h('li', d); }))] : null,
       s.pendientes && s.pendientes.length ? [h('h4', 'Próximos pasos propuestos'), h('ul', s.pendientes.map(function (p) { return h('li', p.quien ? [h('b', p.quien + ': '), p.que] : p.que); }))] : null);
+  }
+
+  /* una pregunta abierta: carga el texto en el campo de intervención para contestarla */
+  function responderA(r, pregunta) {
+    var txt = App.dom.derecho.querySelector('.reunion-txt');
+    if (!txt) return;
+    var v = 'Sobre «' + pregunta + '»: ';
+    txt.value = v; borrador[r.id] = v;
+    txt.style.height = 'auto'; txt.style.height = Math.min(160, txt.scrollHeight + 2) + 'px';
+    txt.focus();
+    txt.setSelectionRange(v.length, v.length);
   }
 
   function resumir(r) {
@@ -304,42 +329,56 @@
     return h('div.sintesis',
       h('h4', 'Resumen'), h('p', s.resumen || '—'),
       s.decisiones && s.decisiones.length ? [h('h4', 'Decisiones'), h('ul', s.decisiones.map(function (d) { return h('li', d); }))] : null,
-      s.pendientes && s.pendientes.length ? [h('h4', 'Pendientes'), h('ul.pendientes', s.pendientes.map(function (p, i) {
-        return h('li', h('div', h('b', p.quien + ': '), p.que), accionesPendiente(r, p, i, (r.pendientesEstado || [])[i]));
-      })), accionesGenerales(r, s)] : null,
-      r.acta ? h('div.ayuda', { style: { marginTop: '10px' } }, 'Acta guardada en ' + r.acta + '. Las decisiones se sumaron a la memoria de la oficina.') : null,
-      r.salidaRuta ? h('div.ayuda', 'Archivo de salida: ' + r.salida) : null);
+      s.pendientes && s.pendientes.length ? pendientes(r, s) : null,
+      r.acta ? h('div.ayuda', { style: { marginTop: '10px' } }, 'Las decisiones se sumaron a la memoria de la oficina.') : null);
   }
 
   /* ---------------- pendientes que se ejecutan ---------------- */
-  /* «Encargar todo» (si hay más de un encargable sin encargo) y «Pasar a flujo» (si algún pendiente depende de otro) */
-  function accionesGenerales(r, s) {
+  /* agrupados por quién tiene que actuar: vos, los agentes, los que te necesitan, lo que está en marcha y lo hecho */
+  function pendientes(r, s) {
     var ests = r.pendientesEstado || [];
+    var G = { vos: [], agentes: [], necesitan: [], marcha: [], hechos: [], otros: [] };
+    s.pendientes.forEach(function (p, i) {
+      var est = ests[i];
+      if (!est) { G.otros.push(filaPendiente(r, s, p, i, null)); return; }
+      var enc = est.encargo, esp = est.espera;
+      var haciendo = enc && (enc.estado === 'corriendo' || enc.estado === 'esperando_permiso');
+      var g = est.hecho || (enc && enc.entrega) ? 'hechos'
+        : esp || haciendo ? 'marcha'
+        : est.encargable ? 'agentes'
+        : !est.agente ? 'vos' : 'necesitan';
+      G[g].push(filaPendiente(r, s, p, i, est));
+    });
     var porEncargar = ests.filter(function (e) { return e.encargable && !e.encargo && !e.espera; }).length;
-    var hayDeps = (s.pendientes || []).some(function (p) { return p.depende_de && p.depende_de.length; });
-    if (porEncargar < 2 && !hayDeps) return null;
-    var fila = h('div.acciones-pendiente', { style: { marginTop: '8px' } });
-    if (porEncargar > 1) {
-      fila.appendChild(h('button.btn.chico', { onclick: function (ev) {
+    var hayDeps = s.pendientes.some(function (p) { return p.depende_de && p.depende_de.length; });
+    var secs = [];
+    if (G.otros.length) secs.push(App.seccion('Pendientes', G.otros, { cuenta: G.otros.length }));
+    if (G.vos.length) secs.push(App.seccion('Te toca a vos', G.vos, { cuenta: G.vos.length }));
+    if (G.agentes.length) {
+      var todo = porEncargar > 1 ? h('button.btn.chico', { onclick: function (ev) {
         ev.currentTarget.disabled = true;
         api.post('/api/reuniones/' + r.id + '/pendientes/encargar-todos').then(function (d) {
           r.pendientesEstado = d.pendientesEstado; pintarPanel(r); vigilarPendientes(r.id);
           App.aviso('Encargado: los que dependen de otros arrancan cuando esos entreguen.');
         }).catch(function (e) { App.fallo(e); pintarPanel(r); });
-      } }, 'Encargar todo'));
+      } }, 'Encargar todo') : null;
+      secs.push(App.seccion('Lo pueden hacer los agentes', G.agentes, { cuenta: G.agentes.length, accion: todo }));
     }
+    if (G.necesitan.length) secs.push(App.seccion('Te necesitan para seguir', G.necesitan, { cuenta: G.necesitan.length, ayuda: 'No lo pueden hacer solos: falta tu parte.' }));
+    if (G.marcha.length) secs.push(App.seccion('En marcha o esperando', G.marcha, { cuenta: G.marcha.length }));
+    if (G.hechos.length) secs.push(App.seccion('Hechos', h('details.pend-hechos', h('summary', 'Mostrar los ' + G.hechos.length), G.hechos), { cuenta: G.hechos.length }));
     if (hayDeps) {
-      fila.appendChild(h('button.btn.chico.fantasma', { title: 'Arma un flujo con estos pasos para repetirlo otra vez', onclick: function () {
+      secs.push(App.acciones(null, h('button.btn.chico.fantasma', { title: 'Arma un flujo con estos pasos para repetirlo otra vez', onclick: function () {
         api.post('/api/reuniones/' + r.id + '/flujo').then(function (d) {
           if (App.Flujos && App.Flujos.editor) App.Flujos.editor(null, d.borrador);
         }).catch(App.fallo);
-      } }, App.icono('flujo'), 'Pasar a flujo'));
+      } }, App.icono('flujo'), 'Pasar a flujo')));
     }
-    return fila;
+    return h('div.pendientes', secs);
   }
 
   function nombresDe(ids) {
-    var ns = (ids || []).map(function (id) { return id === 'persona' ? 'vos' : ((App.agente(id) || {}).nombre || id); });
+    var ns = (ids || []).map(function (id) { return id === 'persona' ? 'vos' : App.humano.quien(id); });
     return ns.length < 2 ? ns.join('') : ns.slice(0, -1).join(', ') + (ns[ns.length - 1] === 'vos' ? ' y a vos' : ' y ' + ns[ns.length - 1]);
   }
 
@@ -359,69 +398,73 @@
     App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), ok);
   }
 
-  /* debajo de cada pendiente del acta: «Hacelo ahora» / «Convertir en tarea», o en qué quedó (trabajando, entregado, revisado) */
-  function accionesPendiente(r, p, i, est) {
-    if (!est) return null;
-    var fila = h('div.acciones-pendiente');
-    var enc = est.encargo, esp = est.espera;
+  /* una fila por pendiente: el qué como título, de quién depende y en qué quedó como bajada, UN botón principal y el resto en «⋯» */
+  function filaPendiente(r, s, p, i, est) {
+    var ag = est && est.agente && App.agente(est.agente);
+    var marca = ag || (est && est.agente ? h('div.retrato') : App.Yo.retrato('retrato', 64));
+    if (!est) return App.filaDecision({ marca: marca, titulo: p.que, sub: p.quien ? App.humano.quien(p.quien) : null });
+    var sub = [ag ? ag.nombre : est.agente ? App.humano.quien(est.agente) : 'Vos'];
     if (est.dependeDe && est.dependeDe.length) {
-      fila.appendChild(h('span.insignia', { title: 'Tiene que esperar a que estos pendientes estén hechos' }, 'Depende de ' + est.dependeDe.map(function (d) { return d + 1; }).join(', ')));
+      sub.push('Después de ' + est.dependeDe.map(function (d) { var x = s.pendientes[d]; return '«' + (x ? x.que : 'otro pendiente') + '»'; }).join(' y '));
     }
+    (est.tareas || []).forEach(function (t) { sub.push('Tarea: ' + t.nombre); });
+    var estado = null, principal = null, mas = [];
+    var enc = est.encargo, esp = est.espera;
     if (esp) {
       var texto = esp.estado === 'relanzada' ? 'Arrancando…' : esp.estado === 'lista' ? 'Ya llegó todo, arranca enseguida' : 'Esperando a ' + nombresDe(esp.esperaA);
-      fila.appendChild(h('span.insignia.aviso', esp.estado === 'esperando' ? App.icono('reloj') : h('span.giro'), ' ' + texto));
+      estado = h('span.insignia.aviso', esp.estado === 'esperando' ? App.icono('reloj') : h('span.giro'), ' ' + texto);
       vigilarPendientes(r.id);
       if (esp.estado !== 'relanzada') {
-        fila.appendChild(h('button.btn.chico', { title: 'Lo hace ahora, con lo que haya', onclick: function (ev) {
+        principal = h('button.btn.chico', { title: 'Lo hace ahora, con lo que haya', onclick: function (ev) {
           ev.currentTarget.disabled = true;
           api.post('/api/reuniones/' + r.id + '/pendientes/' + i + '/encargar', { forzar: true }).then(function (d) {
             r.pendientesEstado = d.pendientesEstado; pintarPanel(r); vigilarPendientes(r.id);
             App.aviso('Arrancó sin esperar.');
           }).catch(function (e) { App.fallo(e); pintarPanel(r); });
-        } }, 'Arrancar igual'));
-        fila.appendChild(h('button.btn.chico.fantasma', { onclick: function (ev) {
-          ev.currentTarget.disabled = true;
+        } }, 'Arrancar igual');
+        mas.push({ texto: 'Cancelar espera', icono: 'cerrar', accion: function () {
           Promise.all((esp.ids || []).map(function (id) { return api.post('/api/esperas/' + id + '/cancelar').catch(function () {}); })).then(function () {
             App.aviso('Espera cancelada.'); refrescar(r.id);
           });
-        } }, 'Cancelar espera'));
+        } });
       }
     }
     if (est.hecho) {
-      fila.appendChild(h('span.insignia.ok', 'Hecho por vos'));
+      estado = h('span.insignia.ok', 'Hecho por vos');
     } else if (enc && enc.estado === 'corriendo') {
-      fila.appendChild(h('span.insignia.aviso', h('span.giro'), ' Trabajando en esto…'));
+      estado = h('span.insignia.aviso', h('span.giro'), ' Trabajando en esto…');
       vigilarPendientes(r.id);
     } else if (enc && enc.estado === 'esperando_permiso') {
-      fila.appendChild(h('span.insignia.aviso', 'Esperando tu permiso'));
+      estado = h('span.insignia.aviso', 'Esperando tu permiso');
       vigilarPendientes(r.id);
     } else if (enc && enc.entrega) {
       var revisada = enc.entregaEstado === 'revisada';
-      fila.appendChild(h('span.insignia' + (revisada ? '.ok' : '.aviso'), revisada ? 'Entregado y revisado' : 'Entregado · sin revisar'));
-      fila.appendChild(h('button.btn.chico', { onclick: function () { if (App.Entregables) App.Entregables.abrir(enc.entrega); } }, 'Ver entrega'));
+      estado = h('span.insignia' + (revisada ? '.ok' : '.aviso'), revisada ? 'Entregado y revisado' : 'Entregado · sin revisar');
+      principal = h('button.btn.chico', { onclick: function () { if (App.Entregables) App.Entregables.abrir(enc.entrega); } }, 'Ver entrega');
     } else if (enc && enc.estado === 'error') {
-      fila.appendChild(h('span.insignia.error', { title: enc.error || '' }, 'Falló'));
+      estado = h('span.insignia.error', { title: enc.error || '' }, 'Falló');
     }
-    if (est.encargable && !(enc && (enc.estado === 'corriendo' || enc.estado === 'esperando_permiso')) && !esp) {
-      fila.appendChild(h('button.btn.chico' + (enc ? '.fantasma' : ''), { onclick: function (ev) {
-        ev.currentTarget.disabled = true;
+    var haciendo = enc && (enc.estado === 'corriendo' || enc.estado === 'esperando_permiso');
+    if (est.encargable && !haciendo && !esp) {
+      var encargar = function (btn) {
+        if (btn) btn.disabled = true;
         api.post('/api/reuniones/' + r.id + '/pendientes/' + i + '/encargar').then(function (d) {
           r.pendientesEstado = d.pendientesEstado; pintarPanel(r); vigilarPendientes(r.id);
-          App.aviso((App.agente(est.agente) || {}).nombre ? App.agente(est.agente).nombre + ' se puso a trabajar en eso.' : 'Encargado.');
+          App.aviso(ag ? ag.nombre + ' se puso a trabajar en eso.' : 'Encargado.');
         }).catch(function (e) { App.fallo(e); pintarPanel(r); });
-      } }, enc ? 'Hacerlo de nuevo' : 'Hacelo ahora'));
-      fila.appendChild(h('button.btn.chico.fantasma', { onclick: function () {
+      };
+      if (principal) mas.push({ texto: 'Hacerlo de nuevo', icono: 'enviar', accion: function () { encargar(null); } });
+      else principal = h('button.btn.chico' + (enc ? '' : '.primario'), { onclick: function (ev) { encargar(ev.currentTarget); } }, enc ? 'Hacerlo de nuevo' : 'Hacelo ahora');
+      mas.push({ texto: 'Convertir en tarea', icono: 'parte', accion: function () {
         if (!App.Agente || !App.Agente.nuevaTarea) return;
         App.Agente.nuevaTarea(est.agente, { nombre: p.que.length > 80 ? p.que.slice(0, 79) + '…' : p.que,
           consigna: 'Pendiente de la reunión «' + r.tema + '»' + (r.acta ? ' (acta: ' + r.acta + ')' : '') + ': ' + p.que,
           origen: { reunion: r.id, pendiente: i }, unica: true }, function () { refrescar(r.id); });
-      } }, 'Convertir en tarea'));
-    } else if (!est.encargable && !est.hecho) {
-      fila.appendChild(h('span.ayuda', { style: { margin: 0 } }, !est.agente ? 'Te toca a vos.' : 'Necesita tu parte: ' + ((App.agente(est.agente) || {}).nombre || 'el agente') + ' no lo puede hacer solo.'));
-      if (!enc) fila.appendChild(h('button.btn.chico', { title: 'Marcalo como hecho: lo que dependa de esto puede seguir', onclick: function () { yaLoHice(r, i, p); } }, 'Ya lo hice'));
+      } });
+    } else if (!est.encargable && !est.hecho && !enc) {
+      principal = h('button.btn.chico.primario', { title: 'Marcalo como hecho: lo que dependa de esto puede seguir', onclick: function () { yaLoHice(r, i, p); } }, 'Ya lo hice');
     }
-    (est.tareas || []).forEach(function (t) { fila.appendChild(h('span.insignia', { title: 'Tarea programada que salió de este pendiente' }, 'Tarea: ' + t.nombre)); });
-    return fila.childNodes.length ? fila : null;
+    return App.filaDecision({ marca: marca, titulo: p.que, sub: sub.join(' · '), estado: estado, principal: principal, mas: mas });
   }
 
   function refrescar(id) {

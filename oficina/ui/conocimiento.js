@@ -5,18 +5,22 @@
   'use strict';
   var h = App.h, api = App.api;
   var TIPOS = { oficina: 'Memoria común', decision: 'Decisión', notas: 'Notas', acta: 'Acta', ficha: 'Documento', entregable: 'Entregable', pregunta: 'Pregunta frecuente' };
-  var VENCE = [['', 'No vence'], ['30', 'A los 30 días'], ['60', 'A los 60 días'], ['90', 'A los 90 días'], ['180', 'A los 6 meses'], ['365', 'Al año']];
+  var VENCE = [['', 'No vence'], ['30', '30 días'], ['60', '60 días'], ['90', '90 días'], ['180', '6 meses'], ['365', '1 año']];
   var reloj = null;
+
+  /* lo que cuenta como «Sugerencias»: el mismo criterio en la insignia lateral y en la pestaña */
+  function contar(st) { return (st.pendientes || 0) + (st.vencidas || 0) + (st.sugerencias || 0) + (st.obsoletos || 0); }
 
   /* insignia de la barra lateral: cuántas cosas esperan a la persona */
   function vigilarEstado() {
     clearTimeout(reloj);
     api.get('/api/conocimiento/estado').then(function (st) {
       var b = App.dom && App.dom.navCon;
-      var n = (st.pendientes || 0) + (st.vencidas || 0) + (st.sugerencias || 0);
+      var n = contar(st);
       if (b) {
         b.className = 'insignia' + (st.pendientes ? ' aviso' : n ? ' info' : ' oculto');
-        b.textContent = n ? n + ' para revisar' : '';
+        b.textContent = n ? n + (n === 1 ? ' sugerencia' : ' sugerencias') : '';
+        b.title = n ? 'Para revisar en Conocimiento › Sugerencias' : '';
       }
       reloj = setTimeout(vigilarEstado, 30000);
     }).catch(function () { reloj = setTimeout(vigilarEstado, 60000); });
@@ -34,7 +38,17 @@
   function nombre(id) { var a = App.agente(id); return a ? a.nombre : id; }
   function cuando(iso) { return App.hace(iso) || ''; }
   function vacio(texto) { return h('div.vacio', texto); }
-  function cargando() { return h('div.vacio', h('span.giro')); }
+  function cargando(texto) { return App.cargando(texto); }
+  /* «⋯» con el resto de las acciones */
+  function masBoton(items) {
+    return h('button.btn.fantasma.icono.chico', { title: 'Más opciones', 'aria-label': 'Más opciones', onclick: function (ev) { App.menu(ev.currentTarget, items); } }, App.icono('puntos'));
+  }
+  /* una ruta o referencia cruda → botón «Abrir» (si apunta a un archivo de la oficina) */
+  function botonAbrir(ruta) {
+    if (!ruta || !/\.[A-Za-z0-9]{1,6}$/.test(String(ruta).split('#')[0]) || !App.ChatRico) return null;
+    var r = App.humano.ruta(ruta);
+    return h('button.btn.chico.fantasma', { title: r.completa, onclick: function () { App.ChatRico.abrirArchivo(String(ruta).split('#')[0]); } }, App.icono('abrir'), 'Abrir');
+  }
 
   /* ---------------- formulario de una pregunta (alta o edición) ---------------- */
   function formPregunta(p, listo) {
@@ -42,21 +56,22 @@
     p = p || {};
     var hj = App.hoja({ titulo: nueva ? 'Agregar pregunta frecuente' : 'Editar pregunta frecuente', ancho: 560 });
     function campo(etq, el, ayuda) { return h('div.fila-campo', h('label.etiqueta-campo', etq), el, ayuda ? h('div.ayuda', ayuda) : null); }
-    var ag = h('select.campo', { disabled: !nueva }, (App.E.oficina.agentes || []).map(function (a) { return h('option', { value: a.id, selected: a.id === p.agente }, a.nombre + ' · ' + a.rol); }));
+    var ag = nueva ? App.elegir({ opciones: (App.E.oficina.agentes || []).map(function (a) { return { valor: a.id, titulo: a.nombre, sub: null, retrato: a }; }), valor: p.agente || ((App.E.oficina.agentes || [])[0] || {}).id })
+      : h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, App.agente(p.agente) ? App.retratoImg(App.agente(p.agente), 'retrato-mini', 48) : null, h('b', p.agenteNombre || App.humano.quien(p.agente)));
     var preg = h('input.campo', { value: p.pregunta || '', maxlength: 4000, placeholder: 'Ej.: ¿Cuánto cuesta el curso Glow?' });
     var resp = h('textarea.campo', { rows: 6, maxlength: 12000 }); resp.value = p.respuesta || '';
     var tema = h('input.campo', { value: p.tema || '', maxlength: 60, placeholder: 'Ej.: precios del curso' });
-    var vence = h('select.campo', VENCE.map(function (v) { return h('option', { value: v[0], selected: String(p.venceDias || '') === v[0] }, v[1]); }));
+    var vence = App.elegir({ opciones: VENCE.map(function (v) { return { valor: v[0], titulo: v[1] }; }), valor: String(p.venceDias || '') });
     var err = h('div.error-txt');
     App.add(hj.cuerpo,
       campo('Quién responde', ag, nueva ? 'A quién le preguntarían esto.' : null),
       campo('Pregunta', preg), campo('Respuesta', resp, nueva ? null : 'Si cambiás la pregunta o la respuesta, la versión anterior queda en el historial.'),
-      h('div.dos', campo('Tema', tema), campo('Vence', vence, 'Para temas que cambian rápido (precios, fechas).')), err);
+      campo('Tema', tema), campo('Vence', vence, 'Para temas que cambian rápido (precios, fechas).'), err);
     var guardar = h('button.btn.primario', { onclick: function () {
-      var cuerpo = { pregunta: preg.value.trim(), respuesta: resp.value.trim(), tema: tema.value.trim(), venceDias: vence.value ? Number(vence.value) : null };
+      var cuerpo = { pregunta: preg.value.trim(), respuesta: resp.value.trim(), tema: tema.value.trim(), venceDias: vence.valor() ? Number(vence.valor()) : null };
       if (!cuerpo.pregunta || !cuerpo.respuesta) { err.textContent = 'Faltan la pregunta y la respuesta.'; return; }
       guardar.disabled = true;
-      var pedido = nueva ? api.post('/api/conocimiento/preguntas', Object.assign({ agente: ag.value }, cuerpo)) : api.patch('/api/conocimiento/preguntas/' + p.id, cuerpo);
+      var pedido = nueva ? api.post('/api/conocimiento/preguntas', Object.assign({ agente: ag.valor() }, cuerpo)) : api.patch('/api/conocimiento/preguntas/' + p.id, cuerpo);
       pedido.then(function () { hj.cerrar(); App.aviso('Guardado.'); listo(); vigilarEstado(); })
         .catch(function (e) { err.textContent = e.message; guardar.disabled = false; });
     } }, 'Guardar');
@@ -65,7 +80,7 @@
 
   function historial(p) {
     var hj = App.hoja({ titulo: 'Historial de la pregunta', ancho: 600, sinPie: true });
-    var cont = h('div', { style: { padding: '4px 0' } }, cargando());
+    var cont = h('div', { style: { padding: '4px 0' } }, cargando('Trayendo el historial…'));
     hj.cuerpo.appendChild(cont);
     api.get('/api/conocimiento/preguntas/' + p.id + '/historial').then(function (r) {
       App.vaciar(cont);
@@ -83,18 +98,22 @@
     var meta = [p.agenteNombre];
     if (p.deNombre) meta.push('le preguntó ' + p.deNombre);
     meta.push('confirmada ' + cuando(p.confirmada));
-    var acciones = h('div.con-acciones',
-      h('button.btn.chico' + (p.vencida ? '.primario' : ''), { onclick: function () {
-        api.post('/api/conocimiento/preguntas/' + p.id + '/confirmar').then(function () { App.aviso('Confirmada.'); refrescar(); vigilarEstado(); }).catch(App.fallo);
-      } }, 'Sigue valiendo'),
-      h('button.btn.chico', { onclick: function () { formPregunta(p, refrescar); } }, App.icono('lapiz'), 'Editar'),
-      p.versiones > 1 ? h('button.btn.chico.fantasma', { onclick: function () { historial(p); } }, p.versiones + ' versiones') : null,
-      h('span', { style: { flex: 1 } }),
-      h('button.btn.chico.fantasma.icono', { title: 'Borrar', onclick: function () {
+    var mas = [
+      { texto: 'Editar', icono: 'lapiz', accion: function () { formPregunta(p, refrescar); } },
+      p.versiones > 1 ? { texto: 'Historial', icono: 'reloj', nota: p.versiones + ' versiones', accion: function () { historial(p); } } : null,
+      '-',
+      { texto: 'Borrar', icono: 'papelera', peligro: true, accion: function () {
         App.confirmar('¿Borrar esta pregunta?', 'Deja de aparecer en las búsquedas de los agentes. Su historial queda guardado.', 'Borrar', true).then(function (si) {
           if (si) api.del('/api/conocimiento/preguntas/' + p.id).then(function () { refrescar(); vigilarEstado(); }).catch(App.fallo);
         });
-      } }, App.icono('papelera')));
+      } }
+    ].filter(Boolean);
+    var acciones = App.acciones(null, [
+      h('button.btn.chico' + (p.vencida ? '.primario' : ''), { onclick: function () {
+        api.post('/api/conocimiento/preguntas/' + p.id + '/confirmar').then(function () { App.aviso('Confirmada.'); refrescar(); vigilarEstado(); }).catch(App.fallo);
+      } }, 'Sigue valiendo'),
+      masBoton(mas)]);
+    acciones.classList.add('con-acciones');
     return h('div.con-item',
       h('div.con-cab', h('span.con-tit', p.pregunta), p.vencida ? h('span.insignia.aviso', 'Vencida') : null, p.tema ? h('span.con-tema', p.tema) : null),
       h('div.con-resp', p.respuesta),
@@ -111,10 +130,10 @@
       var q = inp.value.trim(); estado.q = q;
       if (!q) {
         App.vaciar(res).appendChild(h('div.ayuda', { style: { padding: '8px 2px' } },
-          'Busca en la memoria común, las decisiones, las notas de cada agente, las actas de reuniones, las fichas de la biblioteca, los entregables y las respuestas de los agentes a sus colegas. Lo más nuevo aparece primero. Es lo mismo que usan los agentes con buscar().'));
+          'Busca en la memoria común, las decisiones, las notas de cada agente, las actas de reuniones, las fichas de la biblioteca, los entregables y las respuestas de los agentes a sus colegas. Lo más nuevo aparece primero. Los agentes consultan lo mismo cuando necesitan saber algo.'));
         return;
       }
-      App.vaciar(res).appendChild(cargando());
+      App.vaciar(res).appendChild(cargando('Buscando…'));
       api.get('/api/conocimiento/buscar', { q: q }).then(function (r) {
         if (inp.value.trim() !== q) return;
         App.vaciar(res);
@@ -129,12 +148,12 @@
               });
             } }, 'Está desactualizado');
           res.appendChild(h('div.con-item' + (x.obsoleto ? '.obsoleto' : ''),
-            h('div.con-cab', h('span.insignia', TIPOS[x.tipo] || x.tipo), h('span.con-tit', x.titulo || x.ruta),
+            h('div.con-cab', h('span.insignia', TIPOS[x.tipo] || x.tipo), h('span.con-tit', x.titulo || App.humano.ruta(x.ruta).corta),
               x.vencida ? h('span.insignia.aviso', 'Vencida') : null,
               h('span.con-meta', (x.autorNombre ? x.autorNombre + ' · ' : '') + x.fecha)),
             fragmento(x.fragmento),
             x.obsoleto ? h('div.ayuda', 'Desactualizado' + (x.obsoleto.motivo ? ': ' + x.obsoleto.motivo : '') + ' (marcado por ' + x.obsoleto.por + ', ' + x.obsoleto.fecha + ')') : null,
-            h('div.con-acciones', h('span.con-ruta', x.tipo === 'pregunta' ? 'Pregunta frecuente' : x.ruta), marcar)));
+            h('div.con-acciones', h('span.con-ruta'), x.tipo === 'pregunta' ? null : botonAbrir(x.ruta), marcar)));
         });
       }).catch(function (e) { App.vaciar(res).appendChild(vacio(e.message)); });
     }
@@ -145,16 +164,15 @@
   }
 
   function pintarPreguntas(cuerpo, estado) {
-    var ag = h('select.campo', { style: { width: '200px' } }, [h('option', { value: '' }, 'Todos los agentes')].concat((App.E.oficina.agentes || []).map(function (a) {
-      return h('option', { value: a.id, selected: estado.agente === a.id }, a.nombre);
-    })));
+    var ag = App.elegir({ opciones: [{ valor: '', titulo: 'Todos' }].concat((App.E.oficina.agentes || []).map(function (a) { return { valor: a.id, titulo: a.nombre, retrato: a }; })),
+      valor: estado.agente || '', etiqueta: 'Filtrar por agente', alCambiar: function () { cargar(); } });
     var filtro = h('input.campo', { value: estado.filtro || '', placeholder: 'Filtrar por palabra' });
     var lista = h('div');
-    App.add(cuerpo, h('div.con-barra', ag, h('div', { style: { flex: 1, minWidth: '160px' } }, filtro),
-      h('button.btn.primario', { onclick: function () { formPregunta(null, cargar); } }, App.icono('mas'), 'Agregar')), lista);
+    App.add(cuerpo, h('div.con-barra', h('div', { style: { flex: 1, minWidth: '160px' } }, filtro),
+      h('button.btn.primario', { onclick: function () { formPregunta(null, cargar); } }, App.icono('mas'), 'Agregar')), h('div.con-barra', ag), lista);
     function cargar() {
-      estado.agente = ag.value; estado.filtro = filtro.value.trim();
-      App.vaciar(lista).appendChild(cargando());
+      estado.agente = ag.valor(); estado.filtro = filtro.value.trim();
+      App.vaciar(lista).appendChild(cargando('Trayendo las preguntas…'));
       api.get('/api/conocimiento/preguntas', { agente: estado.agente, q: estado.filtro }).then(function (r) {
         App.vaciar(lista);
         if (!r.preguntas.length) {
@@ -165,13 +183,12 @@
         r.preguntas.forEach(function (p) { lista.appendChild(tarjetaPregunta(p, cargar)); });
       }).catch(function (e) { App.vaciar(lista).appendChild(vacio(e.message)); });
     }
-    ag.addEventListener('change', cargar);
     filtro.addEventListener('input', App.debounce(cargar, 300));
     cargar();
   }
 
   function pintarRevisar(cuerpo, alCambiar) {
-    var cont = h('div', cargando());
+    var cont = h('div', cargando('Trayendo lo que hay para revisar…'));
     cuerpo.appendChild(cont);
     function refrescar() { alCambiar(); cargar(); vigilarEstado(); }
     function cargar() {
@@ -183,55 +200,59 @@
       ]).then(function (rs) {
         var pend = rs[0].preguntas, venc = rs[1].preguntas, sug = rs[2].sugerencias, obs = rs[3].obsoletos;
         App.vaciar(cont);
-        if (!pend.length && !venc.length && !sug.length && !obs.length) { cont.appendChild(vacio('Nada para revisar. 🎉')); return; }
+        if (!pend.length && !venc.length && !sug.length && !obs.length) { cont.appendChild(App.vacio('bombilla', 'Nada para revisar', 'Acá aparecen las respuestas que no coinciden, las vencidas y lo que los agentes sugieren sumar o sacar de lo que saben.')); return; }
+        /* en todas las filas: la alternativa en fantasma, la principal a la derecha y el resto en «⋯» */
         if (pend.length) {
-          cont.appendChild(h('div.con-sec-tit', 'Respuestas que no coinciden'));
-          pend.forEach(function (p) {
+          var filasPend = pend.map(function (p) {
             var c = p.contradice || {};
             function resolver(q) { api.post('/api/conocimiento/preguntas/' + p.id + '/resolver', { quedarse: q }).then(refrescar).catch(App.fallo); }
-            cont.appendChild(h('div.con-item',
-              h('div.con-cab', h('span.insignia.aviso', 'No coinciden'), h('span.con-tit', p.pregunta)),
+            return h('div.con-item',
+              h('div.con-cab', h('span.con-tit', p.pregunta)),
               h('div.con-dos',
                 h('div.con-lado', h('h5', 'Antes · ' + (c.agenteNombre || '')), c.respuesta || '(ya no está)'),
                 h('div.con-lado', h('h5', 'Ahora · ' + p.agenteNombre + ' · ' + App.fecha(p.creada)), p.respuesta)),
-              h('div.con-acciones',
+              App.acciones(null, [
+                h('button.btn.chico.fantasma', { onclick: function () { resolver('anterior'); } }, 'Vale la anterior'),
                 h('button.btn.chico.primario', { onclick: function () { resolver('nueva'); } }, 'Vale la nueva'),
-                h('button.btn.chico', { onclick: function () { resolver('anterior'); } }, 'Vale la anterior'),
-                h('button.btn.chico.fantasma', { onclick: function () { resolver('ambas'); } }, 'Valen las dos'))));
+                masBoton([{ texto: 'Valen las dos', accion: function () { resolver('ambas'); } }])]));
           });
+          cont.appendChild(App.seccion('Respuestas que no coinciden', filasPend, { cuenta: String(pend.length), ayuda: 'Dos agentes contestaron distinto a lo mismo. Elegí cuál vale.' }));
         }
         if (venc.length) {
-          cont.appendChild(h('div.con-sec-tit', 'Respuestas vencidas (¿siguen valiendo?)'));
-          venc.forEach(function (p) { cont.appendChild(tarjetaPregunta(p, refrescar)); });
+          cont.appendChild(App.seccion('Respuestas vencidas', venc.map(function (p) { return tarjetaPregunta(p, refrescar); }), { cuenta: String(venc.length), ayuda: '¿Siguen valiendo?' }));
         }
         if (sug.length) {
-          cont.appendChild(h('div.con-sec-tit', 'Sugerencias para el «sabe de»'));
-          sug.forEach(function (s) {
-            var txt = s.tipo === 'agregar'
-              ? ['Sumar ', h('b', '«' + s.tema + '»'), ' a lo que sabe ' + s.agenteNombre, h('span.con-meta', ' · respondió ' + s.veces + ' preguntas sobre esto')]
-              : ['Sacar ', h('b', '«' + s.tema + '»'), ' de lo que sabe ' + s.agenteNombre, h('span.con-meta', ' · hace meses que nadie le pregunta por esto')];
+          var filasSug = sug.map(function (s) {
+            var agregar = s.tipo === 'agregar';
             function decidir(aceptar) {
               api.post('/api/conocimiento/sugerencias', { agente: s.agente, tema: s.tema, tipo: s.tipo, aceptar: aceptar }).then(function (r) {
                 if (aceptar && r.oficina) App.actualizar(r.oficina);
                 refrescar();
               }).catch(App.fallo);
             }
-            cont.appendChild(h('div.con-item', h('div.con-cab', h('span', { style: { flex: 1 } }, txt),
-              h('button.btn.chico.primario', { onclick: function () { decidir(true); } }, s.tipo === 'agregar' ? 'Sumar' : 'Sacar'),
-              h('button.btn.chico.fantasma', { onclick: function () { decidir(false); } }, 'Ahora no'))));
+            return App.filaDecision({
+              marca: App.agente(s.agente) || 'bombilla',
+              titulo: (agregar ? 'Sumar «' : 'Sacar «') + s.tema + '»',
+              sub: (agregar ? 'A lo que sabe ' + s.agenteNombre + ' · respondió ' + s.veces + ' preguntas sobre esto' : 'De lo que sabe ' + s.agenteNombre + ' · hace meses que nadie le pregunta por esto'),
+              principal: [
+                h('button.btn.chico.fantasma', { onclick: function () { decidir(false); } }, 'Ahora no'),
+                h('button.btn.chico.primario', { onclick: function () { decidir(true); } }, agregar ? 'Sumar' : 'Sacar')]
+            });
           });
+          cont.appendChild(App.seccion('Sugerencias para «Sabe de»', filasSug, { cuenta: String(sug.length) }));
         }
         if (obs.length) {
-          cont.appendChild(h('div.con-sec-tit', 'Marcado como desactualizado'));
-          obs.forEach(function (o) {
-            cont.appendChild(h('div.con-item.obsoleto',
-              h('div.con-cab', h('span.con-tit', o.titulo || o.ref), h('span.con-meta', (o.por ? nombre(o.por) : 'Vos') + ' · ' + App.hace(o.ts))),
+          var filasObs = obs.map(function (o) {
+            var r = App.humano.ruta(o.ref);
+            return h('div.con-item.obsoleto',
+              h('div.con-cab', h('span.con-tit', o.titulo || r.corta), h('span.con-meta', (o.por ? App.humano.quien(o.por) : 'Vos') + ' · ' + App.hace(o.ts))),
               h('div.con-frag', o.fragmento),
               o.motivo ? h('div.ayuda', 'Motivo: ' + o.motivo) : null,
-              h('div.con-acciones', h('span.con-ruta', o.ref), h('button.btn.chico', { onclick: function () {
+              App.acciones(null, [botonAbrir(o.ref), h('button.btn.chico.primario', { onclick: function () {
                 api.del('/api/conocimiento/obsoleto?ref=' + encodeURIComponent(o.hash)).then(refrescar).catch(App.fallo);
-              } }, 'Sigue valiendo'))));
+              } }, 'Sigue valiendo')]));
           });
+          cont.appendChild(App.seccion('Marcado como desactualizado', filasObs, { cuenta: String(obs.length) }));
         }
       }).catch(function (e) { App.vaciar(cont).appendChild(vacio(e.message)); });
     }
@@ -240,7 +261,7 @@
 
   function pintarQuien(cuerpo, hj) {
     var inp = h('input.campo', { placeholder: '¿Quién sabe de…? Ej.: presupuesto de anuncios', autofocus: true });
-    var res = h('div'), tabla = h('div', cargando());
+    var res = h('div'), tabla = h('div', cargando('Trayendo al equipo…'));
     App.add(cuerpo, h('div.con-barra', h('div', { style: { flex: 1, minWidth: '220px' } }, inp)), res, h('div.con-sec-tit', 'Lo que sabe cada uno'), tabla);
     function buscar() {
       var t = inp.value.trim();
@@ -273,17 +294,21 @@
     }).catch(function (e) { App.vaciar(tabla).appendChild(vacio(e.message)); });
   }
 
-  function abrir(pestanaInicial) {
+  /* `busqueda` (opcional): texto con el que abre la pestaña Buscar (lo usa ⌘K). También se puede dejar en
+     App.Conocimiento.busquedaPendiente antes de navegar a #/archivos/conocimiento. */
+  function abrir(pestanaInicial, busqueda) {
     if (App.Agente && App.Agente.alCerrar) App.Agente.alCerrar();
     var hj = App.hojaEnPanel({ titulo: 'Conocimiento', icono: 'bombilla', sinPie: true }, 'conocimiento');
+    var pend = busqueda || (App.Conocimiento && App.Conocimiento.busquedaPendiente) || '';
+    if (App.Conocimiento) App.Conocimiento.busquedaPendiente = '';
     var pestana = pestanaInicial || 'buscar';
-    var estado = {};
+    var estado = pend ? { q: pend } : {};
     var tabs = h('div.pestanas'), cuerpo = h('div.con-cuerpo');
     App.add(hj.cuerpo, h('div.con', tabs, cuerpo));
     hj.cuerpo.style.padding = '0';
     function contarRevisar() {
       api.get('/api/conocimiento/estado').then(function (st) {
-        var n = (st.pendientes || 0) + (st.vencidas || 0) + (st.sugerencias || 0) + (st.obsoletos || 0);
+        var n = contar(st);
         var b = tabs.querySelector('[data-p="revisar"] .insignia');
         if (b) { b.textContent = n; b.className = 'insignia' + (st.pendientes ? ' aviso' : '') + (n ? '' : ' oculto'); }
       }).catch(function () {});
@@ -305,5 +330,5 @@
     pintar();
   }
 
-  App.Conocimiento = { abrir: abrir, vigilarEstado: vigilarEstado };
+  App.Conocimiento = { abrir: abrir, vigilarEstado: vigilarEstado, busquedaPendiente: '' };
 })();

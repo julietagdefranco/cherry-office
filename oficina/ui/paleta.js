@@ -1,4 +1,5 @@
-/* Paleta ⌘K / Ctrl+K: buscar agentes, salas, acciones y reuniones recientes; Enter abre (y la cámara va hasta ahí).
+/* Paleta ⌘K / Ctrl+K: buscar agentes, salas, acciones y reuniones recientes, agrupado por tipo y sin duplicados; sin texto muestra
+   lo pendiente y lo reciente; con texto termina con «Buscar … en Conocimiento / Biblioteca». Enter abre (y la cámara va hasta ahí).
    También la barra de pistas: dice qué podés hacer con lo que está bajo el mouse en la maqueta. */
 window.App = window.App || {};
 App.Paleta = (function () {
@@ -21,61 +22,73 @@ App.Paleta = (function () {
     return s / (t.length + 1) + s;
   }
 
+  /* orden de los grupos de resultados */
+  var GRUPOS = ['Para revisar', 'Recientes', 'Equipo', 'Lugares', 'Acciones', 'Buscar en'];
+
   function armar() {
     var o = App.E.oficina || { agentes: [], departamentos: [] }, act = App.E.actividad || {}, out = [];
+    var sinRev = App.Entregables && App.Entregables.sinRevisar ? App.Entregables.sinRevisar() : 0;
+    var permisos = App.Permisos && App.Permisos.cuantos ? App.Permisos.cuantos() : 0;
+    function ag(grupo, tipo, icono, txt, sub, buscar, hacer, extra) { out.push(Object.assign({ grupo: grupo, tipo: tipo, icono: icono, txt: txt, sub: sub || '', buscar: buscar, hacer: hacer }, extra || {})); }
+
+    ag('Para revisar', 'Bandeja', 'bandeja', 'Para revisar', sinRev ? sinRev + ' sin revisar' : 'Entregas de los agentes',
+      'bandeja entregables entregas revisar despacho direccion', function () { App.Nav.ir('#/bandeja/revisar'); }, { pendiente: sinRev });
+    ag('Para revisar', 'Bandeja', 'escudo', 'Te piden permiso', permisos ? permisos + (permisos === 1 ? ' pendiente' : ' pendientes') : 'Nada pendiente',
+      'permisos pedidos pendientes bandeja', function () { App.Nav.ir('#/bandeja/permisos'); }, { pendiente: permisos });
+    ag('Para revisar', 'Bandeja', 'parte', 'Hoy: lo que te espera', '', 'hoy espera avisos parte', function () { App.Nav.ir('#/bandeja/hoy'); });
+
+    /* un solo lugar por agente: su charla (la ficha se abre desde ahí o desde Equipo) */
     o.agentes.forEach(function (a) {
       var t = act[a.id], d = App.depto(a.departamento);
-      out.push({ tipo: 'Agente', icono: 'personas', txt: a.nombre, sub: t ? (t.tarea || t.estado) : a.rol + (d ? ' · ' + d.nombre : ''),
-        buscar: a.nombre + ' ' + a.rol + ' ' + (d ? d.nombre : ''),
-        hacer: function () { App.Oficina3D.enfocarAgente(a.id); App.Agente.abrir(a.id); } });
-    });
-    out.push({ tipo: 'Sala', icono: 'reunion', txt: 'Sala de reuniones', buscar: 'sala reuniones',
-      hacer: function () { App.Oficina3D.enfocarLugar('reunion'); App.Reunion.abrir(); } });
-    out.push({ tipo: 'Sala', icono: 'libro', txt: 'Biblioteca', buscar: 'biblioteca archivos documentos',
-      hacer: function () { App.Oficina3D.enfocarLugar('biblioteca'); App.Biblioteca.abrir(); } });
-    out.push({ tipo: 'Bandeja', icono: 'bandeja', txt: 'Para revisar', sub: App.Entregables && App.Entregables.sinRevisar() ? App.Entregables.sinRevisar() + ' sin revisar' : '',
-      buscar: 'bandeja entregables entregas revisar despacho direccion',
-      hacer: function () { App.Nav.ir('#/bandeja/revisar'); } });
-    out.push({ tipo: 'Bandeja', icono: 'escudo', txt: 'Te piden permiso', sub: App.Permisos && App.Permisos.cuantos() ? App.Permisos.cuantos() + ' pendientes' : '',
-      buscar: 'permisos pedidos pendientes bandeja', hacer: function () { App.Nav.ir('#/bandeja/permisos'); } });
-    out.push({ tipo: 'Vos', icono: 'personas', txt: 'Tu perfil', sub: App.Yo.nombre(), buscar: 'yo perfil quien dirige mi nombre dueño minifig',
-      hacer: function () { App.Yo.abrir(); } });
-    o.agentes.forEach(function (a) {
-      out.push({ tipo: 'Ficha', icono: 'lapiz', txt: 'Ficha de ' + a.nombre, sub: 'Perfil, permisos, notas, tareas y archivos', buscar: 'editar ficha perfil ' + a.nombre,
-        hacer: function () { App.Nav.ir('#/equipo/' + encodeURIComponent(a.id)); } });
+      ag('Equipo', 'Charla', 'charla', a.nombre, (t ? (t.tarea || t.estado) : a.rol + (d ? ' · ' + d.nombre : '')) + ' · charla · ficha en Equipo',
+        a.nombre + ' ' + a.rol + ' ' + (d ? d.nombre : '') + ' ficha perfil editar charla hablar',
+        function () { App.Oficina3D.enfocarAgente(a.id); App.Agente.abrir(a.id); }, { activo: !!t });
     });
     o.departamentos.forEach(function (d) {
-      out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Nav.ir('#/equipo/departamentos'); } });
+      ag('Equipo', 'Departamento', 'capas', d.nombre, 'departamento', 'departamento departamentos ' + d.nombre, function () { App.Nav.ir('#/equipo/departamentos'); });
     });
-    [['Hoy: lo que te espera', 'parte', function () { App.Nav.ir('#/bandeja/hoy'); }],
-     ['Tareas programadas y pendientes', 'reloj', function () { App.Tareas.abrir(); }],
-     ['Carpeta de la oficina', 'carpeta', function () { App.Nav.ir('#/archivos/carpeta'); }],
-     ['Conocimiento de la oficina', 'bombilla', function () { App.Nav.ir('#/archivos/conocimiento'); }],
-     ['Editar los flujos de la oficina', 'flujo', function () { App.Flujos.abrir(); App.Flujos.definiciones(); }],
-     ['Flujos', 'flujo', function () { App.Flujos.abrir(); }],
-     ['Nueva corrida', 'flujo', function () { App.Flujos.abrir(); App.Flujos.nueva(); }],
-     ['Armar con el Creador', 'chispa', function () { App.Creador.abrir(); }],
-     ['Ajustes', 'ajustes', function () { App.Ajustes.abrir(); }],
-     ['Nombre de la oficina y quién dirige', 'edificio', function () { App.Ajustes.abrir('general'); }],
-     ['Reglas de la oficina', 'regla', function () { App.Ajustes.abrir('reglas'); }],
-     ['Nuevo departamento', 'capas', function () { App.Deptos.agregar(); }],
-     ['Conectores', 'enchufe', function () { App.Ajustes.abrir('conectores'); }],
-     ['Permisos de los agentes', 'escudo', function () { App.Ajustes.abrir('permisos'); }],
-     ['Contratar un agente', 'mas', function () { App.Contratar.abrir(); }],
-     ['Llamar a reunión', 'reunion', function () { App.Reunion.nueva(); }],
-     ['Departamentos', 'capas', function () { App.Nav.ir('#/equipo/departamentos'); }],
-     ['Siguiente aviso pendiente', 'chispa', function () { if (App.Avisos) App.Avisos.siguiente(); }],
-     ['Revisar la próxima entrega', 'chispa', function () { if (!App.Entregables.siguiente()) App.aviso('No tenés entregas sin revisar.'); }],
-     ['Exportar oficina', 'subir', function () { App.exportarOficina(); }],
-     ['Ver toda la oficina', 'edificio', function () { App.Oficina3D.encuadrar(); }]].forEach(function (x) {
-      out.push({ tipo: 'Acción', icono: x[1], txt: x[0], buscar: x[0], hacer: x[2] });
+    if (!o.departamentos.length) ag('Equipo', 'Equipo', 'capas', 'Departamentos', '', 'departamentos', function () { App.Nav.ir('#/equipo/departamentos'); });
+    ag('Equipo', 'Vos', 'personas', 'Tu perfil', App.Yo.nombre(), 'yo perfil quien dirige mi nombre dueño minifig', function () { App.Yo.abrir(); });
+
+    ag('Lugares', 'Sala', 'reunion', 'Sala de reuniones', '', 'sala reuniones', function () { App.Oficina3D.enfocarLugar('reunion'); App.Reunion.abrir(); });
+    ag('Lugares', 'Sala', 'libro', 'Biblioteca', 'Documentos y fichas', 'biblioteca archivos documentos', function () { App.Nav.ir('#/archivos/biblioteca'); });
+    ag('Lugares', 'Archivos', 'carpeta', 'Carpeta de la oficina', '', 'carpeta oficina archivos', function () { App.Nav.ir('#/archivos/carpeta'); });
+    ag('Lugares', 'Archivos', 'bombilla', 'Conocimiento de la oficina', 'Lo que ya se sabe', 'conocimiento preguntas frecuentes sabe', function () { App.Nav.ir('#/archivos/conocimiento'); });
+
+    [['Flujos', 'flujo', 'Correr, editar o armar uno nuevo', 'flujos flujo corrida nueva correr editar', function () { App.Flujos.abrir(); }],
+     ['Tareas programadas y pendientes', 'reloj', '', 'tareas programadas pendientes', function () { App.Tareas.abrir(); }],
+     ['Armar con el Creador', 'chispa', 'Armá la oficina charlando', 'creador armar oficina', function () { App.Nav.ir('#/equipo/creador'); }],
+     ['Contratar un agente', 'mas', '', 'contratar agente nuevo', function () { App.Nav.ir('#/equipo/contratar'); }],
+     ['Llamar a reunión', 'reunion', '', 'llamar reunion', function () { App.Reunion.nueva(); }],
+     ['Nuevo departamento', 'capas', '', 'nuevo departamento', function () { App.Deptos.agregar(); }],
+     ['Ajustes', 'ajustes', '', 'ajustes configuracion', function () { App.Ajustes.abrir(); }],
+     ['Nombre de la oficina y quién dirige', 'edificio', '', 'nombre oficina dirige general', function () { App.Ajustes.abrir('general'); }],
+     ['Reglas de la oficina', 'regla', '', 'reglas oficina', function () { App.Ajustes.abrir('reglas'); }],
+     ['Conectores', 'enchufe', '', 'conectores', function () { App.Ajustes.abrir('conectores'); }],
+     ['Permisos de los agentes', 'escudo', '', 'permisos agentes', function () { App.Ajustes.abrir('permisos'); }],
+     ['Siguiente aviso pendiente', 'chispa', '', 'siguiente aviso pendiente', function () { if (App.Avisos) App.Avisos.siguiente(); }],
+     ['Revisar la próxima entrega', 'chispa', '', 'revisar proxima entrega', function () { if (!App.Entregables.siguiente()) App.aviso('No tenés entregas sin revisar.'); }],
+     ['Exportar oficina', 'subir', '', 'exportar oficina', function () { App.exportarOficina(); }],
+     ['Ver toda la oficina', 'edificio', '', 'ver toda encuadrar oficina', function () { App.Oficina3D.encuadrar(); }]].forEach(function (x) {
+      ag('Acciones', 'Acción', x[1], x[0], x[2], x[0] + ' ' + x[3], x[4]);
     });
-    App.opcionesOficina().forEach(function (o) { out.push({ tipo: 'Acción', icono: o.icono, txt: o.texto, buscar: o.texto, hacer: o.accion }); });
+    App.opcionesOficina().forEach(function (op) { ag('Acciones', 'Acción', op.icono, op.texto, '', op.texto, op.accion); });
     reuniones.slice(0, 8).forEach(function (r) {
-      out.push({ tipo: 'Reunión', icono: 'reunion', txt: r.tema, sub: App.fecha ? App.fecha(r.creada) : '', buscar: 'reunion ' + r.tema,
-        hacer: function () { App.Reunion.ver ? App.Reunion.ver(r.id) : App.Reunion.abrir(); } });
+      ag('Recientes', 'Reunión', 'reunion', r.tema, App.fecha ? App.fecha(r.creada) : '', 'reunion ' + r.tema,
+        function () { App.Reunion.ver ? App.Reunion.ver(r.id) : App.Reunion.abrir(); });
     });
     return out;
+  }
+
+  /* qué se muestra sin texto: primero lo pendiente, después lo reciente y un par de atajos */
+  function inicio(items) {
+    var pend = items.filter(function (x) { return x.grupo === 'Para revisar'; })
+      .sort(function (a, b) { return (b.pendiente || 0) - (a.pendiente || 0); });
+    var hay = pend.filter(function (x) { return x.pendiente; });
+    var rec = items.filter(function (x) { return x.grupo === 'Recientes'; }).slice(0, 3);
+    var gente = items.filter(function (x) { return x.tipo === 'Charla'; }).sort(function (a, b) { return (b.activo ? 1 : 0) - (a.activo ? 1 : 0); }).slice(0, 4);
+    var acc = items.filter(function (x) { return ['Flujos', 'Armar con el Creador', 'Llamar a reunión', 'Ajustes'].indexOf(x.txt) >= 0; });
+    return (hay.length ? hay : pend.slice(0, 1)).concat(rec, gente, acc);
   }
 
   function abrir() {
@@ -89,17 +102,29 @@ App.Paleta = (function () {
     velo = h('div.velo.cmdk-velo', { onclick: cerrar }, caja);
     document.body.appendChild(velo);
     function filtrar() {
-      var q = norm(inp.value.trim());
-      filtrados = items.map(function (x) { return { x: x, s: puntaje(q.replace(/\s+/g, ''), x.buscar) }; })
-        .filter(function (y) { return y.s > 0; }).sort(function (a, b) { return b.s - a.s; }).slice(0, 12).map(function (y) { return y.x; });
+      var texto = inp.value.trim(), q = norm(texto);
+      if (!q) filtrados = inicio(items);
+      else {
+        var res = items.map(function (x) { return { x: x, s: puntaje(q.replace(/\s+/g, ''), x.buscar) }; })
+          .filter(function (y) { return y.s > 0; }).sort(function (a, b) { return b.s - a.s; }).slice(0, 12).map(function (y) { return y.x; });
+        /* agrupados por tipo, en el orden de los grupos (dentro de cada uno, el mejor puntaje primero) */
+        filtrados = [];
+        GRUPOS.forEach(function (g) { res.forEach(function (x) { if (x.grupo === g) filtrados.push(x); }); });
+        var corto = texto.length > 28 ? texto.slice(0, 27) + '…' : texto;
+        filtrados.push({ grupo: 'Buscar en', tipo: 'Buscar', icono: 'bombilla', txt: 'Buscar «' + corto + '» en Conocimiento', sub: 'Decisiones, notas, actas y respuestas de los agentes',
+          hacer: function () { if (App.Conocimiento) App.Conocimiento.busquedaPendiente = texto; App.Nav.ir('#/archivos/conocimiento'); } });
+        filtrados.push({ grupo: 'Buscar en', tipo: 'Buscar', icono: 'libro', txt: 'Buscar «' + corto + '» en Biblioteca', sub: 'Los documentos y sus fichas',
+          hacer: function () { if (App.Biblioteca) App.Biblioteca.busquedaPendiente = texto; App.Nav.ir('#/archivos/biblioteca'); } });
+      }
       sel = 0; pintar();
     }
     function pintar() {
       App.vaciar(lista);
-      if (!filtrados.length) { lista.appendChild(h('div.vacio', 'Nada con eso.')); return; }
+      var previo = null;
       filtrados.forEach(function (x, i) {
+        if (x.grupo !== previo) { previo = x.grupo; lista.appendChild(h('div.cmdk-grupo', !inp.value.trim() && x.grupo === 'Para revisar' ? 'Para revisar' : x.grupo)); }
         var fila = h('div.cmdk-item' + (i === sel ? '.sel' : ''), { onmousemove: function () { if (sel !== i) { sel = i; pintar(); } }, onclick: function () { elegir(i); } },
-          App.icono(x.icono), h('div.cmdk-txt', h('b', x.txt), x.sub ? h('small', x.sub) : null), h('span.cmdk-tipo', x.tipo));
+          App.icono(x.icono), h('div.cmdk-txt', h('b', x.txt), x.sub ? h('small', x.sub) : null), x.pendiente ? h('span.insignia.aviso', String(x.pendiente)) : h('span.cmdk-tipo', x.tipo));
         lista.appendChild(fila);
       });
       var s = lista.querySelector('.sel'); if (s && s.scrollIntoView) s.scrollIntoView({ block: 'nearest' });

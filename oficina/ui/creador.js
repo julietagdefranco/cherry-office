@@ -1,5 +1,5 @@
-/* Creador de flujos: una hoja con el chat a la izquierda y el borrador de tarjetas a la derecha.
-   Nada se crea hasta que la persona lo aprueba con el botón del pie. */
+/* Creador de flujos: una pantalla (#/equipo/creador) con el chat a la izquierda y el borrador de tarjetas a la derecha.
+   Nada se crea hasta que la persona lo aprueba con el botón del pie. Las tarjetas se editan en el lugar. */
 window.App = window.App || {};
 (function () {
   'use strict';
@@ -12,9 +12,10 @@ window.App = window.App || {};
   var ACCION_TXT = { crear: 'Nuevo', modificar: 'Cambio', quitar: 'Quitar' };
   var ESTADO_TXT = { borrador: 'Borrador', lista: 'Lista', creada: 'Creada', error: 'Error' };
   var DIAS = [[1, 'Lun'], [2, 'Mar'], [3, 'Mié'], [4, 'Jue'], [5, 'Vie'], [6, 'Sáb'], [7, 'Dom']];
-  var MODELOS = [['', 'El de siempre (Sonnet)'], ['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku']];
+  var MODELOS = [['', 'El de siempre'], ['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku']];
+  var ZONA_BASE = 'America/Argentina/Buenos_Aires';
   var INTRO = 'Contame qué hace tu negocio y cómo querés organizar el equipo. Voy armando tarjetas a la derecha: nada se crea hasta que lo apruebes.';
-  var abierta = null;   // la hoja abierta (una sola a la vez)
+  var abierta = null;   // la pantalla abierta (una sola a la vez)
   var alActividadActual = null;
   App.on('actividad', function (r) { if (alActividadActual) alActividadActual(r); });
 
@@ -49,16 +50,26 @@ window.App = window.App || {};
     if (ref === 'persona') return 'Vos';
     if (ref.indexOf('tarjeta:') === 0) {
       var t = tarjetaPorId(ref.slice(8));
-      return t ? tituloTarjeta(t) + ' (propuesta)' : ref;
+      return t ? tituloTarjeta(t) + ' (propuesta)' : '(ya no está)';
     }
     var o = App.E.oficina || {};
-    if (tipo === 'departamento') { var d = App.depto(ref); return d ? d.nombre : ref; }
-    if (tipo === 'agente') { var a = App.agente(ref); return a ? a.nombre : ref; }
-    if (tipo === 'flujo') { var f = buscar(o.flujos, function (x) { return x.id === ref; }); return f ? f.nombre : ref; }
-    if (tipo === 'regla') { var r = buscar(o.reglas, function (x) { return x.id === ref; }); return r ? recortar(r.texto, 70) : ref; }
+    if (tipo === 'departamento') { var d = App.depto(ref); return d ? d.nombre : '(ya no está)'; }
+    if (tipo === 'agente') return App.humano.quien(ref) === 'alguien que ya no está' ? '(ya no está)' : App.humano.quien(ref);
+    if (tipo === 'flujo') { var f = buscar(o.flujos, function (x) { return x.id === ref; }); return f ? f.nombre : '(ya no está)'; }
+    if (tipo === 'regla') { var r = buscar(o.reglas, function (x) { return x.id === ref; }); return r ? recortar(r.texto, 70) : '(ya no está)'; }
     return ref;
   }
-  function listaTxt(l) { return (l || []).map(function (x) { return typeof x === 'string' ? x : JSON.stringify(x); }).join('; '); }
+  /* un valor suelto (texto, lista u objeto) en palabras, sin JSON */
+  function suelto(x) {
+    if (x === null || x === undefined) return '';
+    if (typeof x === 'boolean') return x ? 'Sí' : 'No';
+    if (typeof x !== 'object') return String(x);
+    if (Array.isArray(x)) return x.map(suelto).filter(Boolean).join(', ');
+    var cab = x.nombre || x.texto || x.servidor || x.titulo || x.pregunta;
+    if (cab) return String(cab);
+    return Object.keys(x).map(function (k) { return suelto(x[k]); }).filter(Boolean).join(' · ');
+  }
+  function listaTxt(l) { return (l || []).map(suelto).join('; '); }
   function limitesTxt(l) {
     if (!l) return '';
     var p = [];
@@ -77,8 +88,7 @@ window.App = window.App || {};
     if (clave === 'pasos') return v.map(function (p) { return p.nombre + (p.quien ? ' (' + nombreDe('agente', p.quien) + ')' : ''); }).join(' → ');
     if (clave === 'dias') return v.map(function (n) { return (buscar(DIAS, function (d) { return d[0] === n; }) || [0, n])[1]; }).join(', ');
     if (Array.isArray(v)) return listaTxt(v);
-    if (typeof v === 'object') return JSON.stringify(v);
-    return String(v);
+    return suelto(v);
   }
   var ETIQUETAS = { nombre: 'Nombre', mision: 'Misión', color: 'Color', rol: 'Rol', departamento: 'Departamento', prompt: 'Instrucciones', description: 'Descripción',
     modelo: 'Modelo', chips: 'Atajos', limites: 'Límites', conectores: 'Conectores', permisos: 'Coordinación', descripcion: 'Descripción', pasos: 'Pasos',
@@ -151,18 +161,25 @@ window.App = window.App || {};
     return [];
   }
 
-  /* ---------------- hoja ---------------- */
+  /* ---------------- pantalla ---------------- */
   function abrir() {
-    if (abierta) { try { abierta.el.scrollIntoView(); } catch (e) {} return; }
+    /* si otra pantalla ya reemplazó a la del Creador, la anterior no cuenta como abierta */
+    if (abierta && abierta.el.isConnected) { try { abierta.el.scrollIntoView(); } catch (e) {} return; }
     var sid = sesionDe();
     var cerrada = false, relojChat = null, versionVista = -1, mensajes = [], corriendo = false, enviando = false;
     var tarjetas = [], resumen = {}, filtro = '', excluidas = {}, aplicando = false, erroresAplicar = [];
+    var editando = {};   // id de tarjeta → formulario en el lugar (se conserva aunque el borrador se repinte)
 
-    var hj = App.hoja({ titulo: 'Armar la oficina', ancho: 1100, alto: 'min(780px, 94vh)', sinPie: true, alCerrar: function () {
+    var hj = App.hojaEnPanel({ titulo: 'Armar con el Creador', icono: 'chispa', sinPie: true, alCerrar: function () {
       cerrada = true; clearTimeout(relojChat); abierta = null; alActividadActual = null;
-    } });
+    } }, 'creador');
     abierta = hj;
-    hj.cuerpo.style.cssText = 'padding:0;display:flex;flex-direction:column;overflow:hidden';
+    hj.cuerpo.classList.add('creador-cuerpo');
+    function viva() {
+      if (cerrada) return false;
+      if (!hj.el.isConnected) { cerrada = true; clearTimeout(relojChat); abierta = null; alActividadActual = null; return false; }
+      return true;
+    }
 
     /* ---- izquierda: chat ---- */
     var lista = h('div.chat'), cuerpoChat = h('div.creador-chat-cuerpo', lista);
@@ -175,7 +192,7 @@ window.App = window.App || {};
 
     /* ---- derecha: borrador ---- */
     var cabBorrador = h('div.creador-cab'), listaTarjetas = h('div.creador-tarjetas'), errBox = h('div.creador-errores');
-    var botonAplicar = h('button.btn.primario', { onclick: aplicar }, 'Crear las 0 listas');
+    var botonAplicar = h('button.btn.primario', { onclick: aplicar }, 'Crear');
     var notaPie = h('span.ayuda');
     var colBorrador = h('div.creador-col.creador-borrador', cabBorrador, listaTarjetas, errBox, h('div.creador-pie', notaPie, h('span', { style: { flex: 1 } }), botonAplicar));
 
@@ -197,9 +214,9 @@ window.App = window.App || {};
     /* trae el estado del chat; mientras corra, vuelve a pedirlo cada 1,5 s y refresca el borrador */
     function sondear() {
       clearTimeout(relojChat);
-      if (cerrada) return;
+      if (!viva()) return;
       api.get('/api/creador/estado', { session: sid }).then(function (r) {
-        if (cerrada) return;
+        if (!viva()) return;
         var del = r.mensajes || [];
         if (del.length >= mensajes.length || !enviando) mensajes = del;
         corriendo = !!r.corriendo;
@@ -208,7 +225,7 @@ window.App = window.App || {};
         cargarBorrador();
         if (corriendo || enviando) relojChat = setTimeout(sondear, 1500);
       }).catch(function (e) {
-        if (cerrada) return;
+        if (!viva()) return;
         if (corriendo || enviando) relojChat = setTimeout(sondear, 3000);
         else App.fallo(e);
       });
@@ -236,12 +253,12 @@ window.App = window.App || {};
     /* ---------------- borrador ---------------- */
     function cargarBorrador() {
       return api.get('/api/creador/borrador').then(function (r) {
-        if (cerrada) return;
+        if (!viva()) return;
         versionVista = r.version;
         tarjetas = r.tarjetas || []; resumen = r.resumen || {};
         tarjetasActuales = tarjetas;
         pintarBorrador();
-      }).catch(function (e) { if (!cerrada) { App.vaciar(listaTarjetas).appendChild(h('div.vacio', e.message)); } });
+      }).catch(function (e) { if (viva()) { App.vaciar(listaTarjetas).appendChild(h('div.vacio', e.message)); } });
     }
     function alActividad(r) {
       if (cerrada || !r) return;
@@ -271,6 +288,7 @@ window.App = window.App || {};
     function pintarBorrador() {
       var y = listaTarjetas.scrollTop;
       pintarCab();
+      Object.keys(editando).forEach(function (id) { if (!tarjetas.some(function (x) { return x.id === id; })) delete editando[id]; });
       App.vaciar(listaTarjetas);
       if (!tarjetas.length) {
         listaTarjetas.appendChild(h('div.vacio', 'Todavía no hay tarjetas. Contame y las voy armando.'));
@@ -288,7 +306,7 @@ window.App = window.App || {};
     }
     function pintarPie() {
       var n = tarjetas.filter(incluida).length, quitar = tarjetas.filter(function (t) { return incluida(t) && t.accion === 'quitar'; }).length;
-      botonAplicar.textContent = n === 1 ? 'Crear la 1 lista' : 'Crear las ' + n + ' listas';
+      botonAplicar.textContent = !n ? 'Crear' : n === 1 ? 'Crear 1 cosa' : 'Crear ' + n + ' cosas';
       botonAplicar.disabled = !n || aplicando;
       var nota = [];
       if (resumen.borrador) nota.push(plural(resumen.borrador, 'tarjeta espera', 'tarjetas esperan') + ' respuestas');
@@ -298,31 +316,46 @@ window.App = window.App || {};
       erroresAplicar.forEach(function (e) { errBox.appendChild(h('div.error-txt', e)); });
     }
 
+    /* carga la pregunta de una tarjeta en el campo del chat para contestarla ahí */
+    function responderEnChat(t, f) {
+      var q = f.pregunta || f.campo || String(f);
+      txt.value = (txt.value ? txt.value.replace(/\s+$/, '') + '\n' : '') + 'Sobre «' + tituloTarjeta(t) + '»: ' + q + ' ';
+      txt.dispatchEvent(new Event('input'));
+      txt.focus(); txt.setSelectionRange(txt.value.length, txt.value.length);
+    }
+
     function tarjetaEl(t) {
       var d = t.datos || {};
       var dif = t.accion === 'modificar' ? diferencias(t) : [];
+      var form = editando[t.id];
+      /* una sola insignia: el estado si pide atención o ya terminó; si está lista, lo que va a hacer */
+      var insignia = t.estado === 'lista'
+        ? h('span.insignia' + (t.accion === 'quitar' ? '.error' : t.accion === 'modificar' ? '.aviso' : ''), ACCION_TXT[t.accion] || t.accion)
+        : h('span.insignia' + (t.estado === 'creada' ? '.ok' : t.estado === 'error' ? '.error' : '.aviso'), ESTADO_TXT[t.estado] || t.estado);
       var cab = h('div.tb-cab',
-        t.estado === 'lista' ? h('input', { type: 'checkbox', checked: incluida(t), title: 'Incluirla al crear', 'aria-label': 'Incluir ' + tituloTarjeta(t), onchange: function () {
+        t.estado === 'lista' && !form ? h('input', { type: 'checkbox', checked: incluida(t), title: 'Incluirla al crear', 'aria-label': 'Incluir ' + tituloTarjeta(t), onchange: function () {
           if (this.checked) delete excluidas[t.id]; else excluidas[t.id] = true;
           pintarPie();
         } }) : null,
         h('span.tb-icono', App.icono(TIPO_ICONO[t.tipo])),
         h('div.tb-tit', h('b', tituloTarjeta(t)), h('span.ayuda', TIPO_UNO[t.tipo])),
-        h('span.insignia' + (t.accion === 'quitar' ? '.error' : t.accion === 'modificar' ? '.aviso' : ''), ACCION_TXT[t.accion] || t.accion),
-        h('span.insignia' + (t.estado === 'lista' || t.estado === 'creada' ? '.ok' : t.estado === 'error' ? '.error' : '.aviso'), ESTADO_TXT[t.estado] || t.estado));
-      var faltan = (t.faltantes || []).map(function (f) { return f.pregunta || f.campo || String(f); });
-      var acciones = h('div.tb-acciones',
-        t.estado !== 'creada' ? h('button.btn.chico', { onclick: function () { editar(t); } }, 'Editar') : null,
-        t.estado !== 'creada' ? h('button.btn.chico.peligro', { onclick: function () { descartar(t); } }, 'Descartar') : null);
+        insignia);
+      var faltan = t.faltantes || [];
+      var acciones = t.estado !== 'creada' && !form ? h('div.tb-acciones',
+        h('button.btn.chico.fantasma.icono', { title: 'Descartar esta tarjeta', 'aria-label': 'Descartar', onclick: function () { descartar(t); } }, App.icono('papelera')),
+        h('button.btn.chico', { onclick: function () { editando[t.id] = formulario(t); pintarBorrador(); } }, 'Editar')) : null;
       return h('div.tarjeta-borrador', { 'data-estado': t.estado, 'data-tipo': t.tipo, 'data-accion': t.accion },
         cab,
-        h('div.tb-cuerpo',
+        form ? form.el : h('div.tb-cuerpo',
           t.tipo === 'regla' ? h('div.tb-texto', d.texto || '') : null,
           camposClave(t),
           dif.length ? h('div.tb-dif', h('b', 'Qué cambia'), dif.map(function (x) {
             return h('div.tb-dif-fila', h('span.tb-dif-etq', x.etq), h('span.tb-antes', x.antes), h('span.tb-flecha', '→'), h('span.tb-ahora', x.ahora));
           })) : null,
-          faltan.length ? h('div.tb-faltan', h('b', 'Le falta:'), h('ul', faltan.map(function (f) { return h('li', f); }))) : null,
+          faltan.length ? h('div.tb-faltan', h('b', 'Le falta'), faltan.map(function (f) {
+            return h('div.tb-falta', h('span', f.pregunta || f.campo || String(f)),
+              h('button.btn.chico.fantasma', { type: 'button', onclick: function () { responderEnChat(t, f); } }, 'Responder en el chat'));
+          })) : null,
           t.estado === 'error' && t.error ? h('div.error-txt', t.error) : null,
           t.origen ? h('blockquote.tb-origen', t.origen) : null),
         acciones);
@@ -348,7 +381,7 @@ window.App = window.App || {};
           var res = r.resultados || [], ok = res.filter(function (x) { return x.ok; }).length;
           res.filter(function (x) { return !x.ok; }).forEach(function (x) {
             var t = tarjetaPorId(x.id);
-            erroresAplicar.push((t ? tituloTarjeta(t) : x.id) + ': ' + (x.error || 'no se pudo crear'));
+            erroresAplicar.push((t ? tituloTarjeta(t) : 'Una tarjeta') + ': ' + (x.error || 'no se pudo crear'));
           });
           App.recargarOficina().catch(function () {});
           if (ok) App.aviso(ok === 1 ? 'Se creó 1 cosa.' : 'Se crearon ' + ok + ' cosas.');
@@ -357,7 +390,7 @@ window.App = window.App || {};
           if (e.status === 409 && e.datos && e.datos.borradores) {
             erroresAplicar = e.datos.borradores.map(function (b) {
               var t = tarjetaPorId(b.id);
-              return (t ? tituloTarjeta(t) : b.id) + ' todavía le falta: ' + (b.faltantes || []).map(function (f) { return f.pregunta || f.campo; }).join(' / ');
+              return (t ? tituloTarjeta(t) : 'Una tarjeta') + ' todavía le falta: ' + (b.faltantes || []).map(function (f) { return f.pregunta || f.campo; }).join(' / ');
             });
           }
           App.fallo(e);
@@ -365,15 +398,14 @@ window.App = window.App || {};
       });
     }
 
-    /* ---------------- editar ---------------- */
-    function editar(t) {
-      var ed = App.hoja({ titulo: 'Editar: ' + recortar(tituloTarjeta(t), 40), ancho: 640, alto: 'min(720px, 92vh)' });
+    /* ---------------- editar en la tarjeta ---------------- */
+    function formulario(t) {
       var d = JSON.parse(JSON.stringify(t.datos || {}));
       var campos = [];   // {clave, leer()}
-      var faltBox = h('div.tb-faltan');
-      ed.cuerpo.style.cssText = 'padding:14px 18px';
+      var obj = {};
+      var cont = h('div.tb-form');
 
-      function fc(etq, el, ayuda) { return h('div.fila-campo', h('label.etiqueta-campo', etq), el, ayuda ? h('div.ayuda', ayuda) : null); }
+      function fc(etq, el, ayuda) { return h('div.fila-campo', h('label.etiqueta-campo', etq), ayuda ? h('div.ayuda', ayuda) : null, el); }
       function reg(clave, el, leer) { campos.push({ clave: clave, leer: leer }); return el; }
       function vacioNull(v) { v = typeof v === 'string' ? v.trim() : v; return v === '' || (Array.isArray(v) && !v.length) ? null : v; }
       function texto(clave, etq, op) {
@@ -381,33 +413,46 @@ window.App = window.App || {};
         var el = op.area ? h('textarea.campo', { rows: op.filas || 3, value: d[clave] || '', placeholder: op.ph || '' }) : h('input.campo', { value: d[clave] || '', placeholder: op.ph || '', type: op.tipo || 'text' });
         return fc(etq + (op.obl ? ' *' : ''), reg(clave, el, function () { return vacioNull(el.value); }), op.ayuda);
       }
-      function lineas(clave, etq, valor, ayuda, leerFn) {
-        var el = h('textarea.campo', { rows: 3, value: (valor || []).join('\n') });
-        return fc(etq, reg(clave, el, leerFn ? function () { return leerFn(lin(el)); } : function () { return vacioNull(lin(el)); }), ayuda || 'Uno por línea.');
+      /* lista de textos cortos como chips; `leerFn(items)` arma lo que se guarda */
+      function chips(clave, etq, valor, ayuda, op, leerFn) {
+        op = op || {};
+        var items = (valor || []).map(suelto).filter(Boolean);
+        var el = App.chipsEditables(items, { placeholder: op.ph || 'Escribí y Enter', mostrar: op.mostrar });
+        if (clave) reg(clave, el, function () { return leerFn ? leerFn(items) : vacioNull(items.slice()); });
+        return { campo: fc(etq, el, ayuda), items: items };
       }
-      function lin(el) { return el.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean); }
       function opcionesRef(tipo, extra) {
-        var ops = [['', 'Elegí…']];
+        var ops = [];
         if (extra) ops.push(extra);
         var base = tipo === 'departamento' ? (App.E.oficina.departamentos || []) : (App.E.oficina.agentes || []);
-        base.forEach(function (x) { ops.push([x.id, x.nombre]); });
-        tarjetas.forEach(function (x) { if (x.tipo === tipo && x.accion !== 'quitar' && x.id !== t.id) ops.push(['tarjeta:' + x.id, tituloTarjeta(x) + ' (propuesta)']); });
+        base.forEach(function (x) { ops.push({ valor: x.id, titulo: x.nombre, retrato: tipo === 'agente' ? x : null, color: tipo === 'departamento' ? x.color : null }); });
+        tarjetas.forEach(function (x) { if (x.tipo === tipo && x.accion !== 'quitar' && x.id !== t.id) ops.push({ valor: 'tarjeta:' + x.id, titulo: tituloTarjeta(x) + ' (propuesta)' }); });
         return ops;
+      }
+      /* elegir entre opciones a la vista; devuelve el control para poder leer .valor() */
+      function eleccion(ops, valor, tipo) {
+        if (valor && !buscar(ops, function (o) { return o.valor === valor; })) ops = ops.concat([{ valor: valor, titulo: nombreDe(tipo || 'agente', valor) }]);
+        return App.elegir({ opciones: ops, valor: valor || '', forma: 'chips' });
       }
       function sel(clave, etq, ops, valor, op) {
         op = op || {};
-        if (valor && !buscar(ops, function (o) { return o[0] === valor; })) ops = ops.concat([[valor, nombreDe(op.tipo || 'agente', valor)]]);
-        var el = h('select.campo', ops.map(function (o) { return h('option', { value: o[0], selected: o[0] === (valor || '') }, o[1]); }));
-        return fc(etq + (op.obl ? ' *' : ''), op.sinReg ? el : reg(clave, el, function () { return vacioNull(el.value); }), op.ayuda);
+        var el = eleccion(ops, valor, op.tipo);
+        return fc(etq + (op.obl ? ' *' : ''), reg(clave, el, function () { return vacioNull(el.valor()); }), op.ayuda);
       }
 
-      var cont = h('div');
       if (t.tipo === 'departamento') {
-        App.add(cont, texto('nombre', 'Nombre', { obl: true }), texto('mision', 'Misión', { area: true, filas: 3 }), texto('color', 'Color', { ph: '#7aa2e3' }));
+        var color = d.color || '';
+        var muestra = h('button.muestra', { type: 'button', title: 'Cambiar el color', style: { background: color || 'var(--panel-2)' }, onclick: function () {
+          App.elegirColor(muestra, color, function (c) { color = c; muestra.style.background = c; });
+        } });
+        App.add(cont, texto('nombre', 'Nombre', { obl: true }), texto('mision', 'Misión', { area: true, filas: 3 }),
+          fc('Color', reg('color', h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, muestra, h('span.ayuda', 'Tocá para elegir')), function () { return color || null; })));
       } else if (t.tipo === 'agente') {
         var lim = d.limites || {};
-        var solo = h('textarea.campo', { rows: 3, value: (lim.solo || []).join('\n') }), prop = h('textarea.campo', { rows: 3, value: (lim.proponer || []).join('\n') });
-        reg('limites', solo, function () { var a = lin(solo), b = lin(prop); if (!a.length && !b.length) return null; var o = {}; if (a.length) o.solo = a; if (b.length) o.proponer = b; return o; });
+        var solo = chips(null, 'Hace solo', lim.solo, 'Lo que puede hacer y entregar sin consultarte.');
+        var prop = chips(null, 'Deja como propuesta', lim.proponer, 'Lo que deja para tu «Listo» antes de seguir.');
+        reg('limites', solo.campo, function () { var a = solo.items.slice(), b = prop.items.slice(); if (!a.length && !b.length) return null; var o = {}; if (a.length) o.solo = a; if (b.length) o.proponer = b; return o; });
+        var atajos = chips('chips', 'Atajos del chat', d.chips, 'Pedidos que aparecen a un toque en su charla.');
         var coord = h('input', { type: 'checkbox', checked: (d.permisos || []).indexOf('coordinador') >= 0 });
         /* conserva los demás permisos de la tarjeta: el check solo pone o saca «coordinador» */
         reg('permisos', coord, function () {
@@ -420,20 +465,19 @@ window.App = window.App || {};
           sel('departamento', 'Departamento', opcionesRef('departamento'), d.departamento, { obl: true, tipo: 'departamento' }),
           texto('prompt', 'Instrucciones', { area: true, filas: 6, obl: true, ayuda: 'Cómo trabaja, qué sabe y qué entrega.' }),
           texto('description', 'Descripción corta', {}),
-          sel('modelo', 'Modelo', MODELOS, d.modelo || ''),
-          lineas('chips', 'Atajos del chat', d.chips),
-          fc('Hace solo', solo, 'Uno por línea: lo que puede hacer y entregar.'),
-          fc('Propone y espera', prop, 'Uno por línea: lo que deja como propuesta hasta tu «Listo».'),
+          sel('modelo', 'Modelo', MODELOS.map(function (m) { return { valor: m[0], titulo: m[1] }; }), d.modelo || ''),
+          atajos.campo, solo.campo, prop.campo,
           h('label.tb-check', coord, 'Es coordinador/a de la oficina'));
         if ((d.conectores || []).length) cont.appendChild(h('div.ayuda', 'Conectores: ' + valorTxt('conectores', d.conectores) + '. Se cambian desde una tarjeta de conector.'));
       } else if (t.tipo === 'regla') {
         App.add(cont, texto('texto', 'Texto de la regla', { area: true, filas: 4, obl: true }));
       } else if (t.tipo === 'conector') {
+        var herr = { mostrar: App.humano.herramienta, ph: 'Nombre de la herramienta' };
         App.add(cont,
           sel('agente', 'Agente', opcionesRef('agente'), d.agente, { obl: true }),
           texto('servidor', 'Conector', { obl: true, ph: 'Ej.: Google Calendar' }),
-          lineas('leer', 'Puede leer', d.leer, 'Una herramienta por línea.'),
-          lineas('actuar', 'Puede hacer (con aprobación)', d.actuar, 'Una herramienta por línea.'));
+          chips('leer', 'Puede leer', d.leer, 'Las herramientas que solo consultan.', herr).campo,
+          chips('actuar', 'Puede hacer (con aprobación)', d.actuar, 'Las que cambian algo afuera: piden tu visto bueno.', herr).campo);
       } else if (t.tipo === 'tarea') {
         var dias = {}; (d.dias || []).forEach(function (n) { dias[n] = true; });
         var chipsDias = h('div.creador-dias', DIAS.map(function (x) {
@@ -444,35 +488,51 @@ window.App = window.App || {};
           return b;
         }));
         reg('dias', chipsDias, function () { var l = DIAS.map(function (x) { return x[0]; }).filter(function (n) { return dias[n]; }); return l.length ? l : null; });
+        /* la zona IANA queda escondida: por defecto se usa la de siempre */
+        var zona = d.zona || '';
+        var zonaCaja = h('div.zona-caja');
+        var pintarZona = function (abierta) {
+          App.vaciar(zonaCaja);
+          if (abierta) {
+            var inp = h('input.campo', { value: zona, placeholder: ZONA_BASE, 'aria-label': 'Zona horaria' });
+            inp.addEventListener('input', function () { zona = inp.value.trim(); });
+            App.add(zonaCaja, inp, h('div.ayuda', 'Nombre de la zona, como «America/Montevideo». Vacío usa la de la oficina.'));
+            setTimeout(function () { inp.focus(); }, 0);
+          } else {
+            App.add(zonaCaja, h('button.btn.chico.fantasma', { type: 'button', onclick: function () { pintarZona(true); } },
+              zona ? 'Zona horaria: ' + (zona.split('/').pop() || zona).replace(/_/g, ' ') + ' · cambiar' : 'Otra zona horaria'));
+          }
+        };
+        pintarZona(false);
+        reg('zona', zonaCaja, function () { return vacioNull(zona); });
         App.add(cont,
           sel('agente', 'Agente', opcionesRef('agente'), d.agente, { obl: true }),
           texto('nombre', 'Nombre', { obl: true }),
           texto('consigna', 'Consigna', { area: true, filas: 4, obl: true }),
           d.fecha ? null : fc('Días', chipsDias),
-          h('div.dos', texto('hora', 'Hora', { tipo: 'time', obl: true }), texto('zona', 'Zona horaria', { ph: 'America/Argentina/Buenos_Aires' })));
+          texto('hora', 'Hora', { tipo: 'time', obl: true }),
+          zonaCaja);
       } else if (t.tipo === 'flujo') {
         var pasos = JSON.parse(JSON.stringify(d.pasos || []));
         var cajaPasos = h('div.creador-pasos');
-        var quienOps = function () { return opcionesRef('agente', ['persona', 'Vos (la persona)']); };
+        var quienOps = function () { return opcionesRef('agente', { valor: 'persona', titulo: 'Vos' }); };
         var pintarPasos = function () {
           App.vaciar(cajaPasos);
           pasos.forEach(function (p, i) {
             var n = h('input.campo', { value: p.nombre || '', placeholder: 'Nombre del paso' });
-            var q = h('select.campo', quienOps().map(function (o) { return h('option', { value: o[0], selected: o[0] === (p.quien || '') }, o[1]); }));
-            if (p.quien && !buscar(quienOps(), function (o) { return o[0] === p.quien; })) q.appendChild(h('option', { value: p.quien, selected: true }, nombreDe('agente', p.quien)));
+            var q = eleccion(quienOps(), p.quien || '', 'agente');
             var c = h('textarea.campo', { rows: 2, value: p.consigna || '', placeholder: 'Consigna (qué tiene que hacer)' });
             var rc = h('input.campo', { value: p.recibe || '', placeholder: 'Qué recibe' });
             var en = h('input.campo', { value: p.entrega || '', placeholder: 'Qué entrega' });
-            var ap = h('select.campo', [['', 'Aprobación: sin definir'], ['si', 'Pide aprobación'], ['no', 'Sin aprobación']].map(function (o) {
-              return h('option', { value: o[0], selected: o[0] === (p.aprobacion === true ? 'si' : p.aprobacion === false ? 'no' : '') }, o[1]);
-            }));
+            var ap = App.elegir({ opciones: [{ valor: '', titulo: 'Sin definir' }, { valor: 'si', titulo: 'Pide aprobación' }, { valor: 'no', titulo: 'Sin aprobación' }],
+              valor: p.aprobacion === true ? 'si' : p.aprobacion === false ? 'no' : '' });
             var pl = h('input.campo', { type: 'number', min: 0, value: p.plazoDias == null ? '' : p.plazoDias, placeholder: 'Plazo (días)' });
             p._leer = function () {
               var o = {};
               Object.keys(p).forEach(function (k) { if (k !== '_leer') o[k] = p[k]; });
               function poner(k, v) { if (v === '' || v === null) delete o[k]; else o[k] = v; }
-              poner('nombre', n.value.trim()); poner('quien', q.value); poner('consigna', c.value.trim()); poner('recibe', rc.value.trim()); poner('entrega', en.value.trim());
-              if (ap.value) o.aprobacion = ap.value === 'si'; else delete o.aprobacion;
+              poner('nombre', n.value.trim()); poner('quien', q.valor()); poner('consigna', c.value.trim()); poner('recibe', rc.value.trim()); poner('entrega', en.value.trim());
+              if (ap.valor()) o.aprobacion = ap.valor() === 'si'; else delete o.aprobacion;
               poner('plazoDias', pl.value === '' ? '' : Math.max(0, parseInt(pl.value, 10) || 0));
               return o;
             };
@@ -480,8 +540,8 @@ window.App = window.App || {};
               h('div.creador-paso-cab', h('b', 'Paso ' + (i + 1)), h('span', { style: { flex: 1 } }),
                 h('button.btn.chico.fantasma', { type: 'button', title: 'Subir', disabled: i === 0, onclick: function () { guardarPasos(); pasos.splice(i - 1, 0, pasos.splice(i, 1)[0]); pintarPasos(); } }, '↑'),
                 h('button.btn.chico.fantasma', { type: 'button', title: 'Bajar', disabled: i === pasos.length - 1, onclick: function () { guardarPasos(); pasos.splice(i + 1, 0, pasos.splice(i, 1)[0]); pintarPasos(); } }, '↓'),
-                h('button.btn.chico.peligro', { type: 'button', onclick: function () { guardarPasos(); pasos.splice(i, 1); pintarPasos(); } }, 'Quitar')),
-              h('div.dos', n, q), c, h('div.dos', rc, en), h('div.dos', ap, pl)));
+                h('button.btn.chico.fantasma.icono', { type: 'button', title: 'Quitar este paso', 'aria-label': 'Quitar este paso', onclick: function () { guardarPasos(); pasos.splice(i, 1); pintarPasos(); } }, App.icono('papelera'))),
+              n, fc('Quién lo hace', q), c, h('div.dos', rc, en), fc('Aprobación', ap), pl));
           });
           if (!pasos.length) cajaPasos.appendChild(h('div.ayuda', 'Sin pasos todavía.'));
         };
@@ -493,7 +553,6 @@ window.App = window.App || {};
           h('button.btn.chico', { type: 'button', style: { marginTop: '8px' }, onclick: function () { guardarPasos(); pasos.push({}); pintarPasos(); } }, App.icono('mas'), 'Agregar un paso'));
       }
       if (t.origen) cont.appendChild(h('blockquote.tb-origen', { style: { marginTop: '14px' } }, t.origen));
-      App.add(ed.cuerpo, cont, faltBox);
 
       var guardar = h('button.btn.primario', { onclick: function () {
         var datos = {};
@@ -501,16 +560,14 @@ window.App = window.App || {};
         guardar.disabled = true;
         api.patch('/api/creador/tarjetas/' + encodeURIComponent(t.id), { datos: datos }).then(function (r) {
           var nueva = r.tarjeta || {}, falta = (nueva.faltantes || []);
+          delete editando[t.id];
           cargarBorrador();
-          if (!falta.length) { ed.cerrar(); App.aviso('Guardado: la tarjeta está lista.'); return; }
-          t = nueva; d = JSON.parse(JSON.stringify(nueva.datos || {}));
-          App.vaciar(faltBox);
-          App.add(faltBox, h('b', 'Todavía le falta:'), h('ul', falta.map(function (f) { return h('li', f.pregunta || f.campo); })));
-          App.aviso('Guardado. Todavía le faltan cosas.');
-          guardar.disabled = false;
+          App.aviso(falta.length ? 'Guardado. Todavía le faltan cosas.' : 'Guardado: la tarjeta está lista.');
         }).catch(function (e) { guardar.disabled = false; App.fallo(e); });
       } }, 'Guardar');
-      App.add(ed.pie, h('button.btn', { onclick: ed.cerrar }, 'Cerrar'), guardar);
+      var cancelar = h('button.btn', { onclick: function () { delete editando[t.id]; pintarBorrador(); } }, 'Cancelar');
+      obj.el = h('div.tb-cuerpo.tb-edicion', cont, App.acciones(null, [cancelar, guardar]));
+      return obj;
     }
 
     pintarChat();
