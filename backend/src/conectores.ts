@@ -3,7 +3,7 @@
 // evento `system/init` (`mcp_servers`). `cortoHerramienta` y `ConectoresAgente` están en permisos.ts.
 import { ClaudeError, ClaudeRunner } from './claude-runner.js'
 import { esObjeto } from './json.js'
-import { cortoHerramienta, type ServidorConector } from './permisos.js'
+import { clasificarHerramienta, cortoHerramienta, prefijosLeer, type ServidorConector } from './permisos.js'
 import type { Servicios } from './servicios.js'
 
 export type { ServidorConector }
@@ -51,17 +51,14 @@ export const catalogoDe = (s: Servicios) => s.huecos.catalogo as CatalogoConecto
 export const Conectores = {
   prefijoClaudeAi: 'mcp__claude_ai_',
   timeoutDeteccion: 90,
-  prefijosLeer: ['list', 'get', 'search', 'read', 'find', 'fetch', 'download', 'query', 'lookup', 'suggest'],
+  prefijosLeer,
 
   /** Nombre de una herramienta sin el servidor: `mcp__claude_ai_Gmail__send_message` -> `send_message`. */
   corto: cortoHerramienta,
 
   /** `leer` si el nombre corto empieza con list, get, search, read, find, fetch, download, query, lookup o suggest
    *  (también en camelCase); `actuar` si no. Ante la duda, actuar. */
-  clasificar(corto: string): 'leer' | 'actuar' {
-    const c = corto.toLowerCase()
-    return Conectores.prefijosLeer.some((p) => c.startsWith(p)) ? 'leer' : 'actuar'
-  },
+  clasificar: clasificarHerramienta,
 
   /** Prefijo de las herramientas de un servidor: `mcp__claude_ai_` + el nombre con lo que no sea letra, número, `_` o `-`
    *  cambiado por `_`. */

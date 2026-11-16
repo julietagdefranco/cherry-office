@@ -177,7 +177,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const caja = new CajaCosto()
     const escritos = new CajaArchivos()
     const enVivo = new CajaVivo()
-    const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: d.catalogo?.() })
+    const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: d.catalogo?.(), config })
     // consultas a colegas: el token vive lo que dura este chat. Si el servidor MCP no arrancó, el chat sale igual.
     const mcp = d.mcp?.()
     const mcpUrl = mcp ? await mcp.url() : undefined

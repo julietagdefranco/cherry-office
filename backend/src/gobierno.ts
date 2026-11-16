@@ -194,7 +194,13 @@ export class GobiernoRouter implements SubRouter {
 export function instalar(s: Servicios) {
   const catalogo = new CatalogoConectores()
   s.huecos.catalogo = catalogo
-  s.catalogo = () => catalogo.servidores()
+  s.catalogo = () => {
+    // en modo «todos los conectores» la primera corrida que lo necesita dispara la detección (en segundo plano)
+    if (s.config.conectoresAgentes === 'todos' && catalogo.pedirDeteccionInicial()) {
+      void Conectores.detectar(s, catalogo).catch(() => {}).finally(() => catalogo.terminarDeteccion())
+    }
+    return catalogo.servidores()
+  }
   const store = new AccionesStore(s.store)
   s.huecos.acciones = store
   Acciones.instalar(s, store)

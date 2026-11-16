@@ -445,7 +445,7 @@ export class Programador implements ProgramadorEntregas {
    *  nueva (`padre` = `e`); si falla deja un aviso de error. */
   async retomar(act: OficinaActiva, def: AgenteDef, e: Entrega | undefined, p: ParamsRetomar): Promise<{ entrega?: Entrega; error?: string }> {
     const { store, runner, config, avisos, entregas } = this.s
-    const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: this.s.catalogo?.() })
+    const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: this.s.catalogo?.(), config })
     const mcp = this.s.mcp?.()
     const mcpUrl = mcp ? await mcp.url() : undefined
     if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
@@ -583,7 +583,7 @@ export class Programador implements ProgramadorEntregas {
   private async vuelta(ej: Ejecucion, act: OficinaActiva, t: TareaProgramada, def: AgenteDef, actuar: string[],
     v: { mensaje: string; activa: boolean; reglasExtra: string[]; previo?: EsperaPermiso }) {
     const { store, runner, config, entregas } = this.s
-    const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, actuar, catalogo: this.s.catalogo?.() })
+    const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, actuar, catalogo: this.s.catalogo?.(), config })
     ctx.anotarRechazos = true
     for (const r of v.reglasExtra) if (!(ctx.reglas ?? []).includes(r)) ctx.reglas = [...(ctx.reglas ?? []), r]
     // MCP también fuera del chat: token con el perfil del agente, que vive lo que dura la corrida

@@ -15,9 +15,9 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 
 | Método | Ruta | Cuerpo | Respuesta |
 |---|---|---|---|
-| GET | `/api/estado` | | `{app, version, claude, agentes:[ids de la oficina activa], auth, claudePath, oficina:{carpeta,nombre}\|null, perfil, modo_permisos: "auto"\|"preguntar"\|null}` (null = la persona todavía no eligió: la app muestra el aviso) |
-| GET | `/api/preferencias` | | `{modo_permisos}` |
-| PUT | `/api/preferencias` | `{modo_permisos: "auto"\|"preguntar"}` | `{modo_permisos}`; se guarda en config.json y vale desde la próxima corrida. `auto` = `--permission-mode auto` en chats, tareas, encargos y reuniones con permiso en vivo; 400 si el valor no es válido |
+| GET | `/api/estado` | | `{app, version, claude, agentes:[ids de la oficina activa], auth, claudePath, oficina:{carpeta,nombre}\|null, perfil, modo_permisos: "auto"\|"preguntar"\|null, conectores_agentes: "todos"\|"por_agente"}` (null = la persona todavía no eligió: la app muestra el aviso) |
+| GET | `/api/preferencias` | | `{modo_permisos, conectores_agentes}` |
+| PUT | `/api/preferencias` | `{modo_permisos?: "auto"\|"preguntar", conectores_agentes?: "todos"\|"por_agente"}` (al menos uno) | `{modo_permisos, conectores_agentes}`; se guarda en config.json y vale desde la próxima corrida. `auto` = `--permission-mode auto` en chats, tareas, encargos y reuniones con permiso en vivo. `conectores_agentes: "todos"` = cada agente usa todos los conectores conectados en chats, tareas y encargos (leer libre; actuar por `proponer_accion`), sin asignarlos en la tabla; `por_agente` (por defecto) = solo los asignados. 400 si un valor no es válido |
 | GET | `/api/oficinas` | | `{oficinas:[{carpeta,nombre,activa}], activa: carpeta\|null}` (recientes; salta las que ya no existen) |
 | POST | `/api/oficinas` | `{nombre, duenio?, carpeta?, departamentos?:[string \| {nombre, color?, id?}]}` | `{carpeta, oficina}`; queda activa. Sin `departamentos`: Dirección, Comunicación, Operaciones. Carpeta por defecto `<oficinasDir>/<Nombre>` (si existe: `Nombre 2`). 409 si ya hay `oficina.json` en `carpeta` |
 | POST | `/api/oficinas/abrir` | `{carpeta}` | `{carpeta, oficina}`; 404 si no hay `oficina.json`, 400 si es inválido |

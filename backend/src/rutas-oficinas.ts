@@ -1,6 +1,6 @@
 // Rutas del núcleo para oficinas (Router.despachar de Swift): estado, oficinas, oficina, perfil, departamentos y la
 // lista de agentes. Contratar/editar/despedir agentes, chat e historial se suman al portar sus módulos.
-import { esModoPermisos, type Config } from './config.js'
+import { esConectoresAgentes, esModoPermisos, type Config } from './config.js'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
 import { ValidarAgenteExtra, agenteJSON, departamentoJSON, oficinaJSON } from './oficina.js'
@@ -42,6 +42,7 @@ export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada 
       agentes: (act?.oficina.agentes.map((x) => x.id) ?? []).sort(), auth: a,
       claudePath: bin ?? null, oficina: act ? act.resumen : null,
       perfil: perfilJSON(oficinas.perfilActual()), modo_permisos: config.modoPermisos ?? null,
+      conectores_agentes: config.conectoresAgentes ?? 'por_agente',
     }
   }
 
@@ -78,12 +79,18 @@ export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada 
       return no405
     }
     if (seccion === 'preferencias' && n === 2) {
-      if (method === 'GET') return [200, { modo_permisos: config.modoPermisos ?? null }]
+      const prefs = () => ({ modo_permisos: config.modoPermisos ?? null, conectores_agentes: config.conectoresAgentes ?? 'por_agente' })
+      if (method === 'GET') return [200, prefs()]
       if (method === 'PUT') {
         const d = objeto(body)
-        if (!esModoPermisos(d.modo_permisos)) throw new ErrorAPI(400, '«modo_permisos» tiene que ser "auto" o "preguntar".')
-        oficinas.guardarModoPermisos(d.modo_permisos)
-        return [200, { modo_permisos: d.modo_permisos }]
+        const hayModo = d.modo_permisos !== undefined
+        const hayConectores = d.conectores_agentes !== undefined
+        if (!hayModo && !hayConectores) throw new ErrorAPI(400, 'Falta «modo_permisos» o «conectores_agentes».')
+        if (hayModo && !esModoPermisos(d.modo_permisos)) throw new ErrorAPI(400, '«modo_permisos» tiene que ser "auto" o "preguntar".')
+        if (hayConectores && !esConectoresAgentes(d.conectores_agentes)) throw new ErrorAPI(400, '«conectores_agentes» tiene que ser "todos" o "por_agente".')
+        if (esModoPermisos(d.modo_permisos)) oficinas.guardarModoPermisos(d.modo_permisos)
+        if (esConectoresAgentes(d.conectores_agentes)) oficinas.guardarConectoresAgentes(d.conectores_agentes)
+        return [200, prefs()]
       }
       return no405
     }

@@ -36,6 +36,8 @@ export type ContextoOficina = {
   /** Corrida sin la persona (tareas): Bash, Edit y Write visibles pero en `dontAsk`; lo no permitido se rechaza, queda en
    *  `permission_denials` y se guarda como pedido pendiente (permisos-tareas.ts). */
   anotarRechazos?: boolean
+  /** Modo «todos los conectores» (preferencia de la app): el hijo espera a que se conecten aunque todavía no haya catálogo. */
+  todosConectores?: boolean
 }
 
 /** Un servidor MCP de la cuenta (catálogo de conectores de claude.ai). */
@@ -73,6 +75,32 @@ export const Acciones = {
     return out
   },
   herramientasMCP: (_o: Oficina, a: AgenteDef) => (Acciones.actuar(a).length === 0 ? [] : [Acciones.herramientaPropuesta]),
+}
+
+/** Prefijos del nombre corto de las herramientas que solo leen (también en camelCase); el resto actúa. */
+export const prefijosLeer = ['list', 'get', 'search', 'read', 'find', 'fetch', 'download', 'query', 'lookup', 'suggest']
+
+/** `leer` si el nombre corto empieza con uno de `prefijosLeer`; `actuar` si no. Ante la duda, actuar. */
+export function clasificarHerramienta(corto: string): 'leer' | 'actuar' {
+  const c = corto.toLowerCase()
+  return prefijosLeer.some((p) => c.startsWith(p)) ? 'leer' : 'actuar'
+}
+
+/** Preferencia «todos los conectores para todos los agentes» (`conectores_agentes: "todos"` en config.json). */
+export const TodosConectores = {
+  activo: (cfg: Config | undefined) => cfg?.conectoresAgentes === 'todos',
+  /** El agente como lo ven sus corridas: en modo «todos», con cada conector conectado de la cuenta asignado entero
+   *  (las de leer, libres; las de actuar, por `proponer_accion` y la aprobación de la persona, como siempre). Sin el
+   *  modo o sin catálogo, el agente tal cual. */
+  agente(cfg: Config | undefined, a: AgenteDef, catalogo: ServidorConector[] | undefined): AgenteDef {
+    if (!TodosConectores.activo(cfg) || !catalogo) return a
+    const conectores = catalogo.filter((s) => s.estado === 'connected' && s.herramientas.length > 0).map((s) => ({
+      servidor: s.nombre,
+      leer: s.herramientas.filter((h) => clasificarHerramienta(cortoHerramienta(h)) === 'leer'),
+      actuar: s.herramientas.filter((h) => clasificarHerramienta(cortoHerramienta(h)) === 'actuar'),
+    }))
+    return { ...a, conectores }
+  },
 }
 
 export const HerramientasMCPAgente = {
@@ -114,7 +142,8 @@ export const ConectoresAgente = {
 export const Instrucciones = {
   maxCaracteres: 8000,
   /** `conMCP`: el agente corre con el servidor MCP de la oficina (chat, tareas, encargos): se le explica cómo pedirle algo a un colega. */
-  para(o: Oficina, a: AgenteDef, { conMCP = false }: { conMCP?: boolean } = {}): string | undefined {
+  /** `todos`: modo «todos los conectores»: se nombran los servidores sin listar cada herramienta (pueden ser cientos). */
+  para(o: Oficina, a: AgenteDef, { conMCP = false, todos = false }: { conMCP?: boolean; todos?: boolean } = {}): string | undefined {
     const d = o.duenio.trim()
     const jefe = d === '' ? 'la persona' : d
     const secciones: string[] = []
@@ -136,9 +165,14 @@ export const Instrucciones = {
     }
 
     const c: string[] = []
-    const leen = conectores.filter((x) => x.leer.length > 0)
+    if (todos) {
+      const nombres = conectores.map((x) => x.servidor)
+      if (nombres.length > 0) c.push('Tenés todos los conectores de la cuenta: ' + nombres.join(', ') + '. Leer y buscar, libre.')
+      if (conectores.some((x) => x.actuar.length > 0)) c.push(`Para actuar con ellos (mandar, crear, publicar, borrar) usá la herramienta proponer_accion: ${jefe} la aprueba y recién ahí se ejecuta.`)
+    }
+    const leen = todos ? [] : conectores.filter((x) => x.leer.length > 0)
     if (leen.length > 0) c.push('Podés leer con: ' + leen.map((x) => `${x.servidor} (${x.leer.map(cortoHerramienta).join(', ')})`).join('; ') + '.')
-    const actuan = conectores.filter((x) => x.actuar.length > 0)
+    const actuan = todos ? [] : conectores.filter((x) => x.actuar.length > 0)
     if (actuan.length > 0) {
       c.push('Para actuar con ' + actuan.map((x) => `${x.servidor} (${x.actuar.map(cortoHerramienta).join(', ')})`).join('; ')
         + ` usá la herramienta proponer_accion: ${jefe} la aprueba y recién ahí se ejecuta.`)
@@ -190,17 +224,20 @@ export function configMCP(url: string): string {
 // MARK: - oficinas
 
 /** Dónde corre un agente de oficina y qué puede escribir (rutas absolutas). */
-export function contexto(a: OficinaActiva, agente: AgenteDef, { dirsExtra = [], actuar = [], catalogo }: { dirsExtra?: string[]; actuar?: string[]; catalogo?: ServidorConector[] } = {}): ContextoOficina {
+export function contexto(a: OficinaActiva, def: AgenteDef, { dirsExtra = [], actuar = [], catalogo, config }: { dirsExtra?: string[]; actuar?: string[]; catalogo?: ServidorConector[]; config?: Config } = {}): ContextoOficina {
+  const todos = TodosConectores.activo(config)
+  const agente = TodosConectores.agente(config, def, catalogo)
   const rutas = [a.ruta(`conocimiento/agentes/${agente.id}.md`)]
   for (const r of agente.escritura ?? []) if (Validar.rutaEscrituraValida(r)) rutas.push(a.ruta(r))
   const e = entregables(a, agente.id)
   if (e) rutas.push(e)
-  const { permitidas, vedadas } = ConectoresAgente.herramientas(a.oficina, agente, catalogo, actuar)
+  // modo «todos» sin catálogo todavía (no se detectó): no se veda nada; lo que no está permitido se pregunta o se rechaza
+  const { permitidas, vedadas } = todos && !catalogo ? { permitidas: [], vedadas: [] } : ConectoresAgente.herramientas(a.oficina, agente, catalogo, actuar)
   return {
     carpeta: a.carpeta, escritura: rutas, dirsExtra: [...dirsExtra, ...dirsVinculos(a.oficina, agente)],
-    instrucciones: Instrucciones.para(a.oficina, agente, { conMCP: true }), permitidas, vedadas,
+    instrucciones: Instrucciones.para(a.oficina, agente, { conMCP: true, todos }), permitidas, vedadas,
     herramientasMCP: HerramientasMCPAgente.lista(a.oficina, agente), perfilMCP: Coordinador.perfil(a.oficina, agente),
-    reglas: agente.reglas ?? [], preguntar: false,
+    reglas: agente.reglas ?? [], preguntar: false, ...(todos ? { todosConectores: true } : {}),
   }
 }
 
@@ -302,7 +339,7 @@ export const esperaHerramientaMCP = '900000'
  * en vivo, claude tiene que esperar a la persona más de 60 s. */
 export function entorno(ctx: ContextoOficina): Record<string, string> {
   const e: Record<string, string> = {}
-  if (ctx.permitidas.some((p) => p.startsWith('mcp__claude_ai_'))) e.MCP_CONNECTION_NONBLOCKING = 'false'
+  if (ctx.todosConectores || ctx.permitidas.some((p) => p.startsWith('mcp__claude_ai_'))) e.MCP_CONNECTION_NONBLOCKING = 'false'
   if (puedePreguntar(ctx)) e.MCP_TOOL_TIMEOUT = esperaHerramientaMCP
   return e
 }

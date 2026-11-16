@@ -22,6 +22,8 @@ export function datosDirPorDefecto(home: string, plataforma: NodeJS.Platform = p
 
 export type ModoPermisos = 'auto' | 'preguntar'
 export const esModoPermisos = (v: unknown): v is ModoPermisos => v === 'auto' || v === 'preguntar'
+export type ConectoresAgentes = 'todos' | 'por_agente'
+export const esConectoresAgentes = (v: unknown): v is ConectoresAgentes => v === 'todos' || v === 'por_agente'
 
 export class Config {
   proyecto: string
@@ -48,6 +50,10 @@ export class Config {
    *  y solo se pregunta lo dudoso; `preguntar` = lo que no está permitido se pregunta o se rechaza. undefined = la
    *  persona todavía no eligió (la app muestra el aviso al abrir) y se comporta como `preguntar`. */
   modoPermisos?: ModoPermisos
+  /** Qué conectores de claude.ai usan los agentes (clave `conectores_agentes`, toda la app): `todos` = cada agente lee con
+   *  todos los conectores conectados y lo que actúa (enviar, publicar...) se pide como cualquier permiso; `por_agente` = solo
+   *  los asignados a cada agente (Ajustes › Conectores). undefined se comporta como `por_agente`. */
+  conectoresAgentes?: ConectoresAgentes
 
   constructor(home: string = os.homedir()) {
     this.home = home
@@ -120,6 +126,7 @@ export class Config {
     if (s(o.oficinas_dir)) this.oficinasDir = Config.ruta(o.oficinas_dir, home)
     if (lista(o.oficina_dirs_extra)) this.oficinaDirsExtra = o.oficina_dirs_extra.map((d) => Config.ruta(d, home))
     if (esModoPermisos(o.modo_permisos)) this.modoPermisos = o.modo_permisos
+    if (esConectoresAgentes(o.conectores_agentes)) this.conectoresAgentes = o.conectores_agentes
     if (lista(o.legacy_dirs)) this.legacyDirs = [...o.legacy_dirs.map((d) => Config.ruta(d, home)), ...this.legacyDirs]
   }
 

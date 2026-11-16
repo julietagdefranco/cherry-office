@@ -3,7 +3,7 @@
 // en el actor. Si un método necesita esperar algo en el medio (claude), tiene que releer la oficina después.
 import fs from 'node:fs'
 import path from 'node:path'
-import { Config, type ModoPermisos } from './config.js'
+import { Config, type ConectoresAgentes, type ModoPermisos } from './config.js'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, type Obj } from './json.js'
 import { jsonSwift } from './json-swift.js'
@@ -265,6 +265,13 @@ export class Oficinas {
     this.log.info(`modo de permisos: ${modo}`)
   }
 
+  /** Guarda en config.json si todos los agentes usan todos los conectores o solo los asignados. Vale desde la próxima corrida. */
+  guardarConectoresAgentes(modo: ConectoresAgentes) {
+    this.config.conectoresAgentes = modo
+    this.guardarEstado()
+    this.log.info(`conectores de los agentes: ${modo}`)
+  }
+
   private guardarEstado() {
     let o: Obj = {}
     if (fs.existsSync(this.estadoPath)) {
@@ -280,6 +287,7 @@ export class Oficinas {
     }
     o.oficina_activa = this.activaCarpeta ?? null
     if (this.config.modoPermisos !== undefined) o.modo_permisos = this.config.modoPermisos
+    if (this.config.conectoresAgentes !== undefined) o.conectores_agentes = this.config.conectoresAgentes
     o.oficinas_recientes = this.recientes.map((r) => ({ carpeta: r.carpeta, nombre: r.nombre, abierta: r.abierta }))
     try {
       fs.mkdirSync(this.config.datosDir, { recursive: true })

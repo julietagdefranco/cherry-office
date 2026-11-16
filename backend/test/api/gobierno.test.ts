@@ -401,3 +401,62 @@ describe('Gobierno: instrucciones, conectores y acciones', () => {
     expect(dict((await f.get('/api/acciones', { entrega: '12345' })).obj).accion).toBeNull()
   })
 })
+
+// Preferencia de toda la app `conectores_agentes`: «todos» = cada agente usa todos los conectores conectados (leer libre,
+// actuar por proponer_accion) sin asignarlos uno por uno; «por_agente» (o sin elegir) = la tabla de siempre.
+describe('Todos los conectores para todos los agentes', () => {
+  const vedadasDe = (l: string[]) => {
+    const i = l.indexOf('--disallowedTools')
+    if (i < 0) return []
+    const resto = l.slice(i + 1)
+    const fin = resto.findIndex((x) => x.startsWith('--'))
+    return fin < 0 ? resto : resto.slice(0, fin)
+  }
+
+  test('preferencias: por defecto por_agente, valida y se guarda', async () => {
+    const f = await fix()
+    expect((await f.get('/api/preferencias')).obj.conectores_agentes).toBe('por_agente')
+    expect((await llamar(f.b, 'GET', '/api/estado')).obj.conectores_agentes).toBe('por_agente')
+    expect((await llamar(f.b, 'PUT', '/api/preferencias', { body: { conectores_agentes: 'algunos' } })).status).toBe(400)
+    const r = await llamar(f.b, 'PUT', '/api/preferencias', { body: { conectores_agentes: 'todos' } })
+    expect(r.status).toBe(200)
+    expect(r.obj.conectores_agentes).toBe('todos')
+    // cambiar solo esto no toca el modo de permisos
+    expect(r.obj.modo_permisos).toBeNull()
+    const cfg = JSON.parse(fs.readFileSync(path.join(f.sb.datos, 'config.json'), 'utf8'))
+    expect(cfg.conectores_agentes).toBe('todos')
+  })
+
+  test('todos: un agente sin conectores asignados lee con todos, propone acciones y no tiene vedas', async () => {
+    const sb = new Sandbox()
+    claudeMezcla(sb)
+    const f = await fix(undefined, sb)
+    expect((await f.post('/api/conectores/actualizar')).obj.error).toBeUndefined()
+    await llamar(f.b, 'PUT', '/api/preferencias', { body: { conectores_agentes: 'todos' } })
+    await chat(f.b, { agent: 'marce', message: 'hola', session: U.a })
+    const l = ultima(f)
+    const todas = Sandbox.reglas(l)
+    const corte = todas.findIndex((x) => x.startsWith('--'))
+    const reglas = corte < 0 ? todas : todas.slice(0, corte)
+    for (const h of [leerCal, verCal, leerMail]) expect(reglas.includes(h), h).toBe(true)
+    expect(reglas.includes(crearCal) || reglas.includes(enviarMail)).toBe(false)
+    expect(reglas.includes('mcp__hq__proponer_accion')).toBe(true)
+    // lo de actuar no se ve directo: va por proponer_accion
+    expect(new Set(vedadasDe(l))).toEqual(new Set([crearCal, enviarMail]))
+    const instr = Sandbox.valor(l, '--append-system-prompt') ?? ''
+    expect(instr.includes('Google Calendar') && instr.includes('Gmail') && instr.includes('proponer_accion')).toBe(true)
+    // y puede proponer una acción de un conector que nunca se le asignó
+    expect((await proponer(f, { herramienta: enviarMail, detalle: { para: 'x@y.z' } })).esError).toBe(false)
+  })
+
+  test('por_agente otra vez: vuelve la veda de todos los conectores', async () => {
+    const sb = new Sandbox()
+    claudeMezcla(sb)
+    const f = await fix(undefined, sb)
+    expect((await f.post('/api/conectores/actualizar')).obj.error).toBeUndefined()
+    await llamar(f.b, 'PUT', '/api/preferencias', { body: { conectores_agentes: 'todos' } })
+    await llamar(f.b, 'PUT', '/api/preferencias', { body: { conectores_agentes: 'por_agente' } })
+    await chat(f.b, { agent: 'marce', message: 'hola', session: U.a })
+    expect(vedadasDe(ultima(f))).toEqual(['mcp__claude_ai_*'])
+  })
+})

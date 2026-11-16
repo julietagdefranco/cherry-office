@@ -155,6 +155,8 @@ App.Ajustes = (function () {
       var agentes = (App.E.oficina && App.E.oficina.agentes) || [];
       if (!disp.length || !agentes.length) return;
       cont.appendChild(h('div.separador'));
+      cont.appendChild(eleccionAcceso());
+      if (modoAcceso() === 'todos') return;
       cont.appendChild(h('h3', { style: { fontSize: '13px', marginBottom: '4px' } }, 'Qué puede usar cada agente'));
       cont.appendChild(h('div.ayuda', { style: { margin: '0 0 8px' } }, 'Leer asigna las herramientas que solo consultan. Actuar asigna las que hacen algo afuera, y siempre piden tu aprobación.'));
       var cab1 = h('tr', h('th', 'Agente'), disp.map(function (s) { return h('th', { colspan: 2 }, s.nombre); }));
@@ -164,6 +166,36 @@ App.Ajustes = (function () {
           disp.map(function (s) { return [celda(a, s, 'leer'), celda(a, s, 'actuar')]; }));
       });
       cont.appendChild(h('div.cx-tabla-caja', h('table.cx-tabla', h('thead', cab1, cab2), h('tbody', filas))));
+    }
+
+    /* `conectores_agentes` (toda la app, PUT /api/preferencias): «todos» = cada agente usa todos los conectores
+       conectados (leer libre; actuar siempre como propuesta que aprobás); «por_agente» = la tabla de abajo. */
+    function modoAcceso() { return (App.E.estado && App.E.estado.conectores_agentes) || 'por_agente'; }
+    var ACCESOS = [
+      { id: 'todos', titulo: 'Todos los agentes usan todos los conectores', nota: 'más simple',
+        bajada: 'Cada agente puede leer con cualquier conector conectado. Mandar, publicar o crear algo afuera sigue siendo una propuesta que aprobás vos.' },
+      { id: 'por_agente', titulo: 'Elegir por agente',
+        bajada: 'Marcás en una tabla qué conectores usa cada agente, para leer y para actuar.' },
+    ];
+    function eleccionAcceso() {
+      var caja = h('div', { style: { marginBottom: '12px' } });
+      caja.appendChild(h('h3', { style: { fontSize: '13px', marginBottom: '8px' } }, 'Acceso de los agentes'));
+      ACCESOS.forEach(function (m) {
+        var b = h('button.opcion.modo-permiso' + (modoAcceso() === m.id ? '.elegida' : ''), { onclick: function () { elegirAcceso(m.id); } },
+          h('div', h('b', m.titulo, m.nota ? h('span.modo-nota', m.nota) : null), h('div.ayuda', { style: { margin: '2px 0 0' } }, m.bajada)));
+        caja.appendChild(b);
+      });
+      return caja;
+    }
+    function elegirAcceso(id) {
+      if (id === modoAcceso()) return;
+      err.textContent = '';
+      api().put('/api/preferencias', { conectores_agentes: id }).then(function (r) {
+        if (App.E && App.E.estado) App.E.estado.conectores_agentes = r.conectores_agentes;
+        if (!vivo) return;
+        App.aviso(id === 'todos' ? 'Todos los agentes usan todos los conectores.' : 'Elegí qué conectores usa cada agente.');
+        pintar(false);
+      }).catch(function (e) { if (vivo) err.textContent = e.message; });
     }
 
     function asignado(a, s) {
