@@ -64,6 +64,59 @@ App.Permisos = (function () {
     });
   }
 
+  /* ---------------- modo de permisos (toda la app) ----------------
+     «Automático»: un clasificador de Claude Code revisa cada acción y solo llega una tarjeta con lo dudoso.
+     «Preguntarme siempre»: lo que el agente no tiene permitido llega como tarjeta (o se rechaza si nadie mira).
+     La primera vez que se abre la app (`modo_permisos` null en /api/estado) se pide elegir; después se cambia desde el
+     menú de la oficina. Se guarda con PUT /api/preferencias y vale desde la próxima corrida de cada agente. */
+  var MODOS = [
+    { id: 'auto', titulo: 'Automático', nota: 'recomendado',
+      bajada: 'Claude revisa cada acción y deja pasar lo razonable. Solo te pregunta lo dudoso.' },
+    { id: 'preguntar', titulo: 'Preguntarme siempre',
+      bajada: 'Cada comando o archivo que el agente no tenga permitido te llega como tarjeta para aprobar.' },
+  ];
+
+  function elegirModo(actual, primeraVez) {
+    var elegido = actual || 'auto';
+    var hj = App.hoja({ titulo: primeraVez ? 'Antes de empezar: los permisos' : 'Permisos de los agentes', ancho: 520, modal: !!primeraVez });
+    var err = h('div.error-txt');
+    var opciones = MODOS.map(function (m) {
+      var b = h('button.opcion.modo-permiso', { onclick: function () { elegido = m.id; marcar(); } },
+        h('div', h('b', m.titulo, m.nota ? h('span.modo-nota', m.nota) : null), h('div.ayuda', { style: { margin: '2px 0 0' } }, m.bajada)));
+      b.dataset.modo = m.id;
+      return b;
+    });
+    function marcar() { opciones.forEach(function (b) { b.classList.toggle('elegida', b.dataset.modo === elegido); }); }
+    marcar();
+    App.add(hj.cuerpo,
+      h('p', { style: { marginTop: 0, color: 'var(--suave)' } }, 'Los agentes corren comandos y escriben archivos en tu compu para hacer su trabajo. Elegí cuánto querés que te pregunten.'),
+      opciones,
+      h('div.modo-aviso',
+        h('b', 'En automático tené en cuenta que:'),
+        h('ul',
+          h('li', 'Un agente puede escribir archivos de la oficina fuera de su carpeta si a Claude le parece razonable para la tarea.'),
+          h('li', 'Las tareas programadas avanzan solas, sin esperarte, salvo en lo que Claude frene.'),
+          h('li', 'Cada acción pasa por una revisión extra de Claude: suma un poco de costo y de tiempo.'),
+          h('li', 'Lo que sale de la oficina (mandar un mail, publicar, gastar) sigue siendo una propuesta que aprobás vos.'))),
+      h('div.ayuda', 'Lo podés cambiar cuando quieras desde el menú de la oficina › Permisos de los agentes.'),
+      err);
+    var guardar = h('button.btn.primario', { autofocus: true, onclick: function () {
+      guardar.disabled = true; err.textContent = '';
+      App.api.put('/api/preferencias', { modo_permisos: elegido }).then(function () {
+        if (App.E && App.E.estado) App.E.estado.modo_permisos = elegido;
+        hj.cerrar();
+        App.aviso(elegido === 'auto' ? 'Modo automático activado.' : 'Te vamos a preguntar cada permiso.');
+      }).catch(function (e) { guardar.disabled = false; err.textContent = e.message; });
+    } }, primeraVez ? 'Empezar' : 'Guardar');
+    if (!primeraVez) hj.pie.appendChild(h('button.btn', { onclick: hj.cerrar }, 'Cancelar'));
+    hj.pie.appendChild(guardar);
+  }
+
+  /** Desde el menú: lee lo guardado y abre la hoja. */
+  function abrirModo() {
+    App.api.get('/api/preferencias').then(function (r) { elegirModo(r.modo_permisos, false); }).catch(App.fallo);
+  }
+
   if (App.on) App.on('actividad', function (r) { aplicar(r.permisos || []); });
-  return { pendientes: function () { return lista.slice(); } };
+  return { pendientes: function () { return lista.slice(); }, elegirModo: elegirModo, abrirModo: abrirModo };
 })();

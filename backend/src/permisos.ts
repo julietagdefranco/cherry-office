@@ -248,15 +248,26 @@ function baseOficina(cfg: Config, ctx: ContextoOficina, agente: string): string 
 /** Pide permiso en vivo solo un chat con la persona presente y con el servidor MCP andando. */
 export const puedePreguntar = (ctx: ContextoOficina) => (ctx.preguntar ?? false) && ctx.mcpUrl !== undefined
 
+/** Modo automático (preferencia de toda la app): un clasificador de Claude Code revisa cada acción no permitida y la deja
+ *  pasar o la frena. Lo frenado va a la tarjeta (chat, con `--permission-prompt-tool`) o a `permission_denials` (tareas). */
+export const modoAuto = (cfg: Config) => cfg.modoPermisos === 'auto'
+
+/** `--permission-mode` de una corrida: `auto` si la persona lo eligió; si no, `default` con la persona presente (se le
+ *  pregunta) o `dontAsk` sin ella (se rechaza). */
+export function modoPermiso(cfg: Config, conPersona: boolean): string {
+  if (modoAuto(cfg)) return 'auto'
+  return conPersona ? 'default' : 'dontAsk'
+}
+
 /** `--tools` de un agente de oficina: base + Edit,Write (si tiene alguna ruta) + las de sus reglas guardadas (Bash...)
- *  + Bash,Edit,Write si puede pedir permiso (o anota rechazos) + las MCP si hay servidor. */
+ *  + Bash,Edit,Write si puede pedir permiso, anota rechazos o corre en modo automático + las MCP si hay servidor. */
 export function herramientasOficina(cfg: Config, ctx: ContextoOficina, agente: string): string {
   let h = baseOficina(cfg, ctx, agente)
   const lista = h.split(',').map((x) => x.trim())
   const sumar = (n: string) => { if (!lista.includes(n)) { lista.push(n); h += ',' + n } }
   if (ctx.escritura.length > 0) { h += ',Edit,Write'; lista.push('Edit', 'Write') }
   for (const r of ctx.reglas ?? []) { const i = r.indexOf('('); if (i >= 0) sumar(r.slice(0, i)) }
-  if (puedePreguntar(ctx) || ctx.anotarRechazos) for (const n of herramientasPreguntables) sumar(n)
+  if (puedePreguntar(ctx) || ctx.anotarRechazos || modoAuto(cfg)) for (const n of herramientasPreguntables) sumar(n)
   if (ctx.mcpUrl !== undefined) h += ',' + (ctx.herramientasMCP ?? herramientasMCP).join(',')
   return h
 }
@@ -265,9 +276,10 @@ export function herramientasOficina(cfg: Config, ctx: ContextoOficina, agente: s
 export function argumentos(cfg: Config, ctx: ContextoOficina, p: { agente: string; mensaje: string; sid: string; flag: string }): string[] {
   const a = ['-p', '--agent', p.agente, p.flag, p.sid, ...ClaudeRunner.formatoSalida]
   a.push('--tools', herramientasOficina(cfg, ctx, p.agente))
-  // con la persona presente: modo normal + la herramienta que le pregunta; si no, se rechaza solo lo no permitido
-  if (puedePreguntar(ctx)) a.push('--permission-mode', 'default', '--permission-prompt-tool', herramientaPermiso)
-  else a.push('--permission-mode', 'dontAsk')
+  // con la persona presente: la herramienta que le pregunta (en auto, solo lo que frena el clasificador); sin ella, lo no
+  // permitido se rechaza (en auto, solo lo que frena el clasificador)
+  a.push('--permission-mode', modoPermiso(cfg, puedePreguntar(ctx)))
+  if (puedePreguntar(ctx)) a.push('--permission-prompt-tool', herramientaPermiso)
   if (ctx.mcpUrl !== undefined) a.push('--mcp-config', configMCP(ctx.mcpUrl))
   for (const d of ctx.dirsExtra) a.push('--add-dir', d)
   a.push('--allowedTools')
