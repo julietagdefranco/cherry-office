@@ -6,6 +6,7 @@
   var sesiones = {};      // id -> session uuid
   var chats = {};         // id -> [{r, t, e}]  (cache en memoria)
   var enCurso = {};       // id -> true mientras espera respuesta
+  var borradores = {};    // id -> texto a medio escribir en el chat (sobrevive al cambiar de pestaña o de agente)
   var vivos = {};         // id -> pasos de la respuesta que se está escribiendo (/api/chat/vivo)
   var refrescarVivo = null;   // {id, fn}: repinta la burbuja en vivo del chat abierto
 
@@ -91,7 +92,9 @@
     var adj = App.Adjuntos();
     adj.zona(cuerpo); adj.zona(pie, txt);
     txt.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); mandar(); } });
-    txt.addEventListener('input', function () { txt.style.height = 'auto'; txt.style.height = Math.min(160, txt.scrollHeight + 2) + 'px'; });
+    function ajustarAlto() { txt.style.height = 'auto'; txt.style.height = Math.min(160, txt.scrollHeight + 2) + 'px'; }
+    txt.addEventListener('input', function () { borradores[a.id] = txt.value; ajustarAlto(); });
+    if (borradores[a.id]) { txt.value = borradores[a.id]; setTimeout(ajustarAlto, 0); }
     App.add(pie, adj.lista, adj.error, adj.input, h('div.redactar', adj.boton, txt, enviar),
       h('div', { style: { display: 'flex', justifyContent: 'space-between', marginTop: '6px' } },
         h('span.ayuda', 'Enter para enviar · Mayús+Enter para otra línea · arrastrá o pegá archivos'),
@@ -149,6 +152,7 @@
         leidos = archivos;
         (chats[id] = chats[id] || []).push({ r: 'u', t: t, adj: nombres });
         txt.value = ''; txt.style.height = '';
+        delete borradores[id];
         adj.vaciar();
         if (actual === id && pestana === 'chat') render();
         if (App.Actividad) setTimeout(App.Actividad.ya, 300);
