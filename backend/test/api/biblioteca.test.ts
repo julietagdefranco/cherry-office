@@ -667,10 +667,10 @@ describe('Biblioteca', () => {
     const l = lect[0]!
     expect(Sandbox.valor(l, '--agent')).toBe('marce')
     expect(uuidValido(Sandbox.valor(l, '--session-id') ?? '')).toBe(true)
-    expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Skill,Edit,Write')
+    expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Skill,WebFetch,WebSearch,Edit,Write')
     // permiso de escritura: SOLO su archivo de notas (ni entregables ni nada más)
     const notas = ruta(f.carpeta, 'conocimiento/agentes/marce.md')
-    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', regla('Edit', notas), regla('Write', notas), '--disallowedTools', 'mcp__claude_ai_*'])
+    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', 'WebFetch', 'WebSearch', regla('Edit', notas), regla('Write', notas), '--disallowedTools', 'mcp__claude_ai_*'])
     expect(l).not.toContain('--add-dir')
     expect(sinPrivate(cwdDe(f, l))).toBe(sinPrivate(f.carpeta))
     const p = l.at(-1)!

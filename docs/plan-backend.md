@@ -41,4 +41,4 @@ Objetivo: misma interacción para Juli (la oficina 3D y el chat se ven y se usan
 - Permisos de escritura por defecto (rutas relativas al proyecto `~/Próspera`):
   - todos: `_equipo/agentes/<id>.md`
   - betty: además `_betty/estado-actual.md` y `_equipo/decisiones.md`
-- Herramientas por defecto: `Read,Glob,Grep,Skill` + `Edit,Write` solo si el agente tiene rutas de escritura (acotadas con `--allowedTools Edit(//ruta)` / `Write(//ruta)`).
+- Herramientas por defecto: `Read,Glob,Grep,Skill,WebFetch,WebSearch` + `Edit,Write` solo si el agente tiene rutas de escritura (acotadas con `--allowedTools Edit(//ruta)` / `Write(//ruta)`).

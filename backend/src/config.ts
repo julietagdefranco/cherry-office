@@ -7,7 +7,7 @@ import { esObjeto } from './json.js'
 import { esIdValido } from './validar.js'
 
 export const agentesPorDefecto = ['betty', 'don-armando', 'marce', 'catalina', 'patricia', 'sofia', 'mario', 'nicolas']
-export const herramientasBase = 'Read,Glob,Grep,Skill'
+export const herramientasBase = 'Read,Glob,Grep,Skill,WebFetch,WebSearch'
 export const escrituraPorDefecto: Record<string, string[]> = {
   '*': ['_equipo/agentes/{id}.md'],
   betty: ['_betty/estado-actual.md', '_equipo/decisiones.md'],
