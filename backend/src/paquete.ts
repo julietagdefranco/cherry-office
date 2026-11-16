@@ -83,6 +83,7 @@ export function slugValido(s: string): boolean {
 
 export function filaJSON(f: ArchivoFila): Obj {
   const o: Obj = { slug: f.slug, nombre: f.nombre, departamento: f.departamento, ruta: f.ruta, tipo: f.tipo, tam: f.tam, hash: f.hash, creado: f.creado }
+  if (f.departamentos.length > 1) o.departamentos = f.departamentos
   if (f.ficha) o.ficha = fichaJSON(f.ficha)
   if (f.aviso !== undefined) o.aviso = f.aviso
   return o
@@ -97,6 +98,7 @@ export function filaDesde(o: Obj, oficina: string, ahora: number): ArchivoFila |
   const tipo = typeof o.tipo === 'string' ? o.tipo : path.posix.extname(ruta).slice(1).toLowerCase()
   return nuevaFila({
     slug, oficina, nombre: prefijo(nombre, 200), departamento: typeof o.departamento === 'string' ? o.departamento : 'compartido',
+    ...(Array.isArray(o.departamentos) && o.departamentos.length > 0 && o.departamentos.every((x) => typeof x === 'string') ? { departamentos: o.departamentos as string[] } : {}),
     ruta, origen: 'subido', tipo, tam: typeof o.tam === 'number' ? Math.trunc(o.tam) : 0, hash: typeof o.hash === 'string' ? o.hash : '',
     estado: 'pendiente', aviso: typeof o.aviso === 'string' ? o.aviso : undefined,
     ficha: esObjeto(o.ficha) ? fichaDesde(o.ficha) : undefined, creado: typeof o.creado === 'number' ? o.creado : ahora, actualizado: ahora,

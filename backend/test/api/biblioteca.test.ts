@@ -894,6 +894,80 @@ describe('Biblioteca', () => {
     expect(lista((await f.get('/api/biblioteca/propuestas')).obj.propuestas).length).toBe(6) // 1 + 5
   })
 
+  // MARK: asignar a un departamento
+
+  test('PATCH /api/archivos/:slug: lo asigna a otro departamento, mueve el original y actualiza ficha y catálogo', async () => {
+    const f = await bib()
+    await subirYEsperar(f, 'precios.txt', 'El taller cuesta 150 dolares')
+    const r = await f.patch('/api/archivos/precios', { departamento: 'redes' })
+    expect(r.status).toBe(200)
+    const a = archivo(r)
+    expect(a.departamento).toBe('redes')
+    expect(a.ruta).toBe('archivos/redes/precios.txt')
+    expect(f.existe('archivos/redes/precios.txt')).toBe(true)
+    expect(f.existe('archivos/compartido/precios.txt')).toBe(false)
+    expect(f.leer('conocimiento/fuentes/precios.md')).toContain('- **Carpeta:** Redes')
+    expect(f.leer('conocimiento/archivos.md')).toContain('(`precios`, Redes, txt)')
+    expect(await buscar(f, '', { departamento: 'redes' })).toEqual(['precios'])
+    // de vuelta a compartido; el mismo departamento no cambia nada
+    expect(archivo(await f.patch('/api/archivos/precios', { departamento: 'compartido' })).ruta).toBe('archivos/compartido/precios.txt')
+    expect(archivo(await f.patch('/api/archivos/precios', { departamento: 'compartido' })).ruta).toBe('archivos/compartido/precios.txt')
+    // errores
+    expect((await f.patch('/api/archivos/precios', { departamento: 'inexistente' })).status).toBe(400)
+    expect((await f.patch('/api/archivos/precios', {})).status).toBe(400)
+    expect((await f.patch('/api/archivos/nada', { departamento: 'redes' })).status).toBe(404)
+  })
+
+  test('PATCH /api/archivos/:slug con varios departamentos: aparece en los dos filtros, el original queda en el primero y leen todos', async () => {
+    const f = await bib()
+    await subirYEsperar(f, 'plan.txt', 'Plan de lanzamiento')
+    const r = await f.patch('/api/archivos/plan', { departamentos: ['redes', 'direccion', 'redes'] })
+    expect(r.status).toBe(200)
+    const a = archivo(r)
+    expect(a.departamentos).toEqual(['redes', 'direccion'])
+    expect(a.departamento).toBe('redes')
+    expect(a.ruta).toBe('archivos/redes/plan.txt')
+    expect(await buscar(f, '', { departamento: 'redes' })).toEqual(['plan'])
+    expect(await buscar(f, '', { departamento: 'direccion' })).toEqual(['plan'])
+    expect(await buscar(f, '', { departamento: 'compartido' })).toEqual([])
+    expect(f.leer('conocimiento/fuentes/plan.md')).toContain('- **Carpeta:** Redes y Dirección')
+    expect(f.leer('conocimiento/archivos.md')).toContain('(`plan`, Redes y Dirección, txt)')
+    // sacar el primero mueve el original al que queda
+    const b = archivo(await f.patch('/api/archivos/plan', { departamentos: ['direccion'] }))
+    expect(b.departamentos).toEqual(['direccion'])
+    expect(b.ruta).toBe('archivos/direccion/plan.txt')
+    // «compartido» gana sobre los departamentos; una lista vacía también es toda la oficina
+    expect(archivo(await f.patch('/api/archivos/plan', { departamentos: ['redes', 'compartido'] })).departamentos).toEqual(['compartido'])
+    await f.patch('/api/archivos/plan', { departamentos: ['redes'] })
+    expect(archivo(await f.patch('/api/archivos/plan', { departamentos: [] })).departamentos).toEqual(['compartido'])
+    expect((await f.patch('/api/archivos/plan', { departamentos: [7] })).status).toBe(400)
+    // lectura por rol: los de los dos departamentos
+    await f.patch('/api/archivos/plan', { departamentos: ['redes', 'direccion'] })
+    const l = await f.post('/api/archivos/plan/leer')
+    expect(l.obj.agentes).toEqual(['marce', 'betty'])
+    await aguardar(f, 'plan')
+  })
+
+  test('PATCH /api/archivos/:slug: si ya hay uno con ese nombre en el destino, no lo pisa', async () => {
+    const f = await bib()
+    await subirYEsperar(f, 'a.txt', 'uno', 'redes')
+    const otro = await subirYEsperar(f, 'a.txt', 'dos')
+    const r = await f.patch(`/api/archivos/${str(otro.slug)}`, { departamento: 'redes' })
+    expect(r.status).toBe(200)
+    expect(archivo(r).ruta).not.toBe('archivos/redes/a.txt')
+    expect(f.leer('archivos/redes/a.txt')).toBe('uno')
+    expect(f.leer(str(archivo(r).ruta))).toBe('dos')
+  })
+
+  test('lectura por rol: leen primero los del departamento asignado y después los de «útil para»', async () => {
+    const f = await bib()
+    f.sb.responder('ficha', fichaJSON({ util_para: ['direccion'] }))
+    const r = await subirTexto(f, 'a.txt', 'uno', { depto: 'redes', leer: true })
+    const fin = await aguardar(f, str(archivo(r).slug))
+    expect(fin.lectura).toEqual({ marce: 'ok', betty: 'ok' })
+    expect(conPrompt(f, 'Se sumó un documento').flatMap((l) => Sandbox.valor(l, '--agent') ?? [])).toEqual(['marce', 'betty'])
+  })
+
   // MARK: vínculos
 
   test('vínculos: validaciones al crear', async () => {
@@ -970,6 +1044,23 @@ describe('Biblioteca', () => {
     expect(g[0]!.alcance).toBe('oficina')
     const l = lista((await f.get('/api/vinculos')).obj.vinculos)
     expect(l.length === 20 && l.every((x) => x.existe === true)).toBe(true)
+  })
+
+  test('PATCH /api/vinculos/:id cambia a quién le da acceso; los archivos vinculados no se asignan uno por uno', async () => {
+    const f = await bib()
+    const ext = externa(f)
+    await f.post('/api/vinculos', { ruta: ext, id: 'ext' })
+    const r = await f.patch('/api/vinculos/ext', { alcance: { departamentos: ['redes'] } })
+    expect(r.status).toBe(200)
+    expect(dict(r.obj.vinculo).alcance).toEqual({ departamentos: ['redes'] })
+    expect(dict(lista(f.oficinaJSON().vinculos)[0]!.alcance).departamentos).toEqual(['redes'])
+    expect(dict((await f.patch('/api/vinculos/ext', {})).obj.vinculo).alcance).toBe('oficina')
+    expect((await f.patch('/api/vinculos/ext', { alcance: { departamentos: ['inexistente'] } })).status).toBe(400)
+    expect((await f.patch('/api/vinculos/nada', { alcance: 'oficina' })).status).toBe(404)
+    await f.post('/api/vinculos/ext/escanear')
+    await aguardar(f, 'a')
+    expect((await f.patch('/api/archivos/a', { departamento: 'redes' })).status).toBe(409)
+    await reposo(f)
   })
 
   test('escanear: sin copiar nada, solo extensiones soportadas, sin ocultos ni enlaces; se ficha en su lugar', async () => {
@@ -1228,7 +1319,7 @@ describe('Biblioteca', () => {
     expect((await f.get('/api/archivos/no-existe')).status).toBe(404)
     expect((await f.get('/api/archivos/no-existe/original')).status).toBe(404)
     expect((await llamar(f.b, 'PUT', '/api/archivos')).status).toBe(405)
-    expect((await llamar(f.b, 'PATCH', '/api/archivos/x')).status).toBe(405)
+    expect((await llamar(f.b, 'PUT', '/api/archivos/x')).status).toBe(405)
     expect((await llamar(f.b, 'DELETE', '/api/vinculos')).status).toBe(405)
     expect((await llamar(f.b, 'POST', '/api/biblioteca/estado')).status).toBe(405)
   })

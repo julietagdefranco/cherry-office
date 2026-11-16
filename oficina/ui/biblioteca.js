@@ -1,15 +1,12 @@
-/* Biblioteca: archivos de la oficina (subidos o de carpetas vinculadas), su ficha y el conocimiento que generan. */
+/* Biblioteca: archivos de la oficina (subidos o de carpetas vinculadas), su ficha y el conocimiento que generan.
+   Todo se ordena por «de quién es»: toda la oficina o uno o más departamentos. La barra lateral elige qué departamento
+   se ve, la etiqueta de cada fila cambia el dueño y «Subir» / «Vincular carpeta» van al departamento abierto. */
 (function () {
   'use strict';
   var h = App.h, api = App.api;
   var relojEstado = null, estadoPrevio = null;
   var PROCESANDO = { pendiente: 'En cola', extrayendo: 'Leyendo el texto', fichando: 'Haciendo la ficha', leyendo: 'Los agentes lo están leyendo' };
-
-  function etiquetaEstado(f) {
-    if (f.estado === 'listo') return h('span.insignia.ok', 'Listo');
-    if (f.estado === 'error') return h('span.insignia.error', { title: f.error || '' }, 'Error');
-    return h('span.insignia.aviso', PROCESANDO[f.estado] || f.estado);
-  }
+  var OFICINA = 'compartido';
 
   /* estado de la cola: insignia en la barra lateral y aviso cuando termina algo */
   function vigilarEstado() {
@@ -18,7 +15,6 @@
       var b = App.dom && App.dom.navBib;
       if (b) {
         var trabajo = st.pendientes || (st.cola || []).length;
-        b.classList.toggle('oculto', !trabajo && !st.propuestas);
         b.className = 'insignia' + (trabajo ? ' aviso' : st.propuestas ? ' ok' : '') + (!trabajo && !st.propuestas ? ' oculto' : '');
         b.textContent = trabajo ? 'Procesando ' + trabajo : st.propuestas ? st.propuestas + (st.propuestas === 1 ? ' propuesta' : ' propuestas') : '';
       }
@@ -29,105 +25,342 @@
     }).catch(function () { relojEstado = setTimeout(vigilarEstado, 20000); });
   }
 
+  /* ---- dueños: «compartido» (toda la oficina) o ids de departamento ---- */
+  function deptos() { return App.E.oficina.departamentos || []; }
+  function nombreDueno(id) { if (id === OFICINA) return 'Toda la oficina'; var d = App.depto(id); return d ? d.nombre : id; }
+  function frase(ids) {
+    var n = ids.map(nombreDueno);
+    return n.length < 2 ? (n[0] || '') : n.slice(0, -1).join(', ') + ' y ' + n[n.length - 1];
+  }
+  function marca(id) {
+    if (id === OFICINA) return App.icono('personas');
+    var d = App.depto(id);
+    return h('span.biblio-punto', { style: { background: (d && d.color) || '#9a9a9a' } });
+  }
+  function agentesDe(id) {
+    var ags = App.E.oficina.agentes || [];
+    return id === OFICINA ? ags : ags.filter(function (a) { return a.departamento === id; });
+  }
+  /* departamentos de una carpeta vinculada, según su alcance */
+  function duenosVinculo(v) {
+    var al = v.alcance;
+    if (!al || al === 'oficina') return [OFICINA];
+    if (al.departamentos) return al.departamentos.slice();
+    var ds = [];
+    (al.agentes || []).forEach(function (id) { var a = App.agente(id); if (a && a.departamento && ds.indexOf(a.departamento) < 0) ds.push(a.departamento); });
+    return ds.length ? ds : [OFICINA];
+  }
+  function duenosArchivo(f) { return f.departamentos && f.departamentos.length ? f.departamentos : [f.departamento || OFICINA]; }
+  function iniciales(n) { return String(n || '?').trim().slice(0, 2).toUpperCase(); }
+
   function abrir() {
-    var hj = App.hoja({ titulo: 'Biblioteca', ancho: 1000, alto: 'min(720px, 92vh)', sinPie: true });
-    var vista = 'archivos', sel = null, archivos = [];
+    var hj = App.hoja({ titulo: 'Biblioteca', ancho: 1100, alto: 'min(740px, 92vh)', sinPie: true });
+    var vista = 'todo';            // 'todo' | 'compartido' | id de departamento | 'propuestas'
+    var sel = null;                // {tipo: 'archivo'|'carpeta', id}
+    var abiertas = {};             // carpetas vinculadas desplegadas en la lista
+    var archivos = [], vinculos = [];
     var buscar = h('input.campo', { placeholder: 'Buscar en todos los documentos…', style: { maxWidth: '320px' } });
-    var dep = h('select.campo', { style: { width: 'auto', minWidth: '200px', flex: 'none' } }, h('option', { value: '' }, 'Todos los departamentos'),
-      App.E.oficina.departamentos.map(function (d) { return h('option', { value: d.id }, d.nombre); }), h('option', { value: 'compartido' }, 'Compartido'));
     var input = h('input', { type: 'file', multiple: true, style: { display: 'none' }, onchange: function () { subir(input.files); input.value = ''; } });
-    var tabs = h('div.pestanas', { style: { padding: '0 18px', marginBottom: '0' } });
-    var lista = h('div.biblio-lista'), det = h('div.biblio-det');
-    var biblio = h('div.biblio', lista, det);
+    var btnSubir = h('button.btn.primario', { onclick: function () { input.click(); } });
+    var nav = h('div.biblio-nav'), lista = h('div.biblio-lista'), det = h('div.biblio-det');
+    var biblio = h('div.biblio', nav, lista, det);
     var zona = h('div', { style: { position: 'relative', flex: 1, minHeight: 0 } }, biblio);
     hj.cuerpo.style.cssText = 'padding:0;display:flex;flex-direction:column;overflow:hidden';
-    App.add(hj.cuerpo, 
-      h('div.biblio-barra', App.icono('buscar'), buscar, dep, h('span', { style: { flex: 1 } }),
-        h('button.btn', { onclick: vincular }, App.icono('enlace'), 'Vincular carpeta'),
-        h('button.btn.primario', { onclick: function () { input.click(); } }, App.icono('subir'), 'Subir archivos'), input),
-      tabs, zona);
+    App.add(hj.cuerpo,
+      h('div.biblio-barra', App.icono('buscar'), buscar, h('span', { style: { flex: 1 } }),
+        h('button.btn', { onclick: vincular }, App.icono('enlace'), 'Vincular carpeta'), btnSubir, input),
+      zona);
 
-    function pintarTabs(np) {
-      App.add(App.vaciar(tabs), [['archivos', 'Archivos'], ['vinculos', 'Carpetas vinculadas'], ['propuestas', 'Propuestas' + (np ? ' (' + np + ')' : '')]].map(function (t) {
-        return h('button.pestana' + (vista === t[0] ? '.activa' : ''), { onclick: function () { vista = t[0]; sel = null; pintarTabs(np); cargar(); } }, t[1]);
-      }));
-    }
-    pintarTabs(estadoPrevio && estadoPrevio.propuestas);
+    /* a dónde va lo que se sube o se vincula: el departamento abierto, o toda la oficina */
+    function destino() { return App.depto(vista) ? vista : OFICINA; }
+    function textoDestino() { return destino() === OFICINA ? 'toda la oficina' : nombreDueno(destino()); }
 
     var cargar = App.debounce(function () {
-      if (vista === 'archivos') cargarArchivos();
-      else if (vista === 'vinculos') cargarVinculos();
-      else cargarPropuestas();
-    }, 150);
-    buscar.addEventListener('input', function () { if (vista !== 'archivos') { vista = 'archivos'; pintarTabs(); } cargar(); });
-    dep.addEventListener('change', cargar);
-
-    /* ---- archivos ---- */
-    function cargarArchivos() {
-      det.style.display = '';
-      api.get('/api/archivos', { q: buscar.value.trim(), departamento: dep.value }).then(function (r) {
-        archivos = r.archivos || [];
-        App.vaciar(lista);
-        if (!archivos.length) {
-          lista.appendChild(h('div.vacio', buscar.value.trim() ? 'No encontré nada con eso.' : h('div', h('p', 'Todavía no hay archivos.'), h('p.ayuda', 'Arrastrá documentos acá o tocá «Subir archivos». Se leen, se fichan y los agentes que les sirve los anotan en su conocimiento.'))));
-        }
-        archivos.forEach(function (f) {
-          var d = App.depto(f.departamento);
-          lista.appendChild(h('div.archivo' + (sel === f.slug ? '.sel' : ''), { onclick: function () { sel = f.slug; cargarArchivos(); } },
-            h('div.tipo', (f.tipo || '').slice(0, 4)),
-            h('div.archivo-txt', h('div.archivo-tit', f.titulo),
-              h('div.archivo-meta', [f.nombre, d ? d.nombre : (f.departamento || 'Compartido'), f.origen === 'vinculo' ? 'vinculado' : null, App.fecha(f.actualizado)].filter(Boolean).join(' · ')),
-              f.snippet ? h('div.archivo-snip', f.snippet.replace(/[\[\]]/g, '')) : null),
-            etiquetaEstado(f)));
-        });
-        biblio.classList.toggle('con-sel', !!sel);
-        if (sel) detalle(sel); else App.vaciar(det).appendChild(h('div.vacio', 'Elegí un archivo para ver su ficha.'));
+      var q = buscar.value.trim();
+      Promise.all([api.get('/api/archivos', { q: q }), api.get('/api/vinculos')]).then(function (rs) {
+        archivos = rs[0].archivos || [];
+        vinculos = rs[1].vinculos || [];
+        pintar();
       }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
+    }, 150);
+    buscar.addEventListener('input', function () { if (vista === 'propuestas') vista = 'todo'; cargar(); });
+
+    function esDe(duenos, v) { return v === 'todo' || duenos.indexOf(v) >= 0; }
+    function cuenta(v) {
+      return archivos.filter(function (f) { return f.origen !== 'vinculo' && esDe(duenosArchivo(f), v); }).length
+        + vinculos.filter(function (x) { return esDe(duenosVinculo(x), v); }).length;
     }
-    function detalle(slug) {
+
+    function pintar() {
+      App.vaciar(btnSubir);
+      App.add(btnSubir, App.icono('subir'), 'Subir a ' + textoDestino());
+      pintarNav();
+      if (vista === 'propuestas') { cargarPropuestas(); return; }
+      det.style.display = '';
+      pintarLista();
+      pintarDetalle();
+    }
+
+    /* ---- barra lateral ---- */
+    function itemNav(v, icono, texto, n) {
+      return h('button.biblio-nav-item' + (vista === v ? '.activa' : ''), { onclick: function () { vista = v; sel = null; pintar(); } },
+        icono, h('span.biblio-nav-txt', texto), n === null ? null : h('small', String(n)));
+    }
+    function pintarNav() {
+      var np = estadoPrevio && estadoPrevio.propuestas;
+      App.add(App.vaciar(nav),
+        itemNav('todo', App.icono('capas'), 'Todo', cuenta('todo')),
+        h('div.biblio-nav-tit', 'De quién es'),
+        itemNav(OFICINA, App.icono('personas'), 'Toda la oficina', cuenta(OFICINA)),
+        deptos().map(function (d) { return itemNav(d.id, marca(d.id), d.nombre, cuenta(d.id)); }),
+        h('div.biblio-nav-sep'),
+        itemNav('propuestas', App.icono('chispa'), 'Propuestas', np || null));
+    }
+
+    /* ---- lista ---- */
+    function pintarLista() {
+      App.vaciar(lista);
+      var q = buscar.value.trim();
+      if (App.depto(vista) || vista === OFICINA) {
+        var gente = vista === OFICINA ? 'Material general: lo puede consultar cualquier agente' : agentesDe(vista).map(function (a) { return a.nombre; }).join(', ') || 'Todavía sin agentes';
+        lista.appendChild(h('div.biblio-cab', marca(vista), h('b', nombreDueno(vista)), h('span', '· ' + gente)));
+      }
+      var filas = 0;
+      vinculos.forEach(function (v) {
+        if (!esDe(duenosVinculo(v), vista)) return;
+        var suyos = archivos.filter(function (f) { return f.vinculo === v.id; });
+        if (q && !suyos.length) return;
+        filas++;
+        lista.appendChild(filaCarpeta(v, suyos));
+        if (abiertas[v.id] || q) suyos.forEach(function (f) { lista.appendChild(filaArchivo(f, true)); });
+      });
+      archivos.forEach(function (f) {
+        if (f.origen === 'vinculo' || !esDe(duenosArchivo(f), vista)) return;
+        filas++;
+        lista.appendChild(filaArchivo(f, false));
+      });
+      if (!filas) {
+        lista.appendChild(h('div.vacio', q ? 'No encontré nada con eso.' : h('div',
+          h('p', vista === 'todo' ? 'Todavía no hay archivos.' : 'Todavía no hay documentos de ' + (vista === OFICINA ? 'toda la oficina' : nombreDueno(vista)) + '.'),
+          h('p.ayuda', 'Arrastrá documentos acá o tocá «Subir a ' + textoDestino() + '». También podés cambiarle el dueño a uno que ya esté desde su etiqueta.'))));
+      }
+      biblio.classList.toggle('con-sel', !!sel);
+    }
+
+    function etiqueta(duenos, alCambiar, deCarpeta) {
+      var txt = duenos[0] === OFICINA ? [marca(OFICINA), 'Oficina'] : duenos.length === 1 ? [marca(duenos[0]), nombreDueno(duenos[0])]
+        : [h('span.biblio-puntos', duenos.map(marca)), duenos.length + ' deptos'];
+      var b = h('button.biblio-dueno', { title: (deCarpeta ? 'Acceso: ' : 'Es de ') + frase(duenos) + ' · cambiar', onclick: function (e) { e.stopPropagation(); menuDueno(b, duenos, alCambiar, deCarpeta); } },
+        txt, App.icono('flecha'));
+      return b;
+    }
+
+    /* menú «¿De quién es?»: toda la oficina, o uno o más departamentos (se aplica en cada clic) */
+    function menuDueno(ancla, duenos, alCambiar, deCarpeta) {
+      var actual = duenos.slice();
+      var caja = h('div.biblio-menu');
+      function opcion(id) {
+        var on = actual.indexOf(id) >= 0;
+        return h('button.menu-item', { onclick: function () {
+          if (id === OFICINA) actual = [OFICINA];
+          else {
+            actual = actual.filter(function (x) { return x !== OFICINA; });
+            var i = actual.indexOf(id);
+            if (i >= 0) actual.splice(i, 1); else actual.push(id);
+            if (!actual.length) actual = [OFICINA];
+          }
+          pintarMenu();
+          alCambiar(actual.slice());
+        } }, h('input', { type: 'checkbox', checked: on, tabindex: '-1', style: { pointerEvents: 'none', margin: 0 } }), marca(id), nombreDueno(id),
+          id !== OFICINA ? h('small', String(agentesDe(id).length)) : null);
+      }
+      function pintarMenu() {
+        App.add(App.vaciar(caja),
+          h('div.menu-tit', deCarpeta ? '¿Quién puede abrirla? Podés marcar varios' : '¿De quién es? Podés marcar varios'),
+          opcion(OFICINA), h('div.menu-sep'), deptos().map(function (d) { return opcion(d.id); }));
+      }
+      pintarMenu();
+      App.emergente(ancla, caja);
+    }
+
+    function asignarArchivo(f, duenos) {
+      return api.patch('/api/archivos/' + encodeURIComponent(f.slug), { departamentos: duenos }).then(function (r) {
+        archivos = archivos.map(function (x) { return x.slug === f.slug ? Object.assign({}, x, r.archivo, { snippet: x.snippet }) : x; });
+        pintar();
+      }).catch(App.fallo);
+    }
+    function asignarCarpeta(v, duenos) {
+      var alcance = duenos[0] === OFICINA ? 'oficina' : { departamentos: duenos };
+      return api.patch('/api/vinculos/' + encodeURIComponent(v.id), { alcance: alcance }).then(function (r) {
+        vinculos = vinculos.map(function (x) { return x.id === v.id ? r.vinculo : x; });
+        pintar();
+      }).catch(App.fallo);
+    }
+
+    function metaEstado(f) {
+      if (f.estado === 'error') return h('span', { style: { color: 'var(--peligro)' }, title: f.error || '' }, 'No se pudo leer');
+      if (f.estado !== 'listo') return h('span', { style: { color: 'var(--aviso)' } }, PROCESANDO[f.estado] || f.estado);
+      return null;
+    }
+    function filaArchivo(f, dentroDeCarpeta) {
+      var duenos = duenosArchivo(f);
+      var otros = App.depto(vista) ? duenos.filter(function (x) { return x !== vista; }) : [];
+      var meta = [metaEstado(f), otros.length ? 'también de ' + frase(otros) : null, f.nombre, App.fecha(f.actualizado)].filter(Boolean);
+      var esSel = sel && sel.tipo === 'archivo' && sel.id === f.slug;
+      return h('div.archivo' + (esSel ? '.sel' : '') + (dentroDeCarpeta ? '.en-carpeta' : ''), { onclick: function () { sel = { tipo: 'archivo', id: f.slug }; pintar(); } },
+        h('div.tipo', (f.tipo || '').slice(0, 4)),
+        h('div.archivo-txt', h('div.archivo-tit', f.titulo),
+          h('div.archivo-meta', meta.map(function (m, i) { return [i ? ' · ' : null, m]; })),
+          f.snippet ? h('div.archivo-snip', f.snippet.replace(/[\[\]]/g, '')) : null),
+        dentroDeCarpeta ? null : etiqueta(duenos, function (d) { asignarArchivo(f, d); }));
+    }
+    function nombreCarpeta(v) { return String(v.ruta).split(/[\\/]/).filter(Boolean).pop() || v.ruta; }
+    function filaCarpeta(v, suyos) {
+      var esSel = sel && sel.tipo === 'carpeta' && sel.id === v.id;
+      var meta = ['Carpeta vinculada', (v.archivos || 0) + (v.archivos === 1 ? ' archivo' : ' archivos'), v.pendientes ? v.pendientes + ' en proceso' : null, v.existe === false ? 'no se encuentra' : null].filter(Boolean).join(' · ');
+      return h('div.archivo' + (esSel ? '.sel' : ''), { onclick: function () { sel = { tipo: 'carpeta', id: v.id }; abiertas[v.id] = true; pintar(); } },
+        h('button.btn.fantasma.icono.chico.biblio-desplegar' + (abiertas[v.id] ? '.abierta' : ''), { title: abiertas[v.id] ? 'Ocultar archivos' : 'Ver archivos',
+          onclick: function (e) { e.stopPropagation(); abiertas[v.id] = !abiertas[v.id]; pintar(); } }, App.icono('flecha')),
+        h('div.tipo', App.icono('carpeta')),
+        h('div.archivo-txt', h('div.archivo-tit', nombreCarpeta(v)), h('div.archivo-meta', meta)),
+        etiqueta(duenosVinculo(v), function (d) { asignarCarpeta(v, d); }, true));
+    }
+
+    /* ---- detalle ---- */
+    function pintarDetalle() {
+      if (!sel) { App.vaciar(det).appendChild(h('div.vacio', 'Elegí un documento para ver de quién es y su ficha.')); return; }
+      if (sel.tipo === 'carpeta') {
+        var v = vinculos.filter(function (x) { return x.id === sel.id; })[0];
+        if (!v) { sel = null; pintarDetalle(); return; }
+        detalleCarpeta(v);
+        return;
+      }
+      var slug = sel.id;
       api.get('/api/archivos/' + encodeURIComponent(slug)).then(function (r) {
-        if (sel !== slug) return;
-        var f = r.archivo, fi = f.ficha || {};
-        function sec(t, c) { return c ? h('div.det-sec', h('h4', t), c) : null; }
-        function ul(l) { return l && l.length ? h('ul', l.map(function (x) { return h('li', x); })) : null; }
-        App.add(App.vaciar(det),
-          h('button.btn.chico.fantasma.solo-angosto', { style: { marginBottom: '8px' }, onclick: function () { sel = null; cargarArchivos(); } }, App.icono('atras'), 'Todos los archivos'),
-          h('h3', { style: { fontSize: '15px', marginBottom: '4px' } }, f.titulo),
-          h('div.ayuda', { style: { marginBottom: '12px' } }, f.nombre + ' · ' + App.tam(f.tam || 0)),
-          h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' } },
-            h('button.btn.chico', { onclick: function () { api.get('/api/archivos/' + encodeURIComponent(slug) + '/original').then(App.abrirContenido).catch(App.fallo); } }, App.icono('abrir'), 'Abrir'),
-            f.estado === 'listo' ? h('button.btn.chico', { onclick: function () { api.post('/api/archivos/' + encodeURIComponent(slug) + '/leer', {}).then(function () { App.aviso('Los agentes lo van a leer.'); cargar(); }).catch(App.fallo); } }, 'Que lo lean') : null,
-            f.estado === 'error' ? h('button.btn.chico', { onclick: function () { api.post('/api/archivos/' + encodeURIComponent(slug) + '/reprocesar', {}).then(cargar).catch(App.fallo); } }, App.icono('recargar'), 'Reintentar') : null,
-            f.origen !== 'vinculo' ? h('button.btn.chico.peligro', { onclick: function () {
-              App.confirmar('¿Quitar ' + f.nombre + '?', 'Va a la papelera de la oficina (no se borra) y sale del catálogo.', 'Quitar', true).then(function (si) {
-                if (si) api.del('/api/archivos/' + encodeURIComponent(slug)).then(function () { sel = null; cargar(); }).catch(App.fallo);
-              });
-            } }, 'Quitar') : null),
-          f.error ? h('div.error-txt', { style: { marginBottom: '12px' } }, f.error) : null,
-          f.aviso ? h('div.ayuda', { style: { marginBottom: '12px' } }, f.aviso) : null,
-          sec('Resumen', fi.resumen ? h('p', fi.resumen) : (f.estado !== 'listo' ? h('p.ayuda', PROCESANDO[f.estado] || 'Sin ficha todavía.') : null)),
-          sec('Datos clave', ul(fi.datos_clave)),
-          sec('Temas', fi.temas && fi.temas.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } }, fi.temas.map(function (t) { return h('span.insignia', t); })) : null),
-          sec('Útil para', fi.util_para && fi.util_para.length ? h('div', fi.util_para.map(function (d) { var x = App.depto(d); return x ? x.nombre : d; }).join(', ')) : null),
-          sec('Texto', r.texto ? h('div.texto-largo', r.texto) : null));
+        if (!sel || sel.id !== slug) return;
+        detalleArchivo(r.archivo, r.texto);
       }).catch(function (e) { App.vaciar(det).appendChild(h('div.vacio', e.message)); });
     }
 
-    /* ---- subir (arrastrar o botón) ---- */
+    function volver() { return h('button.btn.chico.fantasma.solo-angosto', { style: { marginBottom: '8px' }, onclick: function () { sel = null; pintar(); } }, App.icono('atras'), 'Volver'); }
+
+    /* agentes de cada dueño: los que ya lo leyeron, en color; los que faltan, en gris */
+    function gente(f, duenos) {
+      var lect = f.lectura || {}, pend = f.leer || [];
+      function av(a) {
+        var leido = lect[a.id] === 'ok', leyendo = pend.indexOf(a.id) >= 0;
+        return h('span.biblio-av' + (leido ? '.leido' : ''), { title: a.nombre + (leido ? ': lo leyó y tomó notas' : leyendo ? ': lo está leyendo' : ': todavía no lo leyó') }, iniciales(a.nombre));
+      }
+      if (duenos[0] === OFICINA) {
+        var leyeron = Object.keys(lect).filter(function (id) { return lect[id] === 'ok'; }).map(App.agente).filter(Boolean);
+        return h('div.biblio-gente', leyeron.length ? [h('div.biblio-gente-fila', leyeron.map(av)), h('div.ayuda', 'Lo leyeron y tomaron notas')] : h('div.ayuda', 'Lo puede consultar cualquier agente.'));
+      }
+      var todos = [];
+      var filas = duenos.map(function (id) {
+        var ags = agentesDe(id);
+        todos = todos.concat(ags);
+        return h('div.biblio-gente-fila', duenos.length > 1 ? h('span.biblio-gente-dep', nombreDueno(id)) : null,
+          ags.length ? ags.map(av) : h('span.ayuda', 'sin agentes'));
+      });
+      var faltan = todos.filter(function (a) { return lect[a.id] !== 'ok'; });
+      var txt = f.estado !== 'listo' && f.estado !== 'error' ? (f.estado === 'leyendo' ? 'Lo están leyendo ahora' : 'Lo leen cuando termine la ficha (si pedís que lo lean)')
+        : !todos.length ? '' : !faltan.length ? 'Lo leyeron y tomaron notas' : faltan.length === todos.length ? 'Todavía no lo leyeron' : 'Falta ' + faltan.map(function (a) { return a.nombre; }).join(', ');
+      return h('div.biblio-gente', filas, txt ? h('div.ayuda', txt) : null);
+    }
+
+    function tarjetaDueno(duenos, titulo, alCambiar, deCarpeta, extra) {
+      var cambiar = h('button.btn.chico.fantasma', { onclick: function () { menuDueno(cambiar, duenos, alCambiar, deCarpeta); } }, 'Cambiar');
+      return h('div.biblio-dueno-tarjeta',
+        h('div.biblio-dueno-cab', h('span.biblio-puntos', duenos.map(marca)), h('b', titulo), cambiar),
+        extra);
+    }
+
+    function detalleArchivo(f, texto) {
+      var fi = f.ficha || {}, duenos = duenosArchivo(f), slug = f.slug, vinc = f.origen === 'vinculo';
+      var v = vinc ? vinculos.filter(function (x) { return x.id === f.vinculo; })[0] : null;
+      if (vinc && v) duenos = duenosVinculo(v);
+      var titulo = duenos[0] === OFICINA ? 'Es de toda la oficina' : 'Es de ' + frase(duenos);
+      var sugeridos = (fi.util_para || []).filter(function (d) { return App.depto(d) && duenos.indexOf(d) < 0; });
+      var sugerencia = null;
+      if (sugeridos.length && !vinc) {
+        sugerencia = h('div.biblio-sugerencia', duenos[0] === OFICINA ? 'Le sirve sobre todo a ' : 'El bibliotecario cree que también le sirve a ', frase(sugeridos), ' · ',
+          duenos[0] === OFICINA
+            ? h('a', { href: '#', onclick: function (e) { e.preventDefault(); asignarArchivo(f, sugeridos); } }, 'Asignárselo')
+            : h('a', { href: '#', onclick: function (e) { e.preventDefault(); asignarArchivo(f, duenos.concat(sugeridos)); } }, 'Sumar'));
+      }
+      var cambiar = vinc
+        ? function () { if (v) asignarCarpeta(v, arguments[0]); }
+        : function (d) { asignarArchivo(f, d); };
+      function sec(t, c) { return c ? h('div.det-sec', h('h4', t), c) : null; }
+      function ul(l) { return l && l.length ? h('ul', l.map(function (x) { return h('li', x); })) : null; }
+      App.add(App.vaciar(det),
+        volver(),
+        h('h3', { style: { fontSize: '15px', marginBottom: '4px' } }, f.titulo),
+        h('div.ayuda', { style: { marginBottom: '12px' } }, f.nombre + ' · ' + App.tam(f.tam || 0) + (v ? ' · en la carpeta «' + nombreCarpeta(v) + '»' : '')),
+        tarjetaDueno(duenos, vinc ? 'Su carpeta es de ' + (duenos[0] === OFICINA ? 'toda la oficina' : frase(duenos)) : titulo, cambiar, vinc,
+          [gente(f, duenos), sugerencia]),
+        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '12px 0 14px' } },
+          h('button.btn.chico', { onclick: function () { api.get('/api/archivos/' + encodeURIComponent(slug) + '/original').then(App.abrirContenido).catch(App.fallo); } }, App.icono('abrir'), 'Abrir'),
+          f.estado === 'listo' ? h('button.btn.chico', { onclick: function () { api.post('/api/archivos/' + encodeURIComponent(slug) + '/leer', {}).then(function (r) { App.aviso('Lo van a leer ' + (r.agentes || []).map(function (id) { var a = App.agente(id); return a ? a.nombre : id; }).join(', ') + '.'); vigilarEstado(); cargar(); }).catch(App.fallo); } }, 'Que lo lean') : null,
+          f.estado === 'error' ? h('button.btn.chico', { onclick: function () { api.post('/api/archivos/' + encodeURIComponent(slug) + '/reprocesar', {}).then(function () { vigilarEstado(); cargar(); }).catch(App.fallo); } }, App.icono('recargar'), 'Reintentar') : null,
+          !vinc ? h('button.btn.chico.peligro', { onclick: function () {
+            App.confirmar('¿Quitar ' + f.nombre + '?', 'Va a la papelera de la oficina (no se borra) y sale del catálogo.', 'Quitar', true).then(function (si) {
+              if (si) api.del('/api/archivos/' + encodeURIComponent(slug)).then(function () { sel = null; cargar(); }).catch(App.fallo);
+            });
+          } }, 'Quitar') : null),
+        f.error ? h('div.error-txt', { style: { marginBottom: '12px' } }, f.error) : null,
+        f.aviso ? h('div.ayuda', { style: { marginBottom: '12px' } }, f.aviso) : null,
+        sec('Resumen', fi.resumen ? h('p', fi.resumen) : (f.estado !== 'listo' ? h('p.ayuda', PROCESANDO[f.estado] || 'Sin ficha todavía.') : null)),
+        sec('Datos clave', ul(fi.datos_clave)),
+        sec('Temas', fi.temas && fi.temas.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } }, fi.temas.map(function (t) { return h('span.insignia', t); })) : null),
+        sec('Texto', texto ? h('div.texto-largo', texto) : null));
+    }
+
+    function detalleCarpeta(v) {
+      var duenos = duenosVinculo(v), suyos = archivos.filter(function (f) { return f.vinculo === v.id; });
+      var titulo = duenos[0] === OFICINA ? 'Es de toda la oficina' : 'Es de ' + frase(duenos);
+      var quienes = duenos[0] === OFICINA ? 'Cualquier agente puede abrir los originales.'
+        : (v.alcance && v.alcance.agentes ? 'Solo ' + v.alcance.agentes.map(function (id) { var a = App.agente(id); return a ? a.nombre : id; }).join(', ') : 'Solo los agentes de ' + frase(duenos)) + ' pueden abrir los originales. Las fichas las puede consultar cualquiera.';
+      App.add(App.vaciar(det),
+        volver(),
+        h('h3', { style: { fontSize: '15px', marginBottom: '4px' } }, nombreCarpeta(v)),
+        h('div.ayuda', { style: { marginBottom: '12px', wordBreak: 'break-all' } }, v.ruta),
+        tarjetaDueno(duenos, titulo, function (d) { asignarCarpeta(v, d); }, true, h('div.ayuda', { style: { marginTop: '8px' } }, quienes)),
+        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '12px 0 14px' } },
+          h('button.btn.chico', { onclick: function () { escanear(v.id); } }, App.icono('recargar'), 'Actualizar'),
+          h('button.btn.chico.fantasma', { onclick: function () {
+            App.confirmar('¿Desvincular la carpeta?', 'La carpeta y sus archivos no se tocan; solo deja de estar en la biblioteca.', 'Desvincular', true).then(function (si) {
+              if (si) api.del('/api/vinculos/' + encodeURIComponent(v.id)).then(function () { sel = null; cargar(); }).catch(App.fallo);
+            });
+          } }, 'Desvincular')),
+        v.existe === false ? h('div.error-txt', { style: { marginBottom: '12px' } }, 'No encuentro la carpeta en esa ubicación.') : null,
+        h('div.det-sec', h('h4', 'Archivos'), suyos.length
+          ? h('div', suyos.map(function (f) { return h('button.archivo-fila', { onclick: function () { sel = { tipo: 'archivo', id: f.slug }; pintar(); } }, h('span', { style: { flex: 1 } }, f.titulo), metaEstado(f)); }))
+          : h('p.ayuda', 'Todavía no hay archivos leídos de esta carpeta. Tocá «Actualizar».')));
+    }
+
+    function escanear(id) {
+      return api.post('/api/vinculos/' + encodeURIComponent(id) + '/escanear', {}).then(function (r) {
+        App.aviso(r && r.aviso ? r.aviso : 'Buscando cambios en la carpeta…');
+        vigilarEstado(); cargar();
+      }).catch(App.fallo);
+    }
+
+    /* ---- subir (arrastrar o botón): al departamento abierto ---- */
     function subir(files) {
       files = Array.prototype.slice.call(files || []);
       if (!files.length) return;
-      var depSubir = dep.value || '';
+      var dep = destino(), a = textoDestino();
       var i = 0;
-      App.aviso('Subiendo ' + files.length + (files.length === 1 ? ' archivo…' : ' archivos…'));
+      App.aviso('Subiendo ' + files.length + (files.length === 1 ? ' archivo' : ' archivos') + ' a ' + a + '…');
       (function siguiente() {
         if (i >= files.length) { cargar(); vigilarEstado(); return; }
         var f = files[i++];
         var lector = new FileReader();
         lector.onload = function () {
           var b64 = String(lector.result).split(',')[1] || '';
-          api.post('/api/archivos', { nombre: f.name, departamento: depSubir || undefined, base64: b64 })
-            .then(function (r) { if (r.duplicado) App.aviso(f.name + ' ya estaba en la biblioteca.'); })
+          api.post('/api/archivos', { nombre: f.name, departamento: dep, base64: b64 })
+            .then(function (r) { if (r.duplicado) App.aviso(f.name + ' ya estaba en ' + a + '.'); })
             .catch(function (e) { App.aviso(f.name + ': ' + e.message, true); })
             .then(siguiente);
         };
@@ -136,37 +369,20 @@
       })();
     }
     var capaSoltar = null;
-    zona.addEventListener('dragover', function (e) { e.preventDefault(); if (!capaSoltar) { capaSoltar = h('div.soltar', 'Soltá para subir a la biblioteca'); zona.appendChild(capaSoltar); } });
+    zona.addEventListener('dragover', function (e) { e.preventDefault(); if (!capaSoltar) { capaSoltar = h('div.soltar', 'Soltá para subir a ' + textoDestino()); zona.appendChild(capaSoltar); } });
     zona.addEventListener('dragleave', function (e) { if (capaSoltar && !zona.contains(e.relatedTarget)) { capaSoltar.remove(); capaSoltar = null; } });
     zona.addEventListener('drop', function (e) { e.preventDefault(); if (capaSoltar) { capaSoltar.remove(); capaSoltar = null; } subir(e.dataTransfer.files); });
 
-    /* ---- carpetas vinculadas ---- */
-    function cargarVinculos() {
-      det.style.display = 'none'; biblio.classList.remove('con-sel');
-      api.get('/api/vinculos').then(function (r) {
-        App.vaciar(lista);
-        lista.appendChild(h('p.ayuda', { style: { padding: '12px 18px 4px' } }, 'Carpetas que ya tenés en la compu (por ejemplo, de Drive). No se copian: se leen en su lugar y los agentes con acceso pueden consultarlas.'));
-        if (!r.vinculos.length) lista.appendChild(h('div.vacio', 'No hay carpetas vinculadas.'));
-        r.vinculos.forEach(function (v) {
-          var alc = v.alcance === 'oficina' || !v.alcance ? 'Toda la oficina' : v.alcance.departamentos ? v.alcance.departamentos.map(function (d) { var x = App.depto(d); return x ? x.nombre : d; }).join(', ') : (v.alcance.agentes || []).map(function (a) { var x = App.agente(a); return x ? x.nombre : a; }).join(', ');
-          lista.appendChild(h('div.archivo', App.icono('carpeta'),
-            h('div.archivo-txt', h('div.archivo-tit', v.ruta), h('div.archivo-meta', alc + ' · ' + (v.archivos || 0) + ' archivos')),
-            h('button.btn.chico', { onclick: function () { api.post('/api/vinculos/' + encodeURIComponent(v.id) + '/escanear', {}).then(function () { App.aviso('Buscando cambios en la carpeta…'); vigilarEstado(); cargar(); }).catch(App.fallo); } }, App.icono('recargar'), 'Actualizar'),
-            h('button.btn.chico.fantasma', { onclick: function () {
-              App.confirmar('¿Desvincular la carpeta?', 'La carpeta y sus archivos no se tocan; solo deja de estar en la biblioteca.', 'Desvincular', true).then(function (si) {
-                if (si) api.del('/api/vinculos/' + encodeURIComponent(v.id)).then(cargar).catch(App.fallo);
-              });
-            } }, 'Desvincular')));
-        });
-      }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
-    }
+    /* ---- vincular una carpeta: queda del departamento abierto ---- */
     function vincular() {
       App.elegirCarpeta('Elegí la carpeta a vincular').then(function (ruta) {
         if (!ruta) return;
-        var alcance = dep.value && dep.value !== 'compartido' ? { departamentos: [dep.value] } : 'oficina';
-        api.post('/api/vinculos', { ruta: ruta, alcance: alcance }).then(function () {
-          App.aviso('Carpeta vinculada. Se van a leer sus archivos.');
-          vista = 'vinculos'; pintarTabs(); cargar(); vigilarEstado();
+        var dep = destino();
+        api.post('/api/vinculos', { ruta: ruta, alcance: dep === OFICINA ? 'oficina' : { departamentos: [dep] } }).then(function (r) {
+          App.aviso('Carpeta vinculada a ' + textoDestino() + '. Se van a leer sus archivos.');
+          sel = { tipo: 'carpeta', id: r.vinculo.id };
+          abiertas[r.vinculo.id] = true;
+          escanear(r.vinculo.id);
         }).catch(App.fallo);
       });
     }
@@ -188,10 +404,10 @@
       }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
     }
     function resolver(id, ok) {
-      api.post('/api/biblioteca/propuestas/' + encodeURIComponent(id), { aceptar: ok }).then(function () { App.aviso(ok ? 'Cambio aplicado.' : 'Propuesta descartada.'); vigilarEstado(); cargar(); }).catch(App.fallo);
+      api.post('/api/biblioteca/propuestas/' + encodeURIComponent(id), { aceptar: ok }).then(function () { App.aviso(ok ? 'Cambio aplicado.' : 'Propuesta descartada.'); vigilarEstado(); pintar(); }).catch(App.fallo);
     }
 
-    var alCambiar = function () { if (document.body.contains(hj.el)) { pintarTabs(estadoPrevio && estadoPrevio.propuestas); cargar(); } };
+    var alCambiar = function () { if (document.body.contains(hj.el)) cargar(); };
     App.on('biblioteca', alCambiar);
     cargar();
   }
