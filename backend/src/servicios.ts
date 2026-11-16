@@ -64,7 +64,7 @@ export type Instalador = (s: Servicios) => void
 const registro: { nombre: string; orden: number; instalar: Instalador }[] = []
 
 /** Registra un módulo. `orden` define el orden de instalación (y por lo tanto el de sus rutas «extra»):
- *  10 consultas/MCP · 20 agentes · 30 entregas · 40 tareas/programador · 50 reuniones · 60 biblioteca · 70 flujos ·
+ *  10 consultas/MCP · 20 agentes · 30 entregas · 40 tareas/programador · 50 reuniones · 60 biblioteca · 65 conocimiento · 70 flujos ·
  *  71 creador · 72 gobierno · 73 parte · 80 paquete · 90 importar/migración. */
 export function registrarModulo(nombre: string, orden: number, instalar: Instalador) {
   if (registro.some((m) => m.nombre === nombre)) return

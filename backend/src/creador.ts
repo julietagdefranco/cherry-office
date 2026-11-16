@@ -982,7 +982,7 @@ export class HerramientasCreador implements MCPHerramientas {
         inputSchema: { type: 'object', properties: {} },
       },
       defProponer('departamento', 'departamento', '{id?, nombre*, mision?, color?}'),
-      defProponer('agente', 'agente', `{id?, nombre*, rol*, departamento* (id o tarjeta:x), prompt*, description?, modelo?, chips?, limites?:{solo?,proponer?}, conectores?, permisos? (["coordinador"] para quien coordina la oficina)}. ${ref}`),
+      defProponer('agente', 'agente', `{id?, nombre*, rol*, departamento* (id o tarjeta:x), prompt*, description?, modelo?, chips?, sabeDe? (3 a 6 temas sobre los que sabe, para que los colegas sepan a quién preguntarle), limites?:{solo?,proponer?}, conectores?, permisos? (["coordinador"] para quien coordina la oficina)}. ${ref}`),
       defProponer('flujo', 'flujo de trabajo', `{id?, nombre*, descripcion?, pasos*:[{id?, nombre*, quien* (id de agente, tarjeta:x o persona), consigna?, recibe?, recibeDe?, entrega*, aprobacion* (true o false, tiene que venir explícita), plazoDias?, esperaDias?}]}. ${ref}`),
       defProponer('regla', 'regla de la oficina', '{id?, texto*}'),
       defProponer('conector', 'conector para un agente', `{agente* (id o tarjeta:x), servidor*, leer?, actuar?} con nombres completos de herramientas (ver listar_conectores). ${ref}`),

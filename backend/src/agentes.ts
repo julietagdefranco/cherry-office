@@ -13,14 +13,14 @@ import { ClaudeError } from './claude-runner.js'
 import { no404, no405, type Resp } from './router.js'
 import { registrarModulo, type Servicios } from './servicios.js'
 import { CajaCosto } from './stream.js'
-import { Slug, Validar, largo, prefijo } from './validar.js'
+import { Slug, Validar, largo, plegar, prefijo } from './validar.js'
 
 // MARK: - validación del cuerpo
 
 export type NuevoAgente = {
   id?: string; nombre: string; rol: string; description: string; prompt: string; departamento: string
   chips: string[]; modelo: string; brief?: string; avatar?: Avatar; escritura?: string[]
-  limites?: LimitesAgente; conectores?: ConectorAsignado[]; permisos?: string[]
+  limites?: LimitesAgente; conectores?: ConectorAsignado[]; permisos?: string[]; sabeDe?: string[]
 }
 
 /** Lista de textos recortados (los vacíos se descartan). undefined si la clave no viene (o es null). */
@@ -69,6 +69,22 @@ export function permisosValidos(v: unknown): string[] | undefined {
   return p
 }
 
+/** «Sabe de»: lista de temas recortados, sin repetidos (sin importar acentos ni mayúsculas). undefined si no viene. */
+export function sabeDeValido(v: unknown): string[] | undefined {
+  const l = listaTextos(v, 'sabeDe')
+  if (l === undefined) return undefined
+  const vistos = new Set<string>()
+  const out: string[] = []
+  for (const t of l) {
+    const n = plegar(t)
+    if (vistos.has(n)) continue
+    vistos.add(n)
+    out.push(t)
+  }
+  ValidarAgenteExtra.sabeDe(out)
+  return out
+}
+
 export function modeloValido(v: unknown): string {
   if (v === undefined || v === null) return 'sonnet'
   const s = typeof v === 'string' ? v.trim().toLowerCase() : undefined
@@ -109,13 +125,14 @@ export function nuevoAgenteDesde(d: Obj): NuevoAgente {
   n.limites = limitesValidos(d.limites)
   n.conectores = conectoresValidos(d.conectores)
   n.permisos = permisosValidos(d.permisos)
+  n.sabeDe = sabeDeValido(d.sabeDe)
   return n
 }
 
 export type CambiosAgente = {
   nombre?: string; rol?: string; departamento?: string; avatar?: Avatar
   prompt?: string; description?: string; chips?: string[]; modelo?: string; brief?: string
-  limites?: LimitesAgente; conectores?: ConectorAsignado[]; permisos?: string[]
+  limites?: LimitesAgente; conectores?: ConectorAsignado[]; permisos?: string[]; sabeDe?: string[]
   /** Permisos guardados con «Siempre» (solo se pueden quitar o reemplazar: los agrega `agregarReglas`). */
   reglas?: string[]
 }
@@ -134,6 +151,7 @@ export function cambiosAgenteDesde(d: Obj): CambiosAgente {
   c.limites = limitesValidos(d.limites)
   c.conectores = conectoresValidos(d.conectores)
   c.permisos = permisosValidos(d.permisos)
+  c.sabeDe = sabeDeValido(d.sabeDe)
   const r = listaTextos(d.reglas, 'reglas')
   if (r !== undefined) {
     ValidarAgenteExtra.reglas(r)
@@ -144,7 +162,7 @@ export function cambiosAgenteDesde(d: Obj): CambiosAgente {
 
 // MARK: - borrador
 
-export type BorradorAgente = { id: string; nombre: string; rol: string; description: string; prompt: string; chips: string[]; modelo: string }
+export type BorradorAgente = { id: string; nombre: string; rol: string; description: string; prompt: string; chips: string[]; modelo: string; sabeDe?: string[] }
 
 export const Borrador = {
   /** Meta-prompt (español) que pide el JSON del agente. No usa agente ni herramientas. */
@@ -174,6 +192,7 @@ Inventá a la persona que mejor cumple ese pedido y devolvé SOLO un objeto JSON
   "description": "...",
   "prompt": "...",
   "chips": ["...", "...", "..."],
+  "sabeDe": ["...", "...", "..."],
   "modelo": "sonnet"
 }
 
@@ -184,6 +203,7 @@ REGLAS DE CADA CLAVE
 - description: una o dos oraciones, en tercera persona, al estilo de las descripciones de agentes de Claude Code: quién es y CUÁNDO conviene usarlo ("Usalo cuando haga falta..."). Sin saltos de línea.
 - prompt: las instrucciones del agente, en segunda persona ("Sos ..."), en el mismo idioma en que escribió el usuario (español rioplatense por defecto). Estructura: quién es y para quién trabaja; "Tu trabajo" (qué hace y qué entrega); "Cómo respondés" (formato, extensión, tono); "Reglas" (propone y el usuario aprueba; no inventa datos, cifras ni promesas; si falta información pregunta lo mínimo). Entre 150 y 400 palabras. No incluyas rutas de archivos ni una sección de memoria: el sistema la agrega solo.
 - chips: exactamente 3 frases cortas (máximo 60 caracteres) que el usuario podría escribirle al agente para empezar a trabajar.
+- sabeDe: de 3 a 6 temas concretos sobre los que este agente sabe (máximo 4 palabras cada uno, por ejemplo "métricas de Instagram"). Los colegas los usan para saber a quién preguntarle.
 - modelo: "sonnet" salvo que el trabajo exija razonamiento muy profundo ("opus") o sea muy simple y repetitivo ("haiku").
 
 Devolvé únicamente el JSON.`
@@ -210,10 +230,19 @@ Devolvé únicamente el JSON.`
       const chips = (Array.isArray(o.chips) ? o.chips : [])
         .filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter((x) => x !== '' && largo(x) <= 200)
       const m = s('modelo').toLowerCase()
-      return {
+      const temas: string[] = []
+      for (const x of Array.isArray(o.sabeDe) ? o.sabeDe : []) {
+        if (typeof x !== 'string') continue
+        const t = x.trim()
+        if (t === '' || largo(t) > ValidarAgenteExtra.maxLargoTema || temas.some((y) => plegar(y) === plegar(t))) continue
+        temas.push(t)
+      }
+      const b: BorradorAgente = {
         id, nombre: prefijo(nombre, 80), rol: prefijo(rol, 160), description: prefijo(desc, 1000), prompt: prefijo(prompt, 20_000),
         chips: chips.slice(0, 3), modelo: Validar.modelos.has(m) ? m : 'sonnet',
       }
+      if (temas.length > 0) b.sabeDe = temas.slice(0, 6)
+      return b
     }
     return undefined
   },
@@ -281,6 +310,7 @@ export function contratar(oficinas: Oficinas, n: NuevoAgente, log?: { info(m: st
   if (n.limites && !vacio(n.limites)) def.limites = n.limites
   if (n.conectores && n.conectores.length > 0) def.conectores = n.conectores
   if (n.permisos && n.permisos.length > 0) def.permisos = n.permisos
+  if (n.sabeDe && n.sabeDe.length > 0) def.sabeDe = n.sabeDe
   const notas = a.ruta(path.join('conocimiento', 'agentes', `${id}.md`))
   const notasNuevas = !fs.existsSync(notas)
   try {
@@ -317,6 +347,7 @@ export function editarAgente(oficinas: Oficinas, id: string, c: CambiosAgente): 
     if (c.conectores !== undefined) { if (c.conectores.length === 0) delete ag.conectores; else ag.conectores = c.conectores }
     if (c.permisos !== undefined) { if (c.permisos.length === 0) delete ag.permisos; else ag.permisos = c.permisos }
     if (c.reglas !== undefined) { if (c.reglas.length === 0) delete ag.reglas; else ag.reglas = c.reglas }
+    if (c.sabeDe !== undefined) { if (c.sabeDe.length === 0) delete ag.sabeDe; else ag.sabeDe = c.sabeDe }
     if (c.avatar !== undefined) {
       const av = { ...c.avatar }
       if (av.semilla === undefined) av.semilla = ag.avatar?.semilla ?? id

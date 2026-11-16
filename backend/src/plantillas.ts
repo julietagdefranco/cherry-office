@@ -86,6 +86,9 @@ Acá ${nombre} anota lo que va aprendiendo: en qué está, qué entregó, qué e
 /** Documenta las herramientas del servidor MCP de la oficina. Su presencia marca una sección al día. */
 export const lineaConsultas = 'Podés consultar a un colega con la herramienta consultar(colega, pregunta) cuando necesites su mirada; usá colegas() para ver quiénes son. Máximo 3 consultas por mensaje.'
 
+/** Documenta las herramientas de conocimiento compartido (conocimiento.ts). Su presencia también marca una sección al día. */
+export const lineaConocimiento = 'Antes de consultar, buscá si ya se sabe con buscar(pregunta) (notas, decisiones, actas, entregables y respuestas de colegas, lo más nuevo primero) y usá quien_sabe(tema) para saber a quién preguntarle. Si encontrás algo desactualizado, marcalo con marcar_obsoleto(ref, motivo).'
+
 /** Sección fija con las rutas de memoria (relativas a la oficina). Sin salto de línea final. */
 export function seccionMemoria(id: string): string {
   return `${marcaMemoria}
@@ -95,11 +98,12 @@ Tu carpeta de trabajo es la raíz de la oficina; todas las rutas son relativas a
 - Conocimiento y archivos: \`conocimiento/archivos.md\` es el catálogo de documentos de la oficina (una línea por documento); leelo al empezar. Cada documento tiene su ficha en \`conocimiento/fuentes/<slug>.md\` y su texto en \`archivos/.texto/<slug>.md\`; el material original está en \`archivos/\` (\`compartido/\` es de todos, el resto por departamento). Para citar un documento, usá la ficha.
 - Lo que produzcas para el usuario (informes, borradores, archivos) guardalo con Write en \`archivos/entregables/${id}/\`; esa es la única carpeta de archivos donde podés escribir.
 - No podés escribir ningún otro archivo (el sistema lo impide igual). Si algo debería quedar como decisión, proponelo en una reunión o decile al usuario que lo registre.
-- ${lineaConsultas}`
+- ${lineaConsultas}
+- ${lineaConocimiento}`
 }
 
 /** Al abrir una oficina: reescribe la sección de memoria de los `.md` de agente desactualizados (sin la línea de
- *  consultas). Solo toca desde la marca hasta el final. Idempotente. Devuelve cuántos reescribió. */
+ *  consultas o sin la de conocimiento). Solo toca desde la marca hasta el final. Idempotente. Devuelve cuántos reescribió. */
 export function actualizarMemoria(carpeta: string, ids: string[]): number {
   let n = 0
   for (const id of ids) {
@@ -111,7 +115,7 @@ export function actualizarMemoria(carpeta: string, ids: string[]): number {
       continue
     }
     const i = t.indexOf(marcaMemoria)
-    if (i < 0 || t.includes(lineaConsultas)) continue
+    if (i < 0 || (t.includes(lineaConsultas) && t.includes(lineaConocimiento))) continue
     try {
       const tmp = `${p}.tmp`
       fs.writeFileSync(tmp, t.slice(0, i) + seccionMemoria(id) + '\n')

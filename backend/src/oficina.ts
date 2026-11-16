@@ -12,7 +12,7 @@ import { esObjeto, type Obj } from './json.js'
 import { jsonSwift } from './json-swift.js'
 import { decodificarFlujo, decodificarRegla, type FlujoDef, type Regla } from './modelo-flujos.js'
 import { decodificarTarea, type TareaProgramada } from './tareas.js'
-import { Slug, Validar, largo, prefijo } from './validar.js'
+import { Slug, Validar, largo, plegar, prefijo } from './validar.js'
 
 export type Avatar = Partial<Record<(typeof clavesAvatar)[number], string>>
 export const clavesAvatar = ['semilla', 'pelo', 'colorPelo', 'cara', 'torso', 'colorTorso', 'colorPiernas', 'colorPiel',
@@ -30,6 +30,8 @@ export type AgenteDef = {
   brief?: string
   modelo?: string
   chips?: string[]
+  /** Temas sobre los que sabe (para que los colegas sepan a quién preguntarle): `colegas()` y `quien_sabe(tema)`. */
+  sabeDe?: string[]
   avatar?: Avatar
   creado?: string
   /** Rutas extra dentro de `conocimiento/` donde puede escribir (las pone el importador). */
@@ -99,7 +101,7 @@ function decodificarAgente(v: unknown): AgenteDef {
   const o = obj(v)
   return sinUndefined({
     id: str(o.id), nombre: str(o.nombre), rol: str(o.rol), departamento: str(o.departamento),
-    brief: optStr(o.brief), modelo: optStr(o.modelo), chips: optStrs(o.chips),
+    brief: optStr(o.brief), modelo: optStr(o.modelo), chips: optStrs(o.chips), sabeDe: optStrs(o.sabeDe),
     avatar: opt(o.avatar, decodificarAvatar), creado: optStr(o.creado), escritura: optStrs(o.escritura),
     limites: opt(o.limites, (x) => { const l = obj(x); return sinUndefined({ solo: optStrs(l.solo), proponer: optStrs(l.proponer) }) }),
     conectores: opt(o.conectores, (x) => (Array.isArray(x) ? x : falla()).map((c) => {
@@ -219,6 +221,21 @@ export const ValidarAgenteExtra = {
     return false
   },
 
+  maxTemas: 12,
+  maxLargoTema: 60,
+
+  /** «Sabe de»: hasta `maxTemas` temas de 1 a `maxLargoTema` caracteres, sin repetidos (sin importar acentos ni mayúsculas). */
+  sabeDe(ts: string[]) {
+    if (ts.length > this.maxTemas) throw new ErrorAPI(400, `«sabeDe» admite hasta ${this.maxTemas} temas.`)
+    const vistos = new Set<string>()
+    for (const t of ts) {
+      if (t.trim() === '' || largo(t) > this.maxLargoTema) throw new ErrorAPI(400, `Cada tema de «sabeDe» tiene que tener entre 1 y ${this.maxLargoTema} caracteres.`)
+      const n = plegar(t).trim()
+      if (vistos.has(n)) throw new ErrorAPI(400, `Tema repetido en «sabeDe»: «${prefijo(t, 60)}».`)
+      vistos.add(n)
+    }
+  },
+
   mision(m: string | undefined) {
     if (m !== undefined && largo(m) > this.maxMision) throw new ErrorAPI(400, `La misión es demasiado larga (máximo ${this.maxMision} caracteres).`)
   },
@@ -251,6 +268,7 @@ export function validarOficina(o: Oficina) {
     if (a.conectores) ValidarAgenteExtra.conectores(a.conectores)
     if (a.permisos) ValidarAgenteExtra.permisos(a.permisos)
     if (a.reglas) ValidarAgenteExtra.reglas(a.reglas)
+    if (a.sabeDe) ValidarAgenteExtra.sabeDe(a.sabeDe)
   }
   const vins = new Set<string>()
   for (const v of o.vinculos ?? []) {

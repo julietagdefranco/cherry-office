@@ -628,3 +628,32 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .md-doc.md p + *, .md-doc.md ul + *, .md-doc.md ol + *, .md-doc.md pre + *, .md-doc.md blockquote + *, .md-doc.md .md-tabla + * { margin-top: 10px; }
 .md-doc.md table { font-size: 13px; }
 .md-crudo { font: 12.5px/1.55 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
+/* ---------------- conocimiento ---------------- */
+.con { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.con .pestanas { overflow-x: auto; scrollbar-width: none; flex: none; }
+.con .pestana { white-space: nowrap; flex: none; }
+.con-cuerpo { flex: 1; overflow-y: auto; padding: 14px 18px; min-height: 0; }
+.con-barra { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.con-item { border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 10px 12px; margin-bottom: 8px; background: var(--panel); }
+.con-item.obsoleto { opacity: .72; }
+.con-cab { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.con-tit { font-weight: 550; flex: 1; min-width: 140px; overflow-wrap: anywhere; }
+.con-meta { font-size: 12px; color: var(--tenue); }
+.con-frag { margin-top: 6px; color: var(--suave); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.con-frag mark { background: var(--panel-2); color: var(--texto); border-radius: 3px; padding: 0 2px; font-weight: 600; }
+.con-resp { margin-top: 6px; white-space: pre-wrap; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.con-acciones { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+.con-acciones .btn svg { width: 13px; height: 13px; }
+.con-ruta { font-size: 11px; color: var(--tenue); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.con-dos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.con-lado { border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 8px 10px; background: var(--panel-2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.con-lado h5 { font-size: 11px; color: var(--tenue); margin: 0 0 4px; font-weight: 500; }
+.con-temas { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.con-tema { font-size: 11px; padding: 1px 8px; border-radius: 9px; border: 1px solid var(--linea); color: var(--suave); background: var(--panel-2); white-space: nowrap; }
+.con-sec-tit { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--tenue); margin: 14px 0 6px; }
+.con-sec-tit:first-child { margin-top: 0; }
+@media (max-width: 720px) {
+  .con-dos { grid-template-columns: 1fr; }
+  .con-cuerpo { padding: 12px; }
+}

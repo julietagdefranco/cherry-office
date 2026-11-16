@@ -28,10 +28,10 @@ Sin oficina abierta, `/api/chat`, `/api/historial`, `/api/oficina`, `/api/depart
 | PATCH | `/api/departamentos/:id` | `{nombre?, color?}` | `{departamento, oficina}` |
 | DELETE | `/api/departamentos/:id` | `{moverA?}` (o `?moverA=`) | `{ok, oficina}`; 409 si tiene agentes y no hay `moverA`, o si es el último departamento |
 | GET | `/api/agentes` | | `{agentes:[AgenteDef]}` |
-| POST | `/api/agentes/borrador` | `{descripcion, departamento}` | `{id, nombre, rol, description, prompt, chips[≤3], modelo, departamento}`; no escribe nada. 502 si Claude falla o no devuelve JSON usable |
-| POST | `/api/agentes` | `{nombre, rol, prompt, departamento, id?, description?, chips?, modelo?, brief?, avatar?}` | `{agente, oficina}`; escribe el `.md` (plantilla fija con «Memoria de la oficina») y `conocimiento/agentes/<id>.md`. 409 si el id existe. `avatar.semilla` = id si no viene |
+| POST | `/api/agentes/borrador` | `{descripcion, departamento}` | `{id, nombre, rol, description, prompt, chips[≤3], sabeDe?[≤6], modelo, departamento}`; no escribe nada. 502 si Claude falla o no devuelve JSON usable |
+| POST | `/api/agentes` | `{nombre, rol, prompt, departamento, id?, description?, chips?, sabeDe?, modelo?, brief?, avatar?}` | `{agente, oficina}`; escribe el `.md` (plantilla fija con «Memoria de la oficina») y `conocimiento/agentes/<id>.md`. 409 si el id existe. `avatar.semilla` = id si no viene |
 | GET | `/api/agentes/:id` | | `{agente, prompt (sin la sección de memoria), description, modelo?}` |
-| PATCH | `/api/agentes/:id` | cualquiera de `{nombre, rol, departamento, avatar, prompt, description, chips, modelo, brief}` | `{agente, oficina}`; reescribe el `.md` solo si cambia `prompt`, `description` o `modelo` |
+| PATCH | `/api/agentes/:id` | cualquiera de `{nombre, rol, departamento, avatar, prompt, description, chips, sabeDe, modelo, brief}` (`sabeDe: []` lo saca) | `{agente, oficina}`; reescribe el `.md` solo si cambia `prompt`, `description` o `modelo` |
 | DELETE | `/api/agentes/:id` | | `{ok, archivado: ".claude/agents/.archivados/<id>-<fecha>.md"\|null, oficina}`; `conocimiento/` queda |
 | GET | `/api/agentes/:id/conocimiento` | | `{id, ruta, texto}` |
 | POST | `/api/chat` | `{agent, message, session}` | `{reply, pasos?}` (`pasos`: textos intermedios, herramientas y archivos escritos, como en `/api/chat/vivo`, sin los textos finales que ya están en `reply`); cwd = carpeta de la oficina; escritura solo en `conocimiento/agentes/<id>.md` (más `escritura` del agente en `oficina.json`, que solo pone el importador) |
@@ -129,6 +129,37 @@ Cierra el ciclo **consulta → pedido → versión parcial + espera → el otro 
 - **Pasar a flujo:** el borrador (de una reunión o de un par de agentes) es un `FlujoDef` armado sin LLM y ya validado con `flujoDesde`; no se guarda nada. El front lo abre en el editor de flujos (`App.Flujos.editor(null, borrador)`) y la persona lo guarda con `POST /api/flujos`. Los pasos raíz llevan `recibeDe: []` explícito (sin él, «recibe del paso anterior»).
 - **Costo:** pedidos y versiones completas son corridas completas y se registran con origen `pedido` o `espera` y `ref` = id de tarea.
 - **Qué no viaja:** las esperas y los pedidos viven en `hq.db` y no van en el `.oficina.zip`.
+
+## Conocimiento compartido
+
+Tres piezas para que lo que sabe un agente le sirva a los demás. Código: `backend/src/conocimiento.ts` (módulo 65) y panel en `oficina/ui/conocimiento.js` (`App.Conocimiento.abrir()`: botón «Conocimiento» de la barra lateral, con la insignia de lo que hay para revisar).
+
+1. **Quién sabe qué.** `AgenteDef.sabeDe`: hasta 12 temas de hasta 60 caracteres, sin repetidos (sin importar acentos ni mayúsculas). Lo edita la persona en el perfil («Sabe de»), lo propone el borrador y se suma o se saca con las sugerencias. `colegas()` lo devuelve y `quien_sabe(tema)` ordena a los colegas por «sabe de» (3 por palabra), rol y departamento (2), brief y pedidos sugeridos (1) y preguntas que ya respondieron sobre el tema (1 c/u, hasta 4). Las reuniones también lo usan para ordenar a quién invitar.
+2. **Búsqueda.** Índice `saber_fts` (FTS5 con `unicode61 remove_diacritics 2`; sin FTS5 o con `HQ_CONOCIMIENTO_SIN_FTS=1`, tabla común y LIKE) sobre `conocimiento/oficina.md`, `conocimiento/decisiones.md` (una decisión por fragmento, con su fecha), `conocimiento/agentes/*.md`, `conocimiento/fuentes/*.md`, `reuniones/*.md` (fecha del nombre), `archivos/entregables/<id>/**/*.{md,txt,csv}` y las preguntas frecuentes vigentes. Se resincroniza antes de cada búsqueda comparando fecha y tamaño (`saber_docs`). Fragmentos por sección de hasta ~1200 caracteres; el `ref` de cada uno es `<ruta>#<n>`. Puntaje = relevancia (bm25, o palabras que coinciden) × (0,6 + 0,4 × recencia, con recencia = 1/(1 + días/120)) × 0,25 si está obsoleto. La marca de obsoleto (`saber_obsoletos`) va por el hash del fragmento: si su texto cambia, deja de aplicar.
+3. **Preguntas frecuentes** (tabla `preguntas`, versiones agrupadas por `grupo`). Antes de cada `consultar()` se buscan respuestas vigentes parecidas (Dice ≥ 0,6 sobre palabras significativas) y se agregan al prompt del colega, junto con el pedido de cerrar con `TEMA: …`. Si la previa es suya: `[VIGENTE]` la confirma (actualiza `confirmada`) y `[ACTUALIZADA]` (o sin marca) crea una versión nueva y la anterior queda `reemplazada`. Si es de otro: `[CONTRADICE]` deja la nueva `pendiente` (con `contradice`) para que decida la persona; si no, queda como otra vigente. Las marcas y la línea `TEMA:` se sacan antes de devolverle la respuesta a quien preguntó. Si la pregunta habla de precios, fechas, plazos o cupos, vence a los 60 días (`venceDias`) y pide confirmación. Sugerencias: `agregar` un tema que el agente respondió en 3 preguntas distintas o más y no está en su «sabe de»; `quitar` uno sobre el que no respondió nada en 120 días (solo si la oficina ya tiene preguntas así de viejas). Las descartadas no vuelven (`saber_sugerencias`).
+
+**Herramientas MCP** (todo perfil menos el creador; también en `--tools` y `--allowedTools`): `quien_sabe {tema}`, `buscar {pregunta, limite?≤10}` (JSON con `aviso` y `resultados:[{ref, tipo, ruta, titulo, fecha, fragmento, autor?, autorNombre?, obsoleto?, vencida?}]`) y `marcar_obsoleto {ref, motivo}`. La sección «Memoria de la oficina» las documenta (`lineaConocimiento`); al abrir una oficina se reescribe en los `.md` que no la tienen.
+
+| Método | Ruta | Cuerpo | Respuesta |
+|---|---|---|---|
+| GET | `/api/conocimiento/buscar?q=&limite=&tipo=&autor=` | | `{resultados:[…como buscar…], fts}`; 400 sin `q` |
+| GET | `/api/conocimiento/quien-sabe?tema=` | | `{expertos:[{id, nombre, rol, motivos[], sabeDe?, ejemplo?}]}` |
+| POST | `/api/conocimiento/obsoleto` | `{ref, motivo?}` | `{ok}`; 404 si el fragmento no existe |
+| DELETE | `/api/conocimiento/obsoleto?ref=` | | `{ok}` (acepta `ref` o el hash); 404 si no estaba marcado |
+| GET | `/api/conocimiento/obsoletos` | | `{obsoletos:[{hash, ref, titulo, fragmento, motivo, por, ts}]}` (`por` = id del agente, `''` = la persona) |
+| GET | `/api/conocimiento/estado` | | `{pendientes, vencidas, sugerencias, preguntas, obsoletos}` |
+| GET | `/api/conocimiento/preguntas?estado=&agente=&q=&vencidas=1` | | `{preguntas:[Pregunta]}`; `estado`: `vigente` (por defecto), `pendiente`, `reemplazada`, `borrada`, `descartada` o `todas` (vigentes y pendientes) |
+| POST | `/api/conocimiento/preguntas` | `{agente, pregunta, respuesta, tema?, venceDias?}` | `{pregunta}` (origen `manual`) |
+| GET / PATCH / DELETE | `/api/conocimiento/preguntas/:id` | PATCH `{pregunta?, respuesta?, tema?, venceDias?: 1..3650\|null}` | `{pregunta}`; cambiar pregunta o respuesta crea una versión; 409 si no es la vigente. DELETE la deja `borrada` (el historial queda) |
+| GET | `/api/conocimiento/preguntas/:id/historial` | | `{versiones:[Pregunta]}`, la más nueva primero |
+| POST | `/api/conocimiento/preguntas/:id/confirmar` | | `{pregunta}`; vuelve a contar el vencimiento |
+| POST | `/api/conocimiento/preguntas/:id/resolver` | `{quedarse: "nueva"\|"anterior"\|"ambas"}` | `{pregunta}`; solo para `pendiente` (409 si no) |
+| GET | `/api/conocimiento/sugerencias` | | `{sugerencias:[{agente, agenteNombre, tema, tipo: "agregar"\|"quitar", veces}]}` |
+| POST | `/api/conocimiento/sugerencias` | `{agente, tema, tipo, aceptar}` | `{ok, oficina}`; aceptar cambia `sabeDe` en `oficina.json`; descartar la oculta para siempre |
+
+`Pregunta` = `{id, grupo, agente, agenteNombre, de?, deNombre?, pregunta, respuesta, tema, estado, origen: "consulta"|"manual", creada, confirmada, venceDias?, vencida, contradice?: {id, agente, agenteNombre, pregunta, respuesta, estado}, versiones?}`.
+
+**Qué no viaja:** las preguntas frecuentes, los obsoletos y el índice viven en `hq.db` y no van en el `.oficina.zip` (el «sabe de» sí, porque está en `oficina.json`).
 
 ## Biblioteca
 

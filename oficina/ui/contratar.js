@@ -72,6 +72,18 @@
   };
 
   /* ---------------- editor ---------------- */
+  /* «a, b, c» -> ["a", "b", "c"] sin vacíos ni repetidos (sin importar acentos ni mayúsculas) */
+  function temas(texto) {
+    var vistos = {}, out = [];
+    String(texto || '').split(/[,;\n]/).forEach(function (t) {
+      t = t.trim(); if (!t) return;
+      var n = t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (vistos[n]) return; vistos[n] = true; out.push(t);
+    });
+    return out;
+  }
+  App.temas = temas;
+
   App.EditorAgente = function (dato, op) {
     op = op || {};
     var d = JSON.parse(JSON.stringify(dato || {}));
@@ -86,6 +98,7 @@
     var modelo = h('select.campo', MODELOS.map(function (m) { return h('option', { value: m[0], selected: m[0] === (d.modelo || 'sonnet') }, m[1]); }));
     var desc = h('input.campo', { value: d.description || '', maxlength: 1000, placeholder: 'En una línea, para qué sirve' });
     var prompt = h('textarea.campo', { rows: 9, maxlength: 20000 }); prompt.value = d.prompt || '';
+    var sabe = h('input.campo', { value: (d.sabeDe || []).join(', '), maxlength: 800, placeholder: 'Ej.: métricas de Instagram, Reels, presupuesto de anuncios' });
     var chips = [0, 1, 2].map(function (i) { return h('input.campo', { value: (d.chips || [])[i] || '', maxlength: 200, placeholder: i === 0 ? 'Pedido de ejemplo' : '', style: { marginBottom: '6px' } }); });
     var ava = App.EditorAvatar(d.avatar, function () { return d.avatar.semilla || id.value; });
     if (!op.editar) nombre.addEventListener('input', function () { if (!idTocado) id.value = App.slug(nombre.value, usados); ava.retratar(); });
@@ -98,6 +111,7 @@
         campo('Rol', rol),
         h('div.dos', campo('Departamento', dep), campo('Modelo', modelo)),
         campo('Descripción corta', desc),
+        campo('Sabe de', sabe, 'Temas separados por coma (hasta 12). Sus colegas los usan para saber a quién preguntarle.'),
         campo('Instrucciones', prompt, 'Cómo trabaja, qué entrega y cómo habla. Es el texto que recibe Claude.'),
         campo('Pedidos sugeridos', h('div', chips))));
 
@@ -107,7 +121,8 @@
         return {
           id: id.value.trim(), nombre: nombre.value.trim(), rol: rol.value.trim(), departamento: dep.value, modelo: modelo.value,
           description: desc.value.trim() || rol.value.trim(), prompt: prompt.value.trim(),
-          chips: chips.map(function (c) { return c.value.trim(); }).filter(Boolean), avatar: ava.valor(), brief: d.brief || undefined
+          chips: chips.map(function (c) { return c.value.trim(); }).filter(Boolean), avatar: ava.valor(), brief: d.brief || undefined,
+          sabeDe: temas(sabe.value)
         };
       },
       validar: function () {
@@ -118,6 +133,8 @@
         if (!op.editar && !/^[a-z0-9][a-z0-9-]{0,40}$/.test(v.id)) return 'El identificador va en minúsculas, números y guiones.';
         if (!op.editar && usados.indexOf(v.id) >= 0) return 'Ya hay un agente con ese identificador.';
         if (!v.departamento) return 'Elegí un departamento (creá uno en Departamentos).';
+        if (v.sabeDe.length > 12) return '«Sabe de» admite hasta 12 temas.';
+        if (v.sabeDe.some(function (t) { return t.length > 60; })) return 'Cada tema de «Sabe de» tiene que tener hasta 60 caracteres.';
         return null;
       }
     };

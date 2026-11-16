@@ -286,14 +286,14 @@ export function coincide(a: string, b: string): boolean {
   return a.slice(0, 5) === b.slice(0, 5)
 }
 
-/** Agentes cuyo rol/departamento (peso 2) o brief/chips (peso 1) tienen más palabras del tema, primero; el resto detrás.
+/** Agentes cuyo «sabe de», rol o departamento (peso 2) o brief/chips (peso 1) tienen más palabras del tema, primero; el resto detrás.
  *  Estable: a igual puntaje se respeta el orden en que vinieron. */
 export function ordenar(agentes: AgenteDef[], oficina: Oficina, tema: string): AgenteDef[] {
   const vistos = new Set<string>()
   const claves: string[] = []
   for (const p of palabras(tema)) if (p.length >= 4 && !vacias.has(p) && !vistos.has(p)) { vistos.add(p); claves.push(p) }
   const puntaje = (a: AgenteDef) => {
-    const fuerte = palabras(a.rol + ' ' + (oficina.departamentos.find((d) => d.id === a.departamento)?.nombre ?? ''))
+    const fuerte = palabras(a.rol + ' ' + (oficina.departamentos.find((d) => d.id === a.departamento)?.nombre ?? '') + ' ' + (a.sabeDe ?? []).join(' '))
     const debil = palabras((a.brief ?? '') + ' ' + (a.chips ?? []).join(' '))
     let s = 0
     for (const c of claves) {

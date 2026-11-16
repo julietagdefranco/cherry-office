@@ -274,6 +274,7 @@
       dom.navEnt = h('span.insignia.aviso.oculto');
       dom.navParte = h('span.insignia.oculto');
       dom.navFlu = h('span.insignia.info.oculto');
+      dom.navCon = h('span.insignia.oculto');
       dom.lienzo = h('div.lienzo');
       dom.carga = h('div.carga3d', h('span.giro'), 'Armando la oficina…');
       dom.avisoReu = h('div.aviso-reunion.oculto');
@@ -286,7 +287,8 @@
           h('button.nav-item', { onclick: function () { App.Parte.abrir(); } }, App.icono('parte'), 'Parte del día', dom.navParte),
           h('button.nav-item', { onclick: function () { App.Reunion.abrir(); } }, App.icono('reunion'), 'Reuniones', dom.navReu),
           h('button.nav-item', { onclick: function () { App.Flujos.abrir(); } }, App.icono('flujo'), 'Flujos', dom.navFlu),
-          h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib)));
+          h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib),
+          h('button.nav-item', { onclick: function () { App.Conocimiento.abrir(); } }, App.icono('bombilla'), 'Conocimiento', dom.navCon)));
       dom.app = h('div.app', dom.lateral,
         h('div.velo-lateral', { onclick: function () { cajon(false); } }),
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu,
@@ -318,6 +320,7 @@
     if (App.Entregables) App.Entregables.refrescar();
     App.Reunion.retomar();
     App.Biblioteca.vigilarEstado();
+    if (App.Conocimiento) App.Conocimiento.vigilarEstado();
     /* el parte del día se abre solo la primera vez de la sesión */
     var yaAbierto = false;
     try { yaAbierto = !!sessionStorage.getItem('oficina.parte'); sessionStorage.setItem('oficina.parte', '1'); } catch (e) {}
