@@ -239,6 +239,7 @@
   App.editarOficina = editarOficina;
   App.borrarOficina = function () { borrarOficina(); };
   App.otraOficina = function () { otraOficina(); };
+  App.menuOficina = function (ancla) { menuOficina(ancla); };
 
   /* ---------------- selector de color ---------------- */
   function elegirColor(ancla, actual, alElegir) {
@@ -275,7 +276,8 @@
     if (primera) {
       dom.equipo = h('div.equipo');
       dom.nombre = h('div.marca-nombre'); dom.sub = h('div.marca-sub');
-      dom.marca = h('div.marca', { onclick: function () { menuOficina(dom.marca); }, title: 'Cambiar de oficina' }, h('div.marca-txt', dom.nombre, dom.sub), App.icono('abajo'));
+      /* el nombre de la oficina sobre la maqueta es un rótulo: para cambiar de oficina está el logo del riel */
+      dom.marca = h('div.marca.rotulo', h('div.marca-txt', dom.nombre, dom.sub));
       dom.navReu = h('span.insignia.ok.oculto', 'En curso');
       dom.navBib = h('span.insignia.oculto');
       dom.navEnt = h('span.insignia.aviso.oculto');
@@ -290,7 +292,7 @@
       dom.lista = h('aside.lista-col');
       var riel = App.Nav.riel({
         menuOficina: menuOficina, menuNuevo: menuNuevo,
-        insignias: { oficina: dom.navParte, charlas: dom.navReu, archivos: dom.navEnt, trabajo: dom.navTar },
+        insignias: { bandeja: dom.navEnt, charlas: dom.navReu, trabajo: dom.navTar },
         extra: [
           App.Uso ? App.Uso.boton() : null,
           h('button.riel-item.riel-extra', { title: 'Buscar o ir a… (' + App.atajoMod + 'K)', onclick: function () { App.Paleta.abrir(); } }, App.icono('buscar'), h('span', App.atajoMod + 'K')),
@@ -300,7 +302,6 @@
       dom.app = h('div.app.en-oficina', riel, dom.lista,
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu, dom.marca,
           h('div.herramientas',
-            h('button.btn', { title: 'Buscar agentes, charlas y acciones (' + App.atajoMod + 'K)', onclick: function () { App.Paleta.abrir(); } }, App.icono('buscar'), h('span.btn-txt', 'Buscar'), h('kbd.btn-txt', App.atajoMod + 'K')),
             h('button.btn', { title: 'Llamar a reunión', onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), h('span.btn-txt', 'Llamar a reunión'))),
           h('div.pista', App.Paleta ? App.Paleta.BASE : 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte'),
           dom.derecho));
@@ -330,10 +331,6 @@
     /* la ruta (#/charlas/…) decide qué se ve; al cambiar de oficina se vuelve a la maqueta */
     if (!primera || !/^#\/\w/.test(location.hash)) history.replaceState(null, '', '#/oficina');
     App.Nav.aplicar();
-    /* el parte del día se abre solo la primera vez de la sesión, si se arranca en la oficina */
-    var yaAbierto = false;
-    try { yaAbierto = !!sessionStorage.getItem('oficina.parte'); sessionStorage.setItem('oficina.parte', '1'); } catch (e) {}
-    if (!yaAbierto && App.Parte && App.Nav.seccion() === 'oficina') App.Parte.abrir();
   }
   App.montar = montar;
 
@@ -371,11 +368,11 @@
     if (sueltos.length) deps.push({ id: '__sin', nombre: 'Sin departamento', color: '#9a9a9a' });
     deps.forEach(function (d) {
       var ags = d.id === '__sin' ? sueltos : o.agentes.filter(function (a) { return a.departamento === d.id; });
-      /* la lista del equipo es para hablarles: los departamentos se arman en Ajustes › Departamentos o con «+» */
+      /* la lista del equipo (sección Equipo) abre la ficha de cada uno; los departamentos se arman en Equipo › Departamentos */
       if (!ags.length) return;
       c.appendChild(h('div.grupo-tit', h('span.punto', { style: { background: d.color } }), d.nombre, h('span.cuenta', ags.length)));
       ags.forEach(function (a) {
-        var fila = h('div.persona', { 'data-id': a.id, onclick: function () { App.Agente.abrir(a.id); } },
+        var fila = h('div.persona', { 'data-id': a.id, onclick: function () { App.Nav.ir('#/equipo/' + encodeURIComponent(a.id)); } },
           App.retratoImg(a, 'retrato', 96), h('div.persona-txt', h('div.persona-nombre', a.nombre), h('div.persona-rol', a.rol)), h('span.estado-dot'));
         c.appendChild(fila);
       });
@@ -425,7 +422,7 @@
       h('button.btn.chico', { style: { marginLeft: 'auto' }, onclick: function () { if (!hj.enVentana) hj.cerrar(); App.Yo.abrir(); } }, 'Cambiar…'));
     var carpeta = h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 } }, App.icono('carpeta'),
       h('span', { style: { color: 'var(--suave)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }, title: E.carpeta }, E.carpeta),
-      h('button.btn.chico', { style: { marginLeft: 'auto', flex: 'none' }, onclick: function () { if (App.nativo.hay) App.nativo.revelar(E.carpeta); else App.verArchivosOficina(); } },
+      h('button.btn.chico', { style: { marginLeft: 'auto', flex: 'none' }, onclick: function () { if (App.nativo.hay) App.nativo.revelar(E.carpeta); else { if (!hj.enVentana) hj.cerrar(); App.Nav.ir('#/archivos/carpeta'); } } },
         App.nativo.hay ? 'Mostrar' : 'Ver archivos'));
     App.add(hj.cuerpo, h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), n),
       h('div.fila-campo', h('label.etiqueta-campo', 'Quién la dirige'), quien, h('div.ayuda', 'Cada oficina tiene su propio director.')),
@@ -440,13 +437,18 @@
 
   /* Esc cierra el panel solo sobre la maqueta; en las secciones el panel es la pantalla */
   App.alEscape = function () { if (dom.derecho && dom.derecho.classList.contains('abierto') && !App.Nav.enSeccion()) App.cerrarDerecho(); };
-  App.abrirDerecho = function (modo) { dom.derecho.classList.add('abierto'); dom.derecho.setAttribute('data-modo', modo); App.Nav.alAbrir(modo); };
+  App.abrirDerecho = function (modo) {
+    var antes = App.modoDerecho();
+    dom.derecho.classList.add('abierto'); dom.derecho.setAttribute('data-modo', modo); App.Nav.alAbrir(modo);
+    if ((antes === 'permisos' || antes === 'parte' || modo === 'parte') && App.Permisos) App.Permisos.repintar();   // vuelven a flotar
+  };
   /* `silencioso`: lo cierra la navegación misma (va a pintar otra cosa); si no, en una sección queda el panel vacío */
   App.cerrarDerecho = function (silencioso) {
     var m = dom.derecho.getAttribute('data-modo');
     dom.derecho.classList.remove('abierto');
     dom.derecho.removeAttribute('data-modo');
     alCerrarModo(m);
+    if ((m === 'permisos' || m === 'parte') && App.Permisos) App.Permisos.repintar();
     App.Nav.alCerrar(silencioso === true);
   };
   function alCerrarModo(m) {

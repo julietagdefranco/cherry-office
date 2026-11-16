@@ -22,10 +22,7 @@ App.Tareas = (function () {
   function cerrarPanel() { clearTimeout(sondeo); sondeo = null; pedido++; }
 
   function cabecera(sub) {
-    return h('div.der-cab',
-      h('div.retrato.parte-ico', { style: { width: '52px', height: '52px', borderRadius: '12px' } }, App.icono('reloj')),
-      h('div.der-tit', h('h2', 'Tareas'), sub ? h('div.sub', sub) : null),
-      h('button.btn.fantasma.icono', { title: 'Cerrar panel', onclick: App.cerrarDerecho }, App.icono('cerrar')));
+    return App.cabPanel({ icono: 'reloj', titulo: 'Tareas', sub: sub });
   }
 
   function cargar(conGiro) {
@@ -174,7 +171,7 @@ App.Tareas = (function () {
     App.add(App.vaciar(der), cabecera(sub.join(' · ')), cuerpo, pie);
 
     if (!ts.length) {
-      App.add(cuerpo, h('div.vacio', 'Todavía no hay tareas en la oficina. Programale a un agente algo que haga solo: un informe cada mañana, o un encargo de una sola vez.'));
+      App.add(cuerpo, App.vacio('reloj', 'Todavía no hay tareas', 'Programale a un agente algo que haga solo: un informe cada mañana, o un encargo de una sola vez. Usá «Nueva tarea», abajo.'));
     } else {
       var ahora = Date.now(), finHoy = new Date(); finHoy.setHours(23, 59, 59, 999);
       var hoy = g.proximas.filter(function (t) { return instante(t) <= finHoy.getTime(); });
@@ -197,7 +194,7 @@ App.Tareas = (function () {
     }
 
     var nueva = h('button.btn.primario', { onclick: function (ev) { elegirAgente(ev.currentTarget); } }, App.icono('mas'), 'Nueva tarea');
-    App.add(pie, h('div', { style: { display: 'flex', justifyContent: 'flex-end' } }, nueva));
+    App.add(pie, App.acciones(null, nueva));
   }
 
   /* «Nueva tarea»: primero a quién (la hoja es la de la ficha del agente) */

@@ -73,31 +73,46 @@
     });
   }
 
-  /* archivos de la oficina (solo navegador; en la app se usa el Finder) */
-  App.verArchivosOficina = function () {
-    var hj = App.hoja({ titulo: 'Archivos de la oficina', ancho: 640, sinPie: true });
-    var ruta = h('div.ruta-actual'), lista = h('div.carpetas', { style: { border: '1px solid var(--linea)', borderRadius: 'var(--radio)', height: '400px' } });
-    App.add(hj.cuerpo, ruta, lista);
-    function ir(r) {
-      App.vaciar(lista).appendChild(h('div.vacio', h('span.giro')));
-      api.get('/api/oficina/archivos', { ruta: r }).then(function (d) {
-        var partes = (d.ruta || '').split('/').filter(Boolean);
-        App.add(App.vaciar(ruta), 
-          partes.length ? h('button.btn.chico.fantasma', { onclick: function () { ir(partes.slice(0, -1).join('/')); } }, App.icono('atras')) : null,
-          App.icono('carpeta'), h('span', (E_().oficina.nombre) + (d.ruta ? ' / ' + partes.join(' / ') : '')));
-        App.vaciar(lista);
-        if (!d.archivos.length) lista.appendChild(h('div.vacio', 'Carpeta vacía.'));
-        d.archivos.forEach(function (a) {
-          lista.appendChild(h('div.carpeta', {
-            onclick: function () {
-              if (a.esCarpeta) ir(a.rel);
-              else api.get('/api/oficina/archivo', { ruta: a.rel }).then(App.abrirContenido).catch(App.fallo);
-            }
-          }, App.icono(a.esCarpeta ? 'carpeta' : 'libro'), h('span', { style: { flex: 1 } }, a.nombre), a.esCarpeta ? App.icono('flecha') : h('small', { style: { color: 'var(--tenue)' } }, App.tam(a.tam))));
-        });
-      }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
+  /* Archivos › Carpeta de la oficina: la carpeta navegable como pantalla, con su ruta (#/archivos/carpeta/<sub/carpeta>).
+     En la app de escritorio suma «Mostrar en el Finder». Abrir un archivo: markdown en el visor, el resto como siempre. */
+  var rutaActual = '';
+  App.Carpeta = {
+    ruta: function () { return rutaActual; },
+    abrir: function (r) {
+      rutaActual = (r || '').replace(/^\/+|\/+$/g, '');
+      var modo = App.modoDerecho && App.modoDerecho();
+      if (modo !== 'carpeta') App.abrirDerecho('carpeta'); else App.Nav.alAbrir('carpeta');
+      pintar();
     }
-    function E_() { return App.E; }
-    ir('');
   };
+  App.verArchivosOficina = function () { App.Nav.ir('#/archivos/carpeta'); };
+  function pintar() {
+    var E = App.E, partes = rutaActual.split('/').filter(Boolean);
+    var lista = h('div.carpetas.carpeta-panel', h('div.vacio', h('span.giro')));
+    var migas = h('div.ruta-actual',
+      h('button.btn.chico.fantasma', { onclick: function () { App.Carpeta.abrir(''); } }, App.icono('carpeta'), E.oficina.nombre),
+      partes.map(function (p, i) {
+        return [h('span.miga-sep', '/'), h('button.btn.chico.fantasma', { onclick: function () { App.Carpeta.abrir(partes.slice(0, i + 1).join('/')); } }, p)];
+      }));
+    var mostrar = App.nativo.hay ? h('button.btn.chico', { onclick: function () { App.nativo.revelar(E.carpeta.replace(/\/$/, '') + (rutaActual ? '/' + rutaActual : '')); } },
+      App.icono('abrir'), 'Mostrar ' + App.nativo.enExplorador) : null;
+    App.add(App.vaciar(App.dom.derecho),
+      App.cabPanel({ icono: 'carpeta', titulo: 'Carpeta de la oficina', sub: E.carpeta, acciones: mostrar ? [mostrar] : null,
+        volver: partes.length ? { texto: 'Subir', titulo: 'Carpeta de arriba', accion: function () { App.Carpeta.abrir(partes.slice(0, -1).join('/')); } } : null }),
+      h('div.der-cuerpo', migas, lista));
+    var pedida = rutaActual;
+    api.get('/api/oficina/archivos', { ruta: rutaActual }).then(function (d) {
+      if (pedida !== rutaActual || App.modoDerecho() !== 'carpeta') return;
+      App.vaciar(lista);
+      if (!d.archivos.length) lista.appendChild(h('div.vacio', 'Carpeta vacía.'));
+      d.archivos.forEach(function (a) {
+        lista.appendChild(h('div.carpeta', { title: a.rel, onclick: function () {
+          if (a.esCarpeta) App.Carpeta.abrir(a.rel);
+          else if (App.esMarkdown(a.rel)) App.abrirMarkdownOficina(a.rel);
+          else if (App.nativo.hay) App.nativo.abrir(E.carpeta.replace(/\/$/, '') + '/' + a.rel);
+          else api.get('/api/oficina/archivo', { ruta: a.rel }).then(App.abrirContenido).catch(App.fallo);
+        } }, App.icono(a.esCarpeta ? 'carpeta' : 'libro'), h('span', { style: { flex: 1 } }, a.nombre), a.esCarpeta ? App.icono('flecha') : h('small', { style: { color: 'var(--tenue)' } }, App.tam(a.tam))));
+      });
+    }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
+  }
 })();

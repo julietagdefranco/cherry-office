@@ -22,10 +22,11 @@ App.Yo = (function () {
     var sub = subtitulo();
     return h('div',
       h('div.grupo-tit', h('span.punto', { style: { background: '#f5cd2f' } }), 'Vos'),
-      h('div.persona.yo', { title: 'Tu despacho: abrir tu bandeja', onclick: function () { irAlDespacho(); App.Entregables.abrir(); } },
+      /* como con cualquiera del equipo, tocarte abre tu perfil (nombre y minifig); lo que te espera está en la Bandeja */
+      h('div.persona.yo', { title: 'Cambiar tu nombre o tu minifig', onclick: function () { abrir(); } },
         retrato('retrato', 96),
         h('div.persona-txt', h('div.persona-nombre', nombre() || 'Vos'), h('div.persona-rol', sub)),
-        h('button.yo-editar', { title: 'Cambiar tu nombre o tu minifig', onclick: function (e) { e.stopPropagation(); abrir(); } }, App.icono('lapiz'))));
+        h('span.yo-editar', App.icono('lapiz'))));
   }
 
   function irAlDespacho() { if (App.Oficina3D && App.Oficina3D.enfocarLugar) App.Oficina3D.enfocarLugar('direccion'); }
@@ -33,7 +34,7 @@ App.Yo = (function () {
   /* hoja «Quién dirige»: nombre y minifig */
   function abrir() {
     var p = perfil();
-    var hj = App.hoja({ titulo: 'Quién dirige', ancho: 760 });
+    var hj = App.hoja({ titulo: 'Tu perfil', ancho: 760 });
     var n = h('input.campo', { value: p.nombre || '', maxlength: 80, placeholder: 'Tu nombre', autofocus: true });
     var ava = App.EditorAvatar(p.avatar || { semilla: 'yo' }, function () { return 'yo'; });
     var err = h('div.error-txt');

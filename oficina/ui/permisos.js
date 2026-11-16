@@ -19,11 +19,35 @@ App.Permisos = (function () {
     pintar();
   }
 
-  function pintar() {
+  function pintar(soloPila) {
     var vista = App.dom && App.dom.lienzo && App.dom.lienzo.parentNode; if (!vista) return;
     if (!pila || !vista.contains(pila)) { pila = h('div.permisos-pila'); vista.appendChild(pila); }
     App.vaciar(pila);
-    lista.forEach(function (p) { pila.appendChild(tarjeta(p)); });
+    /* con la lista abierta en la Bandeja, las tarjetas van ahí y no flotando */
+    var modo = App.modoDerecho && App.modoDerecho();
+    if (modo === 'permisos') pintarPanel();
+    else if (modo === 'parte') { if (!soloPila && App.Parte && App.Parte.recargar) App.Parte.recargar(); }
+    else lista.forEach(function (p) { pila.appendChild(tarjeta(p)); });
+    if (App.Nav && App.Nav.seccion && App.Nav.seccion() === 'bandeja') App.Nav.pintarLista();
+  }
+
+  /* ---------------- Bandeja › Te piden permiso ---------------- */
+  function panelAbierto() { return App.modoDerecho && App.modoDerecho() === 'permisos'; }
+  function abrirPanel() {
+    App.abrirDerecho('permisos');
+    pintar();
+  }
+  function pintarPanel() {
+    var cuerpo = h('div.der-cuerpo');
+    App.add(App.vaciar(App.dom.derecho),
+      App.cabPanel({ icono: 'escudo', titulo: 'Te piden permiso', sub: lista.length ? (lista.length === 1 ? '1 pedido' : lista.length + ' pedidos') : 'Nada pendiente' }),
+      cuerpo);
+    if (!lista.length) {
+      cuerpo.appendChild(App.vacio('escudo', 'Nadie te pide permiso', 'Cuando un agente quiera hacer algo que no tiene permitido (correr un comando, escribir fuera de su carpeta), el pedido aparece acá.',
+        [h('button.btn', { onclick: function () { App.Ajustes.abrir('permisos'); } }, 'Cuánto te preguntan')]));
+      return;
+    }
+    cuerpo.appendChild(h('div.permisos-lista', lista.map(tarjeta)));
   }
 
   function tarjeta(p) {
@@ -120,5 +144,5 @@ App.Permisos = (function () {
   }
 
   if (App.on) App.on('actividad', function (r) { aplicar(r.permisos || []); });
-  return { pendientes: function () { return lista.slice(); }, elegirModo: elegirModo, abrirModo: abrirModo };
+  return { pendientes: function () { return lista.slice(); }, cuantos: function () { return lista.length; }, tarjeta: function (p) { return tarjeta(p); }, abrirPanel: abrirPanel, repintar: function () { pintar(true); }, elegirModo: elegirModo, abrirModo: abrirModo };
 })();

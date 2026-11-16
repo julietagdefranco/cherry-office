@@ -46,12 +46,8 @@ App.Flujos = (function () {
   }
 
   /* ---------------- panel: cabecera ---------------- */
-  function cabecera(titulo, sub, extra) {
-    return h('div.der-cab',
-      h('div.retrato.flu-icono', App.icono('flujo')),
-      h('div.der-tit', h('h2', { title: titulo }, titulo), sub ? h('div.sub', sub) : null),
-      extra || null,
-      h('button.btn.fantasma.icono', { title: 'Cerrar panel', onclick: App.cerrarDerecho }, App.icono('cerrar')));
+  function cabecera(titulo, sub, volver) {
+    return App.cabPanel({ icono: 'flujo', titulo: titulo, sub: sub, volver: volver });
   }
 
   function prepararPanel() {
@@ -61,31 +57,33 @@ App.Flujos = (function () {
 
   /* ---------------- panel: lista de corridas ---------------- */
   function abrir() {
-    prepararPanel();
     abierta = null; clearTimeout(relojDetalle);
+    prepararPanel();
     pintarLista();
   }
 
   function pintarLista() {
     if (!abiertoPanel()) return;
-    abierta = null; clearTimeout(relojDetalle);
+    clearTimeout(relojDetalle);
+    if (abierta !== null) { abierta = null; App.Nav.alAbrir('flujos'); }
     var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie'), lista = h('div.corridas', h('div.vacio', h('span.giro')));
     function chip(est, txt) {
       return h('button.chip' + (filtro === est ? '.sel' : ''), { onclick: function () { filtro = est; pintarLista(); } }, txt);
     }
     App.add(App.vaciar(der), cabecera('Flujos', 'Lo que está en marcha en la oficina'), cuerpo, pie);
     App.add(cuerpo, h('div.entregas-filtros', chip('abiertas', 'En curso'), chip('terminadas', 'Terminadas'), chip('todas', 'Todas')), lista);
-    App.add(pie, h('div.flu-pie',
-      h('button.btn.primario', { onclick: function () { nuevaCorrida(); } }, App.icono('mas'), 'Nueva corrida'),
-      h('button.btn', { onclick: function () { editor(); } }, 'Flujos de la oficina…')));
+    App.add(pie, App.acciones([h('button.btn', { onclick: function () { editor(); } }, App.icono('lapiz'), 'Editar los flujos…')],
+      h('button.btn.primario', { onclick: function () { nuevaCorrida(); } }, App.icono('mas'), 'Nueva corrida')));
     api().get('/api/flujos/corridas', { estado: filtro, limite: 100 }).then(function (r) {
       if (!abiertoPanel() || abierta !== null) return;
       App.vaciar(lista);
       var cs = r.corridas || [];
       if (!cs.length) {
-        lista.appendChild(h('div.vacio', filtro === 'abiertas'
-          ? 'No hay nada en marcha. Empezá una corrida con «Nueva corrida».'
-          : 'Todavía no hay corridas terminadas.'));
+        lista.appendChild(filtro === 'abiertas'
+          ? App.vacio('flujo', 'Nada en marcha', 'Un flujo pasa un trabajo de agente en agente, con tu aprobación donde haga falta.',
+            [h('button.btn', { onclick: function () { App.Creador.abrir(); } }, App.icono('chispa'), 'Armar un flujo con el Creador'),
+              h('button.btn.primario', { onclick: function () { nuevaCorrida(); } }, App.icono('mas'), 'Nueva corrida')])
+          : h('div.vacio', 'Todavía no hay corridas terminadas.'));
         return;
       }
       cs.forEach(function (c) { lista.appendChild(fila(c)); });
@@ -109,8 +107,10 @@ App.Flujos = (function () {
   function verCorrida(id) {
     id = +id;
     if (!id) { abrir(); return; }
-    prepararPanel();
+    var cambio = abierta !== id, yaAbierto = abiertoPanel();
     abierta = id; firmaDetalle = '';
+    prepararPanel();
+    if (yaAbierto && cambio) App.Nav.alAbrir('flujos');
     if (borrador.corrida !== id) borrador = { corrida: id, nota: '', archivos: [] };
     App.vaciar(App.dom.derecho).appendChild(h('div.vacio', h('span.giro')));
     cargarDetalle(id, true);
@@ -154,7 +154,7 @@ App.Flujos = (function () {
   function pintarDetalle(r) {
     var c = r.corrida, pasos = r.pasos || [], der = App.dom.derecho;
     var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
-    var volverLista = h('button.btn.fantasma.icono', { title: 'Volver a la lista', onclick: function () { pintarLista(); } }, '←');
+    var volverLista = { texto: 'Flujos', titulo: 'Volver a la lista', accion: function () { pintarLista(); } };
     var sub = (c.flujoNombre || c.flujo) + ' · ' + App.hace(c.creada);
     App.add(App.vaciar(der), cabecera(c.nombre, sub, volverLista), cuerpo, pie);
     var abiertaC = c.estado !== 'terminada' && c.estado !== 'cancelada';
@@ -172,9 +172,7 @@ App.Flujos = (function () {
     var botones = [];
     /* el backend solo deja volver en corridas abiertas (una terminada o cancelada da 409) */
     if (abiertaC && pasos.length) botones.push(h('button.btn', { onclick: function () { volverAPaso(c, pasos); } }, 'Volver a un paso…'));
-    botones.push(h('span', { style: { flex: 1 } }));
-    if (abiertaC) botones.push(h('button.btn.peligro-suave', { onclick: function () { cancelar(c); } }, 'Cancelar la corrida'));
-    App.add(pie, h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, botones));
+    App.add(pie, App.acciones(botones, abiertaC ? h('button.btn.peligro-suave', { onclick: function () { cancelar(c); } }, 'Cancelar la corrida') : null));
   }
 
   function pasoItem(c, p, i) {
@@ -670,6 +668,8 @@ App.Flujos = (function () {
   return {
     abrir: abrir,
     verCorrida: verCorrida,
+    corridaAbierta: function () { return abierta; },
+    definiciones: function () { editor(); },
     nueva: nuevaCorrida,
     editor: editor,
     alCerrarPanel: function () { abierta = null; clearTimeout(relojDetalle); }

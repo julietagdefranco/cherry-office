@@ -50,26 +50,24 @@ App.Entregables = (function () {
     if (App.Oficina3D && App.Oficina3D.muro) App.Oficina3D.muro(ultimas, sinRevisar);
     if (App.Avisos && App.Avisos.insignia) App.Avisos.insignia();
     if (App.Yo && App.Yo.refrescar) App.Yo.refrescar();
+    if (App.Nav && App.Nav.seccion() === 'bandeja') App.Nav.pintarLista();
   }
 
   /* ---------------- panel: lista ---------------- */
   function abrir(id) {
     if (App.Agente && App.Agente.alCerrar) App.Agente.alCerrar();
+    abierta = id ? +id : null;   // antes de abrir: la ruta lleva la entrega
     App.abrirDerecho('entregables');
-    if (id) verEntrega(+id); else { abierta = null; pintarLista(); }
+    if (id) verEntrega(+id); else pintarLista();
   }
 
-  function cabecera(titulo, sub, extra) {
-    return h('div.der-cab',
-      h('div.retrato', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', borderRadius: '12px' } }, App.icono('libro')),
-      h('div.der-tit', h('h2', { title: titulo }, titulo), sub ? h('div.sub', sub) : null),
-      extra || null,
-      h('button.btn.fantasma.icono', { title: 'Cerrar panel', onclick: App.cerrarDerecho }, App.icono('cerrar')));
+  function cabecera(titulo, sub, volver, icono) {
+    return App.cabPanel({ icono: icono || 'bandeja', titulo: titulo, sub: sub, volver: volver });
   }
 
   function pintarLista() {
     if (!abiertoPanel()) return;
-    abierta = null;
+    if (abierta !== null) { abierta = null; App.Nav.alAbrir('entregables'); }
     var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), lista = h('div.entregas', h('div.vacio', h('span.giro')));
     var o = App.E.oficina || { agentes: [] };
     function chip(est, txt) {
@@ -83,7 +81,7 @@ App.Entregables = (function () {
       [h('option', { value: '' }, 'Cualquier origen')].concat(Object.keys(ORIGEN).map(function (k) { return h('option', { value: k }, ORIGEN[k]); })));
     selOr.value = filtro.origen;
     App.add(App.vaciar(der),
-      cabecera('Entregables', sinRevisar ? (sinRevisar === 1 ? '1 sin revisar' : sinRevisar + ' sin revisar') : 'Todo revisado'),
+      cabecera('Para revisar', sinRevisar ? (sinRevisar === 1 ? '1 sin revisar' : sinRevisar + ' sin revisar') : 'Todo revisado'),
       cuerpo);
     App.add(cuerpo,
       h('div.entregas-filtros', chip('sin_revisar', 'Sin revisar' + (sinRevisar ? ' (' + sinRevisar + ')' : '')), chip('', 'Todas'), selAg, selOr),
@@ -96,9 +94,10 @@ App.Entregables = (function () {
       App.vaciar(lista);
       var es = (r.entregas || []).filter(function (e) { return filtro.agente !== '__reunion' || !e.agente; });
       if (!es.length) {
-        lista.appendChild(h('div.vacio', filtro.estado === 'sin_revisar'
-          ? 'No tenés nada para revisar. Cuando un agente termine una tarea o un encargo, aparece acá.'
-          : 'Todavía no hay entregas con ese filtro.'));
+        lista.appendChild(filtro.estado === 'sin_revisar'
+          ? App.vacio('ok', 'Nada para revisar', 'Cuando un agente termine una tarea o un encargo, aparece acá.',
+            [h('button.btn', { onclick: function () { filtro.estado = 'todas'; pintarLista(); } }, 'Ver lo ya revisado')])
+          : h('div.vacio', 'Todavía no hay entregas con ese filtro.'));
         return;
       }
       es.forEach(function (e) { lista.appendChild(fila(e)); });
@@ -127,8 +126,9 @@ App.Entregables = (function () {
 
   /* ---------------- panel: detalle ---------------- */
   function verEntrega(id) {
+    var cambio = abierta !== id;
     abierta = id;
-    if (!abiertoPanel()) App.abrirDerecho('entregables');
+    if (!abiertoPanel()) App.abrirDerecho('entregables'); else if (cambio) App.Nav.alAbrir('entregables');
     var der = App.dom.derecho;
     App.vaciar(der).appendChild(h('div.vacio', h('span.giro')));
     api().get('/api/entregas/' + id).then(function (r) { if (abierta === id) pintarDetalle(r.entrega); })
@@ -143,6 +143,19 @@ App.Entregables = (function () {
     return null;
   }
 
+  /* el nombre del archivo; si dos se llaman igual, con la carpeta que los distingue */
+  function nombreCorto(rel, todos) {
+    var n = rel.split('/').pop();
+    var iguales = todos.filter(function (x) { return x.split('/').pop() === n; }).length > 1;
+    return iguales ? rel.split('/').slice(-2).join('/') : n;
+  }
+
+  /* la carpeta de los archivos de una entrega: en la app, el Finder; en el navegador, Archivos › Carpeta de la oficina ahí */
+  function mostrarCarpeta(rel) {
+    if (App.nativo.hay && App.E.carpeta) { App.nativo.revelar(App.E.carpeta.replace(/\/$/, '') + (rel ? '/' + rel : '')); return; }
+    App.Nav.ir('#/archivos/carpeta' + (rel ? '/' + rel.split('/').map(encodeURIComponent).join('/') : ''));
+  }
+
   function abrirArchivo(rel) {
     if (App.esMarkdown(rel)) { App.abrirMarkdownOficina(rel); return; }
     if (App.nativo.hay && App.E.carpeta) { App.nativo.abrir(App.E.carpeta.replace(/\/$/, '') + '/' + rel); return; }
@@ -153,9 +166,9 @@ App.Entregables = (function () {
     if (!abiertoPanel() || abierta !== e.id) return;
     var der = App.dom.derecho, cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
     var bloqueAccion = h('div'), bloqueEspera = h('div');
-    var volver = h('button.btn.fantasma.icono', { title: 'Volver a la lista', onclick: function () { pintarLista(); } }, '←');
+    var volver = { texto: 'Para revisar', titulo: 'Volver a la lista', accion: function () { App.Nav.ir('#/bandeja/revisar'); } };
     var sub = nombreDe(e) + ' · ' + (ORIGEN[e.origen] || e.origen) + ' · ' + hace(e.creada) + (typeof e.costo === 'number' && e.costo > 0 ? ' · ≈ US$ ' + e.costo.toFixed(2) : '');
-    App.add(App.vaciar(der), cabecera(e.titulo, sub, volver), cuerpo, pie);
+    App.add(App.vaciar(der), cabecera(e.titulo, sub, volver, e.origen === 'reunion' ? 'reunion' : 'libro'), cuerpo, pie);
     var est = e.estado === 'sin_revisar' ? h('span.insignia.aviso', 'Sin revisar') : e.estado === 'revisada' ? h('span.insignia.ok', 'Revisada') : h('span.insignia', 'Reemplazada por una versión nueva');
     var meta = h('div.entrega-meta', est, e.padre ? h('span.insignia', 'Versión con cambios') : null, linkOrigen(e));
     App.add(cuerpo, meta, bloqueEspera, bloqueAccion);
@@ -164,15 +177,21 @@ App.Entregables = (function () {
       vigilarCambios(e.id);
     }
     if (e.archivos && e.archivos.length) {
-      App.add(cuerpo, h('div.entrega-archivos', h('div.etiqueta-campo', 'Archivos'), e.archivos.map(function (rel) {
-        var guardado = enBiblioteca(e, rel);
-        return h('div.entrega-archivo',
-          h('button.archivo-fila', { onclick: function () { abrirArchivo(rel); }, title: rel }, App.icono('abrir'), h('span', rel)),
-          guardado && App.Biblioteca ? h('button.insignia.ok.insignia-link', { title: 'Ver la copia en la biblioteca', onclick: function () { App.Biblioteca.abrir(guardado.slug); } },
-            App.icono('libro'), 'En la biblioteca') : null);
-      })));
+      /* archivos como chips con el nombre (la ruta va en el title) y, a la derecha, dónde quedaron */
+      var carpeta = e.archivos[0].split('/').slice(0, -1).join('/');
+      App.add(cuerpo, h('div.entrega-archivos',
+        h('div.entrega-archivos-cab', h('span.etiqueta-campo', e.archivos.length === 1 ? 'Archivo' : e.archivos.length + ' archivos'),
+          h('button.btn.chico.fantasma', { title: carpeta || 'Carpeta de la oficina', onclick: function () { mostrarCarpeta(carpeta); } }, App.icono('carpeta'),
+            App.nativo.hay ? 'Mostrar ' + App.nativo.enExplorador : 'Ver la carpeta')),
+        h('div.adjuntos', e.archivos.map(function (rel) {
+          var guardado = enBiblioteca(e, rel);
+          return h('span.entrega-archivo',
+            h('button.adjunto', { onclick: function () { abrirArchivo(rel); }, title: rel }, App.icono(App.esMarkdown(rel) ? 'libro' : 'abrir'), h('span', nombreCorto(rel, e.archivos))),
+            guardado && App.Biblioteca ? h('button.insignia.ok.insignia-link', { title: 'Ver la copia en la biblioteca', onclick: function () { App.Biblioteca.abrir(guardado.slug); } },
+              App.icono('libro'), 'En la biblioteca') : null);
+        }))));
     }
-    App.add(cuerpo, App.htmlSeguro(h('div.msg.a.entrega-texto', { style: { maxWidth: 'none' } }), App.markdown(e.texto || '(sin texto)')));
+    App.add(cuerpo, App.htmlSeguro(h('div.md-doc.doc-panel.entrega-texto'), App.markdown(e.texto || '(sin texto)')));
     /* flujo y acción llegan aparte: hasta entonces el pie queda vacío, para no ofrecer «Listo» sobre una propuesta sin resolver */
     var extra = { corrida: null, accion: null };
     Promise.all([
@@ -278,7 +297,7 @@ App.Entregables = (function () {
       h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
         h('span.insignia', { title: ac.herramienta }, cortoHerramienta(ac.herramienta)), estado),
       detalle ? h('pre', detalle) : null,
-      ac.resultado && ac.estado !== 'pendiente' ? App.htmlSeguro(h('div.msg.a', { style: { maxWidth: 'none', marginTop: '8px' } }), App.markdown(ac.resultado)) : null));
+      ac.resultado && ac.estado !== 'pendiente' ? App.htmlSeguro(h('div.md-doc.doc-panel'), App.markdown(ac.resultado)) : null));
   }
 
   function vigilarAccion(id) {
@@ -299,7 +318,7 @@ App.Entregables = (function () {
     var botones = [];
     if (e.sid && e.agente && App.Agente.abrirSesion) botones.push(h('button.btn', { onclick: function () { App.Agente.abrirSesion(e.agente, e.sid); } }, 'Abrir en el chat'));
     if (e.estado !== 'cambios' && e.sid && e.agente && !e.enCambios && !pendiente) botones.push(h('button.btn', { onclick: function () { pedirCambios(e); } }, 'Pedir cambios'));
-    botones.push(h('span', { style: { flex: 1 } }));
+    var izq = botones; botones = [];
     if (e.enCambios) {
       // mientras trabaja no se marca: la versión nueva llega como otra entrega
     } else if (pendiente) {
@@ -324,7 +343,7 @@ App.Entregables = (function () {
       if (guardables(e).some(function (rel) { return !enBiblioteca(e, rel); })) botones.push(h('button.btn', { onclick: function () { hojaBiblioteca(e, false); } }, App.icono('libro'), 'Guardar en la biblioteca'));
       botones.push(h('button.btn.fantasma', { onclick: function () { marcar(e, 'sin-revisar'); } }, 'Marcar sin revisar'));
     }
-    App.add(App.vaciar(pie), h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', justifyContent: 'flex-end' } }, botones));
+    App.add(App.vaciar(pie), App.acciones(izq, botones));
   }
 
   /* ---------------- guardar en la biblioteca ---------------- */
@@ -448,6 +467,7 @@ App.Entregables = (function () {
 
   return {
     abrir: abrir, siguiente: siguiente,
+    abierta: function () { return abierta; },
     sinRevisar: function () { return sinRevisar; },
     refrescar: refrescarUltimas,
     alCerrarPanel: function () { abierta = null; clearTimeout(relojAccion); },

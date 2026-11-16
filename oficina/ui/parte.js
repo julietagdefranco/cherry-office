@@ -32,10 +32,7 @@ App.Parte = (function () {
   function cerrarPanel() { clearTimeout(reloj); reloj = null; redactando = false; intentos = 0; pedido++; }
 
   function cabecera(sub) {
-    return h('div.der-cab',
-      h('div.retrato.parte-ico', { style: { width: '52px', height: '52px', borderRadius: '12px' } }, App.icono('parte')),
-      h('div.der-tit', h('h2', 'Parte del día'), sub ? h('div.sub', sub) : null),
-      h('button.btn.fantasma.icono', { title: 'Cerrar panel', onclick: App.cerrarDerecho }, App.icono('cerrar')));
+    return App.cabPanel({ icono: 'parte', titulo: 'Hoy', sub: sub });
   }
 
   function cargar(conGiro) {
@@ -178,13 +175,16 @@ App.Parte = (function () {
     var necesita = p.teNecesita || [], rev = p.paraRevisar || { total: 0, entregas: [] }, flujos = p.flujos || [],
         bloq = p.bloqueos || [], esperas = p.esperas || [], prox = p.proximas || [], narrado = p.narrado && p.narrado.texto ? p.narrado : null;
     var entregas = (rev.entregas || []).slice(0, 5);
-    var vacio = !necesita.length && !entregas.length && !flujos.length && !esperas.length && !bloq.length && !prox.length && !narrado;
+    var vacio = !(App.Permisos && App.Permisos.cuantos()) && !necesita.length && !entregas.length && !flujos.length && !esperas.length && !bloq.length && !prox.length && !narrado;
     var desde = p.desde ? App.hace(p.desde) : '';
-    App.add(App.vaciar(der), cabecera(desde ? (desde === 'recién' ? 'Desde recién' : 'Desde ' + desde) : ''), cuerpo, pie);
+    App.add(App.vaciar(der), cabecera('Lo que te espera y lo que pasó' + (desde ? (desde === 'recién' ? ' desde recién' : ' desde ' + desde) : '')), cuerpo, pie);
+    /* primero lo urgente: los permisos que piden los agentes, con sus botones acá mismo */
+    var perms = App.Permisos && App.Permisos.pendientes ? App.Permisos.pendientes() : [];
+    if (perms.length) App.add(cuerpo, seccion('Te piden permiso', h('div.permisos-lista.en-hoy', perms.map(App.Permisos.tarjeta))));
 
     var coord = coordinador();
     if (narrado) {
-      App.add(cuerpo, h('div.parte-narrado', App.htmlSeguro(h('div.msg.a', { style: { maxWidth: 'none' } }), App.markdown(narrado.texto))));
+      App.add(cuerpo, h('div.parte-narrado', App.htmlSeguro(h('div.md-doc.doc-panel'), App.markdown(narrado.texto))));
     } else if (coord) {
       var btn = h('button.btn', { disabled: redactando, onclick: function () { redactar(coord, btn); } },
         redactando ? [h('span.giro'), coord.nombre + ' está redactando…'] : 'Pedile el parte a ' + coord.nombre);
@@ -193,13 +193,16 @@ App.Parte = (function () {
     }
 
     if (vacio) {
-      App.add(cuerpo, h('div.vacio', 'Todo en orden: no hay nada que te espere.'));
+      App.add(cuerpo, h('div.nav-vacio', App.icono('ok'), h('b', 'Todo en orden'), h('p', 'No hay nada que te espere. Cuando un agente te entregue algo o te pida permiso, aparece acá.'),
+        h('div.acciones', { style: { justifyContent: 'center' } },
+          h('button.btn', { onclick: function (ev) { App.Nav.elegirAgente(ev.currentTarget, function (id) { App.Agente.nueva(id); }); } }, App.icono('charla'), 'Charlar con alguien'),
+          h('button.btn', { onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), 'Llamar a reunión'))));
     } else {
       if (necesita.length) App.add(cuerpo, seccion('Te necesita', h('div.parte-filas', necesita.map(filaAviso))));
       if (entregas.length) {
         App.add(cuerpo, seccion('Para revisar' + (rev.total > entregas.length ? ' (' + rev.total + ')' : ''),
           [h('div.parte-filas', entregas.map(filaEntrega)),
-            rev.total > entregas.length ? h('button.btn.chico.fantasma', { onclick: function () { App.Entregables.abrir(); } }, 'Ver las ' + rev.total) : null]));
+            rev.total > entregas.length ? h('button.btn.chico.fantasma', { onclick: function () { App.Nav.ir('#/bandeja/revisar'); } }, 'Ver las ' + rev.total) : null]));
       }
       if (flujos.length) App.add(cuerpo, seccion('Flujos en curso', h('div.parte-filas', flujos.map(filaFlujo))));
       if (esperas.length) App.add(cuerpo, seccion('En espera', h('div.parte-filas', esperas.map(filaEspera))));
@@ -214,9 +217,9 @@ App.Parte = (function () {
 
     var listo = h('button.btn.primario', { onclick: function () {
       listo.disabled = true;
-      api().post('/api/parte/visto').then(function () { App.cerrarDerecho(); }).catch(function (e) { App.fallo(e); listo.disabled = false; });
+      api().post('/api/parte/visto').then(function () { App.aviso('Listo: el próximo parte arranca desde acá.'); cargar(false); }).catch(function (e) { App.fallo(e); listo.disabled = false; });
     } }, 'Listo, ya lo vi');
-    App.add(pie, h('div', { style: { display: 'flex', justifyContent: 'flex-end' } }, listo));
+    App.add(pie, App.acciones(null, listo));
   }
 
   function redactar(coord, btn) {
@@ -242,5 +245,5 @@ App.Parte = (function () {
     }, 4000);
   }
 
-  return { abrir: abrir, alCerrarPanel: cerrarPanel, abrirEspera: abrirEsperaPorId };
+  return { abrir: abrir, alCerrarPanel: cerrarPanel, abrirEspera: abrirEsperaPorId, recargar: function () { cargar(false); } };
 })();

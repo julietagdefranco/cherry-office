@@ -28,15 +28,17 @@
   function activa(r) { return r && (r.estado === 'en_curso' || r.estado === 'esperando'); }
 
   /* ---------------- lista ---------------- */
-  /* la lista vive en la sección Reuniones (nav.js); con una en curso, se abre esa */
+  /* la sala de reuniones (maqueta, ⌘K): con una en curso se abre esa; si no, se llama a una nueva.
+     La lista de reuniones vive en Charlas (nav.js). */
   function abrir() {
     if (activa(E.reunion)) { panel(E.reunion.id); return; }
-    App.Nav.ir('#/reuniones');
+    nueva();
   }
   function nombre(id) { var a = App.agente(id); return a ? a.nombre : id; }
 
   /* ---------------- nueva ---------------- */
-  function nueva() {
+  /* `con`: ids que arrancan elegidos (p. ej. desde la ficha de un agente) */
+  function nueva(con) {
     if (activa(E.reunion)) { App.aviso('Ya hay una reunión en curso.'); panel(E.reunion.id); return; }
     var o = E.oficina;
     if (o.agentes.length < 2) { App.aviso('Para una reunión hacen falta al menos dos agentes.', true); return; }
@@ -51,6 +53,7 @@
         extras();
       } }, App.retratoImg(a, 'retrato', 72), h('div', { style: { minWidth: 0 } }, h('div.persona-nombre', a.nombre), h('div.persona-rol', a.rol)));
       grilla.appendChild(b);
+      if (Array.isArray(con) && con.indexOf(a.id) >= 0) { elegidos.push(a.id); b.classList.add('sel'); }
     });
     var rondas = h('select.campo', [1, 2, 3].map(function (n) { return h('option', { value: n, selected: n === 1 }, n === 1 ? 'Una ronda' : n + ' rondas'); }));
     var docs = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } }), docsSel = [];
@@ -200,9 +203,7 @@
     var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
     var est = r.estado === 'cerrada' ? 'Cerrada' : r.estado === 'en_curso' ? 'En curso' : 'Esperando: escribí algo, pedí otra ronda o cerrá';
     App.add(App.vaciar(der), 
-      h('div.der-cab', h('div.retrato', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', borderRadius: '12px' } }, App.icono('reunion')),
-        h('div.der-tit', h('h2', { title: r.tema }, r.tema), h('div.sub', est + ' · ' + patronDe(r.patron).nombre + ' · ' + r.agentes.map(nombre).join(', '))),
-        h('button.btn.fantasma.icono', { title: 'Cerrar panel', onclick: App.cerrarDerecho }, App.icono('cerrar'))),
+      App.cabPanel({ icono: 'reunion', titulo: r.tema, sub: est + ' · ' + patronDe(r.patron).nombre + ' · ' + r.agentes.map(nombre).join(', ') }),
       cuerpo, pie);
     var t = h('div.turnos'), ronda = 0;
     r.turnos.forEach(function (x) {
@@ -227,10 +228,10 @@
     if (r.error) cuerpo.appendChild(h('div.sintesis', h('div.error-txt', r.error)));
 
     if (r.estado === 'cerrada') {
-      App.add(pie, h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' } },
+      App.add(pie, h('div.acciones',
         r.salidaRuta && App.nativo.hay ? h('button.btn', { onclick: function () { App.nativo.abrir(r.salidaRuta); } }, App.icono('abrir'), 'Abrir archivo de salida') : null,
         r.acta && (App.nativo.hay || App.esMarkdown(r.acta)) ? h('button.btn', { onclick: function () { if (App.esMarkdown(r.acta)) App.abrirMarkdownOficina(r.acta); else App.nativo.abrir(r.actaRuta); } }, App.icono('abrir'), 'Ver acta') : null,
-        h('button.btn.primario', { onclick: function () { App.cerrarDerecho(); nueva(); } }, 'Nueva reunión')));
+        h('button.btn.primario', { onclick: function () { nueva(); } }, 'Llamar a otra reunión')));
     } else {
       /* chat: lo que escribís lo toman los turnos que siguen; si no queda ninguna ronda, arranca (o se suma) una más */
       /* se repinta todo con cada turno nuevo: si estabas escribiendo, el foco y el cursor vuelven en el acto

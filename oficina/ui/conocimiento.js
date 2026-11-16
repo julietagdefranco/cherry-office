@@ -268,14 +268,14 @@
           h('span.con-meta', cuenta[a.id] ? cuenta[a.id] + (cuenta[a.id] === 1 ? ' respuesta guardada' : ' respuestas guardadas') : ''),
           h('button.btn.chico.fantasma', { onclick: function () { hj.cerrar(); App.Agente.abrir(a.id, 'perfil'); } }, App.icono('lapiz'), 'Editar')),
           temas.length ? h('div.con-temas', temas.map(function (t) { return h('span.con-tema', t); }))
-            : h('div.ayuda', 'Sin temas marcados. Editalo en su perfil («Sabe de») o aceptá las sugerencias en «Para revisar».')));
+            : h('div.ayuda', 'Sin temas marcados. Editalo en su perfil («Sabe de») o aceptá las sugerencias en «Sugerencias».')));
       });
     }).catch(function (e) { App.vaciar(tabla).appendChild(vacio(e.message)); });
   }
 
   function abrir(pestanaInicial) {
     if (App.Agente && App.Agente.alCerrar) App.Agente.alCerrar();
-    var hj = App.hojaEnPanel({ titulo: 'Conocimiento', sinPie: true }, 'conocimiento');
+    var hj = App.hojaEnPanel({ titulo: 'Conocimiento', icono: 'bombilla', sinPie: true }, 'conocimiento');
     var pestana = pestanaInicial || 'buscar';
     var estado = {};
     var tabs = h('div.pestanas'), cuerpo = h('div.con-cuerpo');
@@ -290,7 +290,7 @@
     }
     function pintar() {
       App.vaciar(tabs);
-      [['buscar', 'Buscar'], ['preguntas', 'Preguntas frecuentes'], ['revisar', 'Para revisar'], ['quien', 'Quién sabe qué']].forEach(function (p) {
+      [['buscar', 'Buscar'], ['preguntas', 'Preguntas frecuentes'], ['revisar', 'Sugerencias'], ['quien', 'Quién sabe qué']].forEach(function (p) {
         tabs.appendChild(h('button.pestana' + (pestana === p[0] ? '.activa' : ''), { 'data-p': p[0], onclick: function () { pestana = p[0]; pintar(); } },
           p[1], p[0] === 'revisar' ? h('span.insignia.oculto', { style: { marginLeft: '6px' } }) : null));
       });

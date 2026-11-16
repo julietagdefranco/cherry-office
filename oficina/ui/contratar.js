@@ -144,7 +144,7 @@
   App.Contratar = {
     abrir: function (op) {
       op = op || {};
-      if (!App.E.oficina.departamentos.length) { App.aviso('Primero creá un departamento.', true); App.Ajustes.abrir('departamentos'); return; }
+      if (!App.E.oficina.departamentos.length) { App.aviso('Primero creá un departamento.', true); App.Nav.ir('#/equipo/departamentos'); return; }
       var hj = App.hoja({ titulo: 'Contratar', ancho: 620 });
       var desc = h('textarea.campo', { rows: 5, autofocus: true, maxlength: 4000, placeholder: 'Ej.: alguien que mire las ventas de cada semana, me diga qué productos se mueven y arme un resumen corto para el lunes.' });
       var dep = h('select.campo', App.E.oficina.departamentos.map(function (x) { return h('option', { value: x.id, selected: x.id === op.departamento }, x.nombre); }));

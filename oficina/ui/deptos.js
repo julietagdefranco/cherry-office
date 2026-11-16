@@ -103,7 +103,7 @@
         App.preguntar('Cambiar nombre', 'Nombre del departamento', d.nombre).then(function (v) { if (v && v !== d.nombre) guardar(d.id, { nombre: v }); });
       } },
       { texto: 'Cambiar color…', icono: 'chispa', accion: function () { App.elegirColor(ancla, d.color, function (c) { guardar(d.id, { color: c }); }); } },
-      { texto: 'Misión y más…', icono: 'capas', accion: function () { App.Ajustes.abrir('departamentos'); } },
+      { texto: 'Misión y más…', icono: 'capas', accion: function () { App.Nav.ir('#/equipo/departamentos'); } },
       '-',
       { texto: 'Borrar departamento…', icono: 'papelera', accion: function () { App.Deptos.borrar(d); } }
     ]);

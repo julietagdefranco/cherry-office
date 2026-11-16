@@ -33,16 +33,25 @@ App.Paleta = (function () {
       hacer: function () { App.Oficina3D.enfocarLugar('reunion'); App.Reunion.abrir(); } });
     out.push({ tipo: 'Sala', icono: 'libro', txt: 'Biblioteca', buscar: 'biblioteca archivos documentos',
       hacer: function () { App.Oficina3D.enfocarLugar('biblioteca'); App.Biblioteca.abrir(); } });
-    out.push({ tipo: 'Sala', icono: 'bandeja', txt: 'Tu bandeja', sub: App.Entregables && App.Entregables.sinRevisar() ? App.Entregables.sinRevisar() + ' sin revisar' : '',
+    out.push({ tipo: 'Bandeja', icono: 'bandeja', txt: 'Para revisar', sub: App.Entregables && App.Entregables.sinRevisar() ? App.Entregables.sinRevisar() + ' sin revisar' : '',
       buscar: 'bandeja entregables entregas revisar despacho direccion',
-      hacer: function () { App.Oficina3D.enfocarLugar('entregables'); App.Entregables.abrir(); } });
-    out.push({ tipo: 'Vos', icono: 'personas', txt: 'Quién dirige', sub: App.Yo.nombre(), buscar: 'yo perfil quien dirige mi nombre dueño minifig',
+      hacer: function () { App.Nav.ir('#/bandeja/revisar'); } });
+    out.push({ tipo: 'Bandeja', icono: 'escudo', txt: 'Te piden permiso', sub: App.Permisos && App.Permisos.cuantos() ? App.Permisos.cuantos() + ' pendientes' : '',
+      buscar: 'permisos pedidos pendientes bandeja', hacer: function () { App.Nav.ir('#/bandeja/permisos'); } });
+    out.push({ tipo: 'Vos', icono: 'personas', txt: 'Tu perfil', sub: App.Yo.nombre(), buscar: 'yo perfil quien dirige mi nombre dueño minifig',
       hacer: function () { App.Yo.abrir(); } });
-    o.departamentos.forEach(function (d) {
-      out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Ajustes.abrir('departamentos'); } });
+    o.agentes.forEach(function (a) {
+      out.push({ tipo: 'Ficha', icono: 'lapiz', txt: 'Ficha de ' + a.nombre, sub: 'Perfil, permisos, notas, tareas y archivos', buscar: 'editar ficha perfil ' + a.nombre,
+        hacer: function () { App.Nav.ir('#/equipo/' + encodeURIComponent(a.id)); } });
     });
-    [['Parte del día', 'parte', function () { App.Parte.abrir(); }],
+    o.departamentos.forEach(function (d) {
+      out.push({ tipo: 'Departamento', icono: 'capas', txt: d.nombre, buscar: 'departamento ' + d.nombre, hacer: function () { App.Nav.ir('#/equipo/departamentos'); } });
+    });
+    [['Hoy: lo que te espera', 'parte', function () { App.Nav.ir('#/bandeja/hoy'); }],
      ['Tareas programadas y pendientes', 'reloj', function () { App.Tareas.abrir(); }],
+     ['Carpeta de la oficina', 'carpeta', function () { App.Nav.ir('#/archivos/carpeta'); }],
+     ['Conocimiento de la oficina', 'bombilla', function () { App.Nav.ir('#/archivos/conocimiento'); }],
+     ['Editar los flujos de la oficina', 'flujo', function () { App.Flujos.abrir(); App.Flujos.definiciones(); }],
      ['Flujos', 'flujo', function () { App.Flujos.abrir(); }],
      ['Nueva corrida', 'flujo', function () { App.Flujos.abrir(); App.Flujos.nueva(); }],
      ['Armar con el Creador', 'chispa', function () { App.Creador.abrir(); }],
@@ -54,7 +63,7 @@ App.Paleta = (function () {
      ['Permisos de los agentes', 'escudo', function () { App.Ajustes.abrir('permisos'); }],
      ['Contratar un agente', 'mas', function () { App.Contratar.abrir(); }],
      ['Llamar a reunión', 'reunion', function () { App.Reunion.nueva(); }],
-     ['Departamentos', 'capas', function () { App.Ajustes.abrir('departamentos'); }],
+     ['Departamentos', 'capas', function () { App.Nav.ir('#/equipo/departamentos'); }],
      ['Siguiente aviso pendiente', 'chispa', function () { if (App.Avisos) App.Avisos.siguiente(); }],
      ['Revisar la próxima entrega', 'chispa', function () { if (!App.Entregables.siguiente()) App.aviso('No tenés entregas sin revisar.'); }],
      ['Exportar oficina', 'subir', function () { App.exportarOficina(); }],
@@ -134,7 +143,7 @@ App.Paleta = (function () {
       if (act) t += ' · ' + (VERBO[act.estado] || act.estado) + (act.objetivo ? ' ' + act.objetivo : '');
     } else if (hov.tipo === 'reunion') t = 'Clic: abrir la sala de reuniones';
     else if (hov.tipo === 'biblioteca') t = 'Clic: abrir la biblioteca';
-    else if (hov.tipo === 'direccion') t = 'Clic: abrir tu bandeja de entregables';
+    else if (hov.tipo === 'direccion') t = 'Clic: lo que te espera para revisar';
     else if (hov.tipo === 'yo') t = 'Sos vos' + (App.Yo.nombre() ? ', ' + App.Yo.nombre() : '') + ' · clic: cambiar tu nombre o tu minifig';
     else if (hov.texto) t = hov.texto;   // bandeja de entregables: el 3D ya arma el texto
     el.textContent = t || BASE;

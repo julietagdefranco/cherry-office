@@ -139,6 +139,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     escudo: 'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6zM9 12l2 2 4-4',
     parte: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
     lapiz: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
+    ok: 'M5 12.5l4.5 4.5L19 7',
     bandeja: 'M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z',
     clip: 'M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7.1'
   };
@@ -203,12 +204,54 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
   App.hojaAbierta = function () { return pila.length > 0; };
   /* Lo mismo que una hoja ({cuerpo, pie, cab, cerrar, titulo, el}) pero pintado en el panel principal, con su modo
      (p. ej. 'biblioteca'): para las pantallas que antes eran ventanas y ahora son una sección. */
+  /* Cabecera única de los paneles: [volver] icono · título y bajada · acciones · [×].
+     `volver`: {texto, accion} (siempre a la izquierda, con flecha). La × solo aparece con el panel flotando sobre la maqueta:
+     en una sección el panel es la pantalla y se sale por la lista o el riel. `cerrar` reemplaza a App.cerrarDerecho. */
+  App.cabPanel = function (op) {
+    var ico = op.icono ? (typeof op.icono === 'string' ? h('div.der-ico', App.icono(op.icono)) : op.icono) : null;
+    return h('div.der-cab' + (op.clase ? '.' + op.clase : ''),
+      op.volver ? h('button.btn.fantasma.chico.volver', { title: op.volver.titulo || op.volver.texto, onclick: op.volver.accion }, App.icono('atras'), op.volver.texto) : null,
+      ico,
+      h('div.der-tit', h('h2', { title: op.titulo }, op.titulo || ''), op.sub ? h('div.sub', op.sub) : null),
+      op.acciones && op.acciones.length ? h('div.der-acciones', op.acciones) : null,
+      h('button.btn.fantasma.icono.cerrar-panel', { title: 'Cerrar', onclick: op.cerrar || App.cerrarDerecho }, App.icono('cerrar')));
+  };
+  /* Accesibilidad sin tocar cada módulo: las filas que se tocan (divs con onclick) se pueden enfocar con Tab y abrir con
+     Enter o Espacio, y los botones que son solo un ícono toman su `title` como nombre para los lectores de pantalla. */
+  var CLICABLES = '.lista-item, .persona, .carpeta, .entrega-fila, .corrida-fila, .parte-fila, .archivo, .agente-cara';
+  function accesible(raiz) {
+    if (!raiz.querySelectorAll) return;
+    var els = [raiz].concat([].slice.call(raiz.querySelectorAll(CLICABLES + ', button[title]')));
+    els.forEach(function (el) {
+      if (!el.matches) return;
+      if (el.matches('button[title]') && !el.getAttribute('aria-label') && !el.textContent.trim()) el.setAttribute('aria-label', el.title);
+      else if (el.matches(CLICABLES) && el.tagName !== 'BUTTON' && !el.hasAttribute('tabindex')) { el.setAttribute('tabindex', '0'); el.setAttribute('role', 'button'); }
+    });
+  }
+  if (window.MutationObserver) {
+    new MutationObserver(function (ms) { ms.forEach(function (m) { m.addedNodes.forEach(function (n) { if (n.nodeType === 1) accesible(n); }); }); })
+      .observe(document.documentElement, { childList: true, subtree: true });
+  }
+  document.addEventListener('keydown', function (e) {
+    if ((e.key !== 'Enter' && e.key !== ' ') || !e.target.matches || !e.target.matches(CLICABLES) || e.target.tagName === 'BUTTON') return;
+    e.preventDefault(); e.target.click();
+  });
+
+  /* Estado vacío con intención: qué es este lugar y qué podés hacer (un botón o varios) */
+  App.vacio = function (icono, titulo, texto, botones) {
+    return h('div.nav-vacio', icono ? App.icono(icono) : null, titulo ? h('b', titulo) : null, texto ? h('p', texto) : null,
+      botones ? h('div.acciones', { style: { justifyContent: 'center' } }, botones) : null);
+  };
+  /* Barra de acciones (pies de panel y de hoja): `izq` a la izquierda, el resto a la derecha; la última es la principal. */
+  App.acciones = function (izq, der) {
+    return h('div.acciones', izq && izq.length ? h('div.izq', izq) : null, der || null);
+  };
+
   App.hojaEnPanel = function (op, modo) {
     if (!App.dom || !App.dom.derecho) return App.hoja(op);
     var der = App.dom.derecho;
     var cuerpo = h('div.der-cuerpo.hoja-panel-cuerpo'), pie = h('div.der-pie');
-    var cab = h('div.der-cab.hoja-panel-cab', h('div.der-tit', h('h2', op.titulo || '')),
-      h('button.btn.fantasma.icono', { title: 'Cerrar', onclick: function () { obj.cerrar(); } }, App.icono('cerrar')));
+    var cab = App.cabPanel({ clase: 'hoja-panel-cab', icono: op.icono, titulo: op.titulo, sub: op.sub, acciones: op.acciones, cerrar: function () { obj.cerrar(); } });
     var el = h('div.hoja-panel', cab, cuerpo, op.sinPie ? null : pie);
     App.add(App.vaciar(der), el);
     var obj = { el: el, cuerpo: cuerpo, pie: pie, cab: cab, enPanel: true,
