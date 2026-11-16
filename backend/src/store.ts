@@ -154,6 +154,25 @@ export class Store {
     return f ? txt(f.id) : undefined
   }
 
+  /** Sesiones de la oficina que tienen mensajes, la más reciente primero (por el último mensaje). Para la lista de
+   *  charlas: el primer mensaje del usuario hace de título y el último de vista previa. `agente` filtra. */
+  sesiones(oficina: string, agente?: string, limite = 300): ResumenSesion[] {
+    const p: (string | number)[] = [oficina]
+    if (agente !== undefined) p.push(agente)
+    p.push(limite)
+    return this.db.query(`
+      SELECT s.id, s.agente,
+        (SELECT texto FROM mensajes m WHERE m.sid=s.id AND m.rol='u' ORDER BY m.id LIMIT 1) AS primero,
+        (SELECT texto FROM mensajes m WHERE m.sid=s.id ORDER BY m.id DESC LIMIT 1) AS ultimo,
+        (SELECT rol FROM mensajes m WHERE m.sid=s.id ORDER BY m.id DESC LIMIT 1) AS rol,
+        (SELECT MAX(ts) FROM mensajes m WHERE m.sid=s.id) AS ts,
+        (SELECT COUNT(*) FROM mensajes m WHERE m.sid=s.id) AS n
+      FROM sesiones s
+      WHERE s.oficina=? ${agente !== undefined ? 'AND s.agente=?' : ''} AND EXISTS (SELECT 1 FROM mensajes m WHERE m.sid=s.id)
+      ORDER BY ts DESC LIMIT ?`, p)
+      .map((f) => ({ sid: txt(f.id), agente: txt(f.agente), primero: txt(f.primero), ultimo: txt(f.ultimo), rol: txt(f.rol), ts: num(f.ts), n: num(f.n) }))
+  }
+
   // MARK: mensajes
 
   agregar(sid: string, rol: 'u' | 'a', texto: string, error = false) {
@@ -173,3 +192,4 @@ export class Store {
 }
 
 export type Mensaje = { r: string; t: string; e: boolean }
+export type ResumenSesion = { sid: string; agente: string; primero: string; ultimo: string; rol: string; ts: number; n: number }

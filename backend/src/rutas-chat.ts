@@ -122,6 +122,22 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     return [200, { msgs: lista(store.mensajes(sid)) }]
   }
 
+  /** `GET /api/sesiones?agent=`: las charlas guardadas de la oficina (todas o las de un agente), la más reciente
+   *  primero: `{sesiones:[{session, agente, titulo, ultimo, de:'u'|'a', ts, n}]}`. `titulo` es el primer mensaje del
+   *  usuario y `ultimo` el último mensaje, recortados. Los agentes que ya no están en la oficina no aparecen. */
+  function sesiones(q: Record<string, string>): Resp {
+    const act = oficinas.requerirActiva()
+    const agente = q.agent
+    if (agente !== undefined && !act.oficina.agentes.some((a) => a.id === agente)) return invalido
+    const ids = new Set(act.oficina.agentes.map((a) => a.id))
+    const recortar = (t: string, n: number) => { const s = t.replace(/\s+/g, ' ').trim(); return largo(s) > n ? Array.from(s).slice(0, n).join('') + '…' : s }
+    return [200, {
+      sesiones: store.sesiones(act.carpeta, agente).filter((s) => ids.has(s.agente)).map((s) => ({
+        session: s.sid, agente: s.agente, titulo: recortar(s.primero, 400), ultimo: recortar(s.ultimo, 400), de: s.rol, ts: s.ts, n: s.n,
+      })),
+    }]
+  }
+
   async function chat(body?: Buffer): Promise<Resp> {
     const act = oficinas.requerirActiva()
     if (!body) return invalido
@@ -287,6 +303,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const [, seccion, a2] = partes
     const n = partes.length
     if (seccion === 'historial' && n === 2) return method === 'GET' ? historial(query) : no405
+    if (seccion === 'sesiones' && n === 2) return method === 'GET' ? sesiones(query) : no405
     if (seccion === 'chat' && n === 2) return method === 'POST' ? chat(body) : no405
     if (seccion === 'chat' && n === 3 && a2 === 'vivo') return method === 'GET' ? vivo(query) : no405
     if (seccion === 'actividad' && n === 2) {

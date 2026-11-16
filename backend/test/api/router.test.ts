@@ -161,6 +161,37 @@ describe('Router', () => {
     }
   })
 
+  // MARK: /api/sesiones
+
+  test('sesiones: lista las charlas de la oficina, la más reciente primero, con título y último mensaje', async () => {
+    const sb = new Sandbox()
+    const b = await sb.backend()
+    expect((await llamar(b, 'GET', '/api/sesiones')).obj).toEqual({ sesiones: [] })
+    await chat(b, { message: 'primera   charla\ncon betty', session: U.a })
+    await chat(b, { agent: 'marce', message: 'hola marce', session: U.b })
+    await chat(b, { message: 'sigo en la primera', session: U.a })
+    const r = await llamar(b, 'GET', '/api/sesiones')
+    expect(r.status).toBe(200)
+    const ss = r.obj.sesiones as Obj[]
+    expect(ss.map((s) => s.session)).toEqual([U.a, U.b])
+    expect(ss[0]).toMatchObject({ agente: 'betty', titulo: 'primera charla con betty', ultimo: 'hola betty', de: 'a', n: 4 })
+    expect(typeof ss[0]!.ts).toBe('number')
+    expect(Object.keys(ss[0]!).sort()).toEqual(['agente', 'de', 'n', 'session', 'titulo', 'ts', 'ultimo'])
+  })
+
+  test('sesiones: ?agent= filtra; agente desconocido -> 400; títulos largos se recortan', async () => {
+    const sb = new Sandbox()
+    const b = await sb.backend()
+    await chat(b, { message: 'x'.repeat(500), session: U.a })
+    await chat(b, { agent: 'marce', message: 'hola', session: U.b })
+    const r = await llamar(b, 'GET', '/api/sesiones', { query: { agent: 'marce' } })
+    expect((r.obj.sesiones as Obj[]).map((s) => s.session)).toEqual([U.b])
+    const todas = (await llamar(b, 'GET', '/api/sesiones')).obj.sesiones as Obj[]
+    expect(todas.find((s) => s.session === U.a)!.titulo).toBe('x'.repeat(400) + '…')
+    expect((await llamar(b, 'GET', '/api/sesiones', { query: { agent: 'nadie' } })).status).toBe(400)
+    expect((await llamar(b, 'POST', '/api/sesiones')).status).toBe(405)
+  })
+
   // MARK: /api/chat
 
   test('chat: respuesta exacta {reply} y queda guardada', async () => {
