@@ -89,6 +89,13 @@ select.campo { padding-right: 26px; }
 .equipo { flex: 1; overflow-y: auto; padding: 4px 8px 12px; min-height: 0; }
 .grupo-tit { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; padding: 12px 8px 6px; }
 .grupo-tit .cuenta { margin-left: auto; font-weight: 500; color: var(--tenue); }
+.grupo-mas { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin: -4px -4px -4px 2px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--tenue); cursor: pointer; opacity: 0; }
+.grupo-tit:hover .grupo-mas, .grupo-mas:focus-visible { opacity: 1; }
+.grupo-mas:hover { background: var(--panel); color: var(--texto); }
+.grupo-mas svg { width: 16px; height: 16px; }
+.agregar-depto { width: 100%; border: 0; background: none; text-align: left; font: inherit; color: var(--tenue); margin-top: 8px; }
+.agregar-depto .retrato { display: flex; align-items: center; justify-content: center; background: none; border: 1px dashed var(--linea-fuerte); }
+.herramientas kbd { font: inherit; font-size: 11px; color: var(--tenue); margin-left: 2px; }
 .persona { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radio-chico); cursor: pointer; }
 .persona:hover { background: var(--panel); }
 .persona.activa { background: var(--panel); box-shadow: inset 0 0 0 1px var(--linea-fuerte); }
@@ -185,6 +192,28 @@ select.campo { padding-right: 26px; }
 .hoja-cuerpo { padding: 4px 18px 18px; overflow-y: auto; min-height: 0; flex: 1; }
 .hoja-pie { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--linea); }
 .hoja-pie .izq { margin-right: auto; }
+.hoja-ajustes .hoja-cuerpo { padding: 0; display: flex; overflow: hidden; border-top: 1px solid var(--linea); }
+.aj { display: grid; grid-template-columns: 220px minmax(0, 1fr); flex: 1; min-height: 0; }
+.aj-nav { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--linea); background: var(--fondo); overflow-y: auto; }
+.aj-grupo { font-size: 11px; font-weight: 600; color: var(--tenue); text-transform: uppercase; letter-spacing: .04em; padding: 10px 10px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aj-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 34px; padding: 0 10px; border: 0; border-radius: var(--radio-chico); background: none; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.aj-item:hover { background: var(--panel-2); }
+.aj-item.sel { background: var(--panel); box-shadow: inset 0 0 0 1px var(--linea); font-weight: 500; }
+.aj-item svg { width: 16px; height: 16px; flex: none; color: var(--suave); }
+.aj-item > span:first-of-type { flex: 1; min-width: 0; }
+.aj-item small { color: var(--tenue); font-size: 11px; white-space: nowrap; }
+.aj-item.aj-tenue { color: var(--suave); }
+.aj-flecha { display: none; }
+.aj-sec { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.aj-cab { display: flex; align-items: center; gap: 8px; padding: 14px 20px 6px; }
+.aj-tit { font-size: 15px; margin: 0; }
+.aj-atras { display: none; }
+.aj-cuerpo { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 20px 20px; }
+.aj-pie { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--linea); }
+.aj-pie .izq { margin-right: auto; }
+.aj-fila { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--linea); }
+.aj-fila:last-child { border-bottom: 0; }
+.aj-fila .btn { margin-left: auto; flex: none; }
 
 /* avisos */
 .tostadas { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 80; display: grid; gap: 8px; justify-items: center; pointer-events: none; }
@@ -201,6 +230,11 @@ select.campo { padding-right: 26px; }
 .opcion { display: flex; gap: 12px; align-items: center; padding: 14px; border: 1px solid var(--linea); border-radius: var(--radio); background: var(--panel); cursor: pointer; margin-bottom: 10px; text-align: left; width: 100%; }
 .opcion:hover { border-color: var(--linea-fuerte); box-shadow: var(--sombra); }
 .opcion svg { width: 20px; height: 20px; flex: none; color: var(--suave); }
+.modo-permiso.elegida { border-color: var(--acento, var(--texto)); box-shadow: 0 0 0 1px var(--acento, var(--texto)) inset; }
+.modo-nota { margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; }
+.modo-aviso { margin: 6px 0 12px; padding: 12px 14px; border-radius: var(--radio); background: var(--fondo); font-size: 13px; }
+.modo-aviso ul { margin: 6px 0 0; padding-left: 18px; }
+.modo-aviso li { margin: 3px 0; color: var(--suave); }
 .opcion b { display: block; font-weight: 600; }
 .opcion span { color: var(--suave); font-size: 12px; }
 .recientes { margin-top: 18px; }
@@ -378,12 +412,14 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .app.lateral-abierta .velo-lateral { display: block; animation: aparecer .15s ease; }
   .boton-menu { display: inline-flex; position: absolute; top: 12px; left: 12px; z-index: 5; box-shadow: var(--sombra); }
   .persona { padding: 8px; }
+  .grupo-mas { opacity: 1; }
   .nav-item { height: 40px; }
 
   /* herramientas: solo íconos */
   .herramientas { top: 12px; right: 12px; gap: 6px; }
   .herramientas .btn { width: 36px; padding: 0; }
   .herramientas .btn-txt { display: none; }
+  .herramientas .btn svg ~ svg { display: none; }
   .herramientas .btn svg { width: 17px; height: 17px; }
   .pista { display: none; }
   .aviso-reunion { top: 58px; max-width: calc(100% - 24px); }
@@ -408,6 +444,19 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .hoja-cuerpo { padding: 4px 16px 16px; }
   .hoja-pie { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
   .hoja-doc .hoja-cuerpo { padding: 6px 16px 20px; }
+  /* Ajustes en el celular: la lista ocupa todo; al entrar a una sección, la sección ocupa todo con «‹ Ajustes» */
+  .aj { grid-template-columns: minmax(0, 1fr); }
+  .aj-nav { border-right: 0; background: none; }
+  .aj-item { min-height: 44px; }
+  .aj-item.sel { background: none; box-shadow: none; font-weight: inherit; }
+  .aj-flecha { display: inline-flex; }
+  .aj-sec { display: none; }
+  .aj.aj-dentro .aj-nav { display: none; }
+  .aj.aj-dentro .aj-sec { display: flex; }
+  .aj-atras { display: inline-flex; margin-left: -8px; }
+  .aj-cab { flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 16px 4px; }
+  .aj-cuerpo { padding: 6px 16px 16px; }
+  .aj-pie { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
   .cmdk-velo { padding: 12px; align-items: flex-start; }
   .tostadas { bottom: calc(12px + env(safe-area-inset-bottom)); width: calc(100% - 24px); }
   .tostada { max-width: 100%; }

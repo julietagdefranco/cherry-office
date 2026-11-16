@@ -44,14 +44,15 @@ App.Ajustes = (function () {
   }
 
   /* ---------------- reglas ---------------- */
-  function reglas() {
-    var hj = App.hoja({ titulo: 'Reglas de la oficina', ancho: 580 });
+  /* `crear` (opcional) reemplaza a App.hoja: la ventana de Ajustes lo usa para dibujar la sección adentro */
+  function reglas(crear) {
+    var hj = (crear || App.hoja)({ titulo: 'Reglas de la oficina', ancho: 580 });
     var lista = h('div'), err = h('div.error-txt');
     var filas = [];     // [{id, origen, txt}]
     var guardar = h('button.btn.primario', { disabled: true, onclick: enviar }, 'Guardar');
     var mas = h('button.btn.izq', { onclick: function () { agregar({ texto: '' }, true); } }, App.icono('mas'), 'Nueva regla');
     App.add(hj.cuerpo, h('div.ayuda', { style: { marginTop: 0, marginBottom: '12px' } }, 'Valen para todos los agentes: se suman a sus instrucciones.'), lista, err);
-    App.add(hj.pie, mas, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), guardar);
+    App.add(hj.pie, mas, hj.enVentana ? null : h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), guardar);
     App.add(lista, h('div.vacio', h('span.giro')));
 
     function vacia() {
@@ -93,16 +94,16 @@ App.Ajustes = (function () {
   }
 
   /* ---------------- conectores ---------------- */
-  function conectores() {
+  function conectores(crear) {
     var vivo = true, reloj = null;
-    var hj = App.hoja({ titulo: 'Conectores', ancho: 760, alCerrar: function () { vivo = false; clearTimeout(reloj); } });
+    var hj = (crear || App.hoja)({ titulo: 'Conectores', ancho: 760, alCerrar: function () { vivo = false; clearTimeout(reloj); } });
     var cont = h('div'), err = h('div.error-txt');
     var datos = null;
     var cambios = {};      // agenteId -> { servidor -> { leer: bool, actuar: bool } } solo lo tocado
     var actualizar = h('button.btn.izq', { onclick: refrescar }, App.icono('recargar'), 'Actualizar');
     var guardar = h('button.btn.primario', { disabled: true, onclick: enviar }, 'Guardar');
     App.add(hj.cuerpo, cont, err);
-    App.add(hj.pie, actualizar, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), guardar);
+    App.add(hj.pie, actualizar, hj.enVentana ? null : h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), guardar);
     App.add(cont, h('div.vacio', h('span.giro')));
 
     function cargar() {
@@ -204,5 +205,108 @@ App.Ajustes = (function () {
     cargar();
   }
 
-  return { reglas: reglas, conectores: conectores, nuevosConectores: nuevosConectores, delTipo: delTipo };
+  /* ---------------- ventana de Ajustes ----------------
+     Una sola hoja con las secciones a la izquierda (en el celular, la lista primero y al tocar se entra). Cada sección es
+     la misma función que antes abría su propia hoja: recibe `crear` en lugar de App.hoja y dibuja adentro. Ahí, `cerrar`
+     vuelve a dibujar la sección (después de guardar se ve lo guardado) y `enVentana` le avisa que no ponga «Cancelar». */
+  var atajo = /Mac/.test(navigator.platform || navigator.userAgent) ? '⌘,' : 'Ctrl+,';
+
+  function modoPermisos() {
+    var m = App.E.estado && App.E.estado.modo_permisos;
+    return m === 'auto' ? 'Automático' : m === 'preguntar' ? 'Preguntarme siempre' : '';
+  }
+  var SECCIONES = [
+    { id: 'general', grupo: 'oficina', texto: 'General', icono: 'edificio', pintar: function (c) { App.editarOficina(c); } },
+    { id: 'departamentos', grupo: 'oficina', texto: 'Departamentos', icono: 'capas', pintar: function (c) { App.Deptos.abrir(c); } },
+    { id: 'reglas', grupo: 'oficina', texto: 'Reglas', icono: 'regla', pintar: function (c) { reglas(c); } },
+    { id: 'conectores', grupo: 'oficina', texto: 'Conectores', icono: 'enchufe', pintar: function (c) { conectores(c); } },
+    { id: 'avanzado', grupo: 'oficina', texto: 'Avanzado', icono: 'deslizadores', pintar: avanzado },
+    /* la elige la persona la primera vez que abre la app (permisos.js); acá se ve y se cambia */
+    { id: 'permisos', grupo: 'app', texto: 'Permisos de los agentes', icono: 'escudo', nota: modoPermisos,
+      visible: function () { return !!(App.Permisos && (App.Permisos.pintarModo || App.Permisos.abrirModo)); }, pintar: permisos },
+  ];
+
+  function avanzado(crear) {
+    var hj = crear({ titulo: 'Avanzado' });
+    function fila(titulo, bajada, boton, accion, peligro) {
+      return h('div.aj-fila', h('div', { style: { minWidth: 0 } }, h('div', { style: peligro ? { color: 'var(--peligro)' } : null }, titulo), h('div.ayuda', { style: { margin: '2px 0 0' } }, bajada)),
+        h('button.btn.chico', { style: peligro ? { color: 'var(--peligro)' } : null, onclick: accion }, boton));
+    }
+    App.add(hj.cuerpo,
+      fila('Exportar oficina', 'Un archivo .zip para compartirla o pasarla a otra compu.', 'Exportar…', function () { App.exportarOficina(); }),
+      fila('Borrar oficina', App.nativo.hay ? 'Se borran sus conversaciones y tareas; la carpeta va a la papelera.' : 'Se borran sus conversaciones y tareas.', 'Borrar…', function () { App.borrarOficina(); }, true));
+  }
+
+  function permisos(crear) {
+    if (App.Permisos.pintarModo) { App.Permisos.pintarModo(crear); return; }
+    var hj = crear({ titulo: 'Permisos de los agentes' });
+    App.add(hj.cuerpo,
+      h('div.ayuda', { style: { marginTop: 0 } }, 'Vale para todas tus oficinas. Los agentes corren comandos y escriben archivos en tu compu: elegí cuánto querés que te pregunten.'),
+      h('div.aj-fila', h('div', h('div', 'Modo actual'), h('div.ayuda', { style: { margin: '2px 0 0' } }, modoPermisos() || 'Sin elegir')),
+        h('button.btn.chico', { onclick: function () { App.Permisos.abrirModo(function () { hj.cerrar(); }); } }, 'Cambiar…')));
+  }
+
+  function abrir(id) {
+    if (!App.E.oficina) return;
+    var actual = null, idActual = null;
+    var hj = App.hoja({ titulo: 'Ajustes', ancho: 860, alto: '620px', sinPie: true, alCerrar: function () { soltar(); } });
+    hj.el.classList.add('hoja-ajustes');
+    var nav = h('nav.aj-nav');
+    var tit = h('h3.aj-tit'), cuerpo = h('div.aj-cuerpo'), pie = h('div.aj-pie');
+    var atras = h('button.btn.fantasma.chico.aj-atras', { onclick: function () { caja.classList.remove('aj-dentro'); } }, App.icono('atras'), 'Ajustes');
+    var sec = h('section.aj-sec', h('div.aj-cab', atras, tit), cuerpo, pie);
+    var caja = h('div.aj', nav, sec);
+    hj.cuerpo.appendChild(caja);
+
+    var visibles = SECCIONES.filter(function (s) { return !s.visible || s.visible(); });
+    function grupo(g, titulo) {
+      var ss = visibles.filter(function (s) { return s.grupo === g; });
+      if (!ss.length) return;
+      nav.appendChild(h('div.aj-grupo', titulo));
+      ss.forEach(function (s) {
+        var nota = s.nota ? s.nota() : '';
+        nav.appendChild(h('button.aj-item', { 'data-id': s.id, onclick: function () { ir(s.id); } }, App.icono(s.icono), h('span', s.texto),
+          s.nota ? h('small', nota) : null, h('span.aj-flecha', App.icono('flecha'))));
+      });
+    }
+    grupo('oficina', App.E.oficina.nombre);
+    grupo('app', 'Toda la app');
+    if (App.nativo.hay) App.add(nav, h('div', { style: { flex: 1 } }), h('button.aj-item.aj-tenue', { onclick: App.nativo.acerca }, App.icono('chispa'), h('span', 'Acerca de')));
+
+    function soltar() { if (actual && actual.alCerrar) actual.alCerrar(); actual = null; }
+    /* reemplazo de App.hoja para las secciones */
+    function crear(op) {
+      soltar();
+      App.vaciar(cuerpo); App.vaciar(pie); cuerpo.scrollTop = 0;
+      tit.textContent = op.titulo || '';
+      var obj = { enVentana: true, el: sec, cuerpo: cuerpo, pie: pie, alCerrar: op.alCerrar,
+        titulo: function (t) { tit.textContent = t; },
+        cerrar: function () { if (actual === obj) ir(idActual); } };
+      actual = obj;
+      return obj;
+    }
+    function ir(sid) {
+      var s = visibles.filter(function (x) { return x.id === sid; })[0] || visibles[0];
+      idActual = s.id;
+      nav.querySelectorAll('.aj-item[data-id]').forEach(function (b) {
+        b.classList.toggle('sel', b.getAttribute('data-id') === s.id);
+        /* la nota (p. ej. el modo de permisos) puede haber cambiado desde otra hoja */
+        var x = visibles.filter(function (y) { return y.id === b.getAttribute('data-id'); })[0], small = b.querySelector('small');
+        if (x && x.nota && small) small.textContent = x.nota();
+      });
+      caja.classList.add('aj-dentro');
+      s.pintar(crear);
+      pie.classList.toggle('oculto', !pie.children.length);
+    }
+    /* en el celular, sin sección pedida, se arranca por la lista */
+    var angosto = window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+    ir(id || 'general');
+    if (angosto && !id) caja.classList.remove('aj-dentro');
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === ',' && App.E.oficina && !(App.hojaAbierta && App.hojaAbierta())) { e.preventDefault(); abrir(); }
+  });
+
+  return { reglas: reglas, conectores: conectores, nuevosConectores: nuevosConectores, delTipo: delTipo, abrir: abrir, atajo: atajo };
 })();

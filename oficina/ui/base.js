@@ -104,6 +104,10 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
   /* íconos de trazo fino (SVG inline) */
   var ICONOS = {
     mas: 'M12 5v14M5 12h14',
+    puntos: 'M6 12h.01M12 12h.01M18 12h.01',
+    abajo: 'M7 10l5 5 5-5',
+    deslizadores: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+    ajustes: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
     cerrar: 'M6 6l12 12M18 6L6 18',
     menu: 'M4 7h16M4 12h16M4 17h16',
     personas: 'M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M20 19v-1.5a3.5 3.5 0 0 0-2.5-3.35M15.5 4.2a3 3 0 0 1 0 5.6',
@@ -281,12 +285,21 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
      código, separadores, negrita, cursiva, tachado y enlaces. */
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function enlace(u, texto) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + texto + '</a>'; }
+  /* `![alt](src)`: imágenes de la web, `data:image/…` o rutas de archivos (de la oficina: las carga chat-rico.js).
+     Cualquier otro esquema (javascript:, file:…) no es imagen y queda como texto. */
+  function imagen(u, alt) {
+    var a = ' alt="' + esc(alt) + '"';
+    if (/^https?:\/\//i.test(u) || /^data:image\/[\w.+-]+[;,]/i.test(u)) return '<img class="md-img" src="' + esc(u) + '"' + a + ' loading="lazy">';
+    if (/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^[a-z]:[\\/]/i.test(u)) return null;
+    return '<img class="md-img" data-ruta="' + esc(u) + '"' + a + '>';
+  }
   function enLinea(s) {
     var guardado = [];
     function guardar(html) { guardado.push(html); return '\u0000' + (guardado.length - 1) + '\u0000'; }
     s = String(s).replace(/\u0000/g, '')
       .replace(/`([^`\n]{1,500})`/g, function (_, c) { return guardar('<code>' + esc(c) + '</code>'); })
-      .replace(/!?\[([^\]\n]{1,300})\]\(\s*<?((?:https?:\/\/|mailto:)[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/g, function (_, t, u) { return guardar('<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">') + t + guardar('</a>'); })
+      .replace(/!\[([^\]\n]{0,300})\]\(\s*<?([^\s)>]{1,4000})>?(?:\s+"[^"\n]*")?\s*\)/g, function (m, t, u) { var img = imagen(u, t); return img ? guardar(img) : m; })
+      .replace(/\[([^\]\n]{1,300})\]\(\s*<?((?:https?:\/\/|mailto:)[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/g, function (_, t, u) { return guardar('<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">') + t + guardar('</a>'); })
       .replace(/<((?:https?:\/\/|mailto:)[^\s<>]+)>/g, function (_, u) { return guardar(enlace(u, esc(u))); })
       .replace(/(^|[\s(])(https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"*_])/g, function (_, a, u) { return a + guardar(enlace(u, esc(u))); });
     return esc(s)
@@ -327,11 +340,11 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     }
     for (var i = 0; i < lineas.length; i++) {
       var l = lineas[i], m;
-      if ((m = /^\s*(```+|~~~+)/.exec(l))) {
+      if ((m = /^\s*(```+|~~~+)\s*([\w+#.-]{0,30})/.exec(l))) {
         cerrarTodo();
         var cerca = m[1], cod = [];
         for (i++; i < lineas.length && lineas[i].trim().indexOf(cerca) !== 0; i++) cod.push(lineas[i]);
-        out.push('<pre><code>' + esc(cod.join('\n')) + '</code></pre>');
+        out.push('<div class="md-codigo" data-lang="' + esc(m[2].toLowerCase()) + '"><pre><code>' + esc(cod.join('\n')) + '</code></pre></div>');
         continue;
       }
       if (!l.trim()) { cerrarP(); if (listas.length && !(i + 1 < lineas.length && (RE_ITEM.test(lineas[i + 1]) || /^\s{2,}\S/.test(lineas[i + 1])))) cerrarL(); continue; }
@@ -364,7 +377,11 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     cerrarTodo();
     return out.join('');
   };
-  App.htmlSeguro = function (el, html) { el.innerHTML = html; el.classList.add('md'); return el; };   // solo con salida de App.markdown
+  App.htmlSeguro = function (el, html) {   // solo con salida de App.markdown
+    el.innerHTML = html; el.classList.add('md');
+    if (App.ChatRico) App.ChatRico.hidratar(el);   // imágenes de la oficina, botones de código y artefactos
+    return el;
+  };
 
   /* visor de documentos dentro de la app: markdown formateado (con opción de ver el texto) o texto plano */
   App.esMarkdown = function (nombre) { return /\.(md|markdown|mdown|mkd)$/i.test(nombre || ''); };

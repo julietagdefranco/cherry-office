@@ -10,6 +10,8 @@
   function arrancar() {
     api.get('/api/estado').then(function (st) {
       E.estado = st;
+      // primera vez que se abre la app: elegir cómo piden permiso los agentes (se ve encima de lo que se monte)
+      if (st.modo_permisos === null && !arrancar.modoPreguntado) { arrancar.modoPreguntado = true; App.Permisos.elegirModo(null, true); }
       if (st.oficina) return api.get('/api/oficina').then(function (r) { montar(r.carpeta, r.oficina); });
       inicio();
     }).catch(function (e) {
@@ -234,6 +236,9 @@
   App.armarCharlando = armarCharlando;
   App.opcionesOficina = opcionesOficina;
   App.abrirExistente = abrirExistente;
+  App.editarOficina = editarOficina;
+  App.borrarOficina = function () { borrarOficina(); };
+  App.otraOficina = function () { otraOficina(); };
 
   /* ---------------- selector de color ---------------- */
   function elegirColor(ancla, actual, alElegir) {
@@ -245,6 +250,18 @@
   App.elegirColor = elegirColor;
 
   /* ---------------- estructura principal ---------------- */
+  var atajoBuscar = /Mac/.test(navigator.platform || navigator.userAgent) ? '⌘K' : 'Ctrl+K';
+
+  /* «+ Nuevo»: todo lo que agrega algo a la oficina, en un solo botón */
+  function menuNuevo(ancla) {
+    App.menu(ancla, [
+      { texto: 'Contratar un agente…', icono: 'personas', accion: function () { App.Contratar.abrir(); } },
+      { texto: 'Armar con el Creador…', icono: 'chispa', accion: function () { App.Creador.abrir(); } },
+      { texto: 'Nueva corrida de flujo…', icono: 'flujo', accion: function () { App.Flujos.abrir(); App.Flujos.nueva(); } },
+      { texto: 'Nuevo departamento…', icono: 'capas', accion: function () { App.Deptos.agregar(); } },
+    ]);
+  }
+
   function montar(carpeta, oficina) {
     E.carpeta = carpeta; E.oficina = oficina;
     document.title = oficina.nombre;
@@ -264,21 +281,20 @@
       /* en el celular la barra lateral es un cajón: se abre con el botón de menú y se cierra al elegir algo */
       function cajon(abrir) { dom.app.classList.toggle('lateral-abierta', abrir); }
       dom.lateral = h('aside.lateral', { onclick: function (ev) { if (ev.target.closest('.persona, .nav-item')) cajon(false); } }, dom.marca, dom.equipo, h('nav.nav',
-          h('button.nav-item', { onclick: function () { App.Parte.abrir(); } }, App.icono('parte'), 'Parte del día', dom.navParte),
-          h('button.nav-item', { onclick: function () { App.Flujos.abrir(); } }, App.icono('flujo'), 'Flujos', dom.navFlu),
-          h('button.nav-item', { onclick: function () { App.Reunion.abrir(); } }, App.icono('reunion'), 'Reuniones', dom.navReu),
-          h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib),
+          /* solo lo del día a día, ordenado por uso; la configuración vive en el menú de la oficina */
           h('button.nav-item', { onclick: function () { App.Yo.irAlDespacho(); App.Entregables.abrir(); } }, App.icono('bandeja'), 'Tu bandeja', dom.navEnt),
-          h('button.nav-item', { onclick: function () { App.Deptos.abrir(); } }, App.icono('capas'), 'Departamentos'),
-          h('button.nav-item', { onclick: function () { App.Ajustes.reglas(); } }, App.icono('regla'), 'Reglas de la oficina')));
+          h('button.nav-item', { onclick: function () { App.Parte.abrir(); } }, App.icono('parte'), 'Parte del día', dom.navParte),
+          h('button.nav-item', { onclick: function () { App.Reunion.abrir(); } }, App.icono('reunion'), 'Reuniones', dom.navReu),
+          h('button.nav-item', { onclick: function () { App.Flujos.abrir(); } }, App.icono('flujo'), 'Flujos', dom.navFlu),
+          h('button.nav-item', { onclick: function () { App.Biblioteca.abrir(); } }, App.icono('libro'), 'Biblioteca', dom.navBib)));
       dom.app = h('div.app', dom.lateral,
         h('div.velo-lateral', { onclick: function () { cajon(false); } }),
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu,
           h('button.btn.icono.boton-menu', { title: 'Equipo y secciones', onclick: function () { cajon(true); } }, App.icono('menu')),
           h('div.herramientas',
+            h('button.btn', { title: 'Buscar agentes, salas y acciones (' + atajoBuscar + ')', onclick: function () { App.Paleta.abrir(); } }, App.icono('buscar'), h('span.btn-txt', 'Buscar'), h('kbd.btn-txt', atajoBuscar)),
             h('button.btn', { title: 'Llamar a reunión', onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), h('span.btn-txt', 'Llamar a reunión')),
-            h('button.btn', { title: 'Armar con el Creador', onclick: function () { App.Creador.abrir(); } }, App.icono('chispa'), h('span.btn-txt', 'Armar con el Creador')),
-            h('button.btn.primario', { title: 'Contratar', onclick: function () { App.Contratar.abrir(); } }, App.icono('mas'), h('span.btn-txt', 'Contratar'))),
+            h('button.btn.primario', { title: 'Nuevo', onclick: function (ev) { menuNuevo(ev.currentTarget); } }, App.icono('mas'), h('span.btn-txt', 'Nuevo'), App.icono('abajo'))),
           h('div.pista', App.Paleta ? App.Paleta.BASE : 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte'),
           dom.derecho));
       App.vaciar(raiz).appendChild(dom.app);
@@ -344,7 +360,10 @@
     deps.forEach(function (d) {
       var ags = d.id === '__sin' ? sueltos : o.agentes.filter(function (a) { return a.departamento === d.id; });
       if (!ags.length && !o.agentes.length) return;
-      c.appendChild(h('div.grupo-tit', h('span.punto', { style: { background: d.color } }), d.nombre, h('span.cuenta', ags.length || '')));
+      var tit = h('div.grupo-tit', h('span.punto', { style: { background: d.color } }), d.nombre, h('span.cuenta', ags.length || ''));
+      if (d.id !== '__sin') tit.appendChild(h('button.grupo-mas', { title: 'Opciones de ' + d.nombre, 'aria-label': 'Opciones de ' + d.nombre,
+        onclick: function (ev) { ev.stopPropagation(); App.Deptos.menu(ev.currentTarget, d); } }, App.icono('puntos')));
+      c.appendChild(tit);
       if (!ags.length) c.appendChild(h('div.persona', { onclick: function () { App.Contratar.abrir({ departamento: d.id }); }, style: { color: 'var(--tenue)' } },
         h('div.retrato', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center' } }, App.icono('mas')), h('div.persona-txt', 'Contratar')));
       ags.forEach(function (a) {
@@ -353,6 +372,8 @@
         c.appendChild(fila);
       });
     });
+    c.appendChild(h('button.persona.agregar-depto', { onclick: function () { App.Deptos.agregar(); } },
+      h('div.retrato', App.icono('mas')), h('div.persona-txt', 'Departamento')));
     marcarEstados();
     if (App.Actividad) { App.Actividad.repintar(); App.Actividad.iniciar(); }
   }
@@ -375,33 +396,40 @@
       lista.forEach(function (o) {
         items.push({ texto: o.nombre, icono: 'edificio', nota: o.carpeta === E.carpeta ? 'actual' : '', accion: function () { if (o.carpeta !== E.carpeta) { App.Agente.cerrar(); abrirCarpeta(o.carpeta); } } });
       });
+      items.push({ texto: 'Otra oficina…', icono: 'mas', accion: otraOficina });
       items.push('-');
-      opcionesOficina().forEach(function (o) { items.push({ texto: o.texto + '…', icono: o.icono, accion: o.accion }); });
-      items.push('-');
-      items.push({ texto: 'Conectores…', icono: 'enchufe', accion: function () { App.Ajustes.conectores(); } });
-      items.push('-');
-      items.push({ texto: 'Nombre de la oficina…', icono: 'edificio', accion: editarOficina });
-      items.push({ texto: 'Quién dirige…', icono: 'personas', accion: function () { App.Yo.abrir(); } });
-      items.push({ texto: 'Exportar oficina…', icono: 'subir', accion: exportarOficina });
-      items.push({ texto: App.nativo.hay ? 'Mostrar carpeta ' + App.nativo.enExplorador : 'Ver archivos de la oficina', icono: 'carpeta', accion: function () { if (App.nativo.hay) App.nativo.revelar(E.carpeta); else App.verArchivosOficina(); } });
-      items.push('-');
-      items.push({ texto: 'Borrar oficina…', icono: 'papelera', accion: borrarOficina });
-      if (App.nativo.hay) items.push({ texto: 'Acerca de', icono: 'chispa', accion: App.nativo.acerca });
+      /* toda la configuración (de esta oficina y de la app) vive en la ventana de Ajustes */
+      items.push({ texto: 'Ajustes…', icono: 'ajustes', nota: App.Ajustes.atajo, accion: function () { App.Ajustes.abrir(); } });
       App.menu(ancla, items);
     });
   }
 
-  function editarOficina() {
-    var hj = App.hoja({ titulo: 'Oficina', ancho: 440 });
-    var n = h('input.campo', { value: E.oficina.nombre, maxlength: 80, autofocus: true });
+  /* crear, armar charlando, abrir o importar: las mismas opciones que la pantalla de inicio, en una hoja */
+  function otraOficina() {
+    var hj = App.hoja({ titulo: 'Otra oficina', ancho: 480, sinPie: true });
+    App.add(hj.cuerpo, opcionesOficina().map(function (o) {
+      return h('button.opcion', { onclick: function () { hj.cerrar(); o.accion(); } }, App.icono(o.icono), h('div', h('b', o.texto), h('span', o.bajada)));
+    }));
+  }
+
+  /* sección «General» de Ajustes: nombre, quién dirige y carpeta. `crear` (opcional) reemplaza a App.hoja. */
+  function editarOficina(crear) {
+    var hj = (crear || App.hoja)({ titulo: 'General', ancho: 440 });
+    var n = h('input.campo', { value: E.oficina.nombre, maxlength: 80, autofocus: !hj.enVentana });
     var err = h('div.error-txt');
     var quien = h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, App.Yo.retrato('retrato', 96), h('b', App.Yo.nombre() || 'Sin nombre todavía'),
-      h('button.btn.chico', { style: { marginLeft: 'auto' }, onclick: function () { hj.cerrar(); App.Yo.abrir(); } }, 'Cambiar…'));
+      h('button.btn.chico', { style: { marginLeft: 'auto' }, onclick: function () { if (!hj.enVentana) hj.cerrar(); App.Yo.abrir(); } }, 'Cambiar…'));
+    var carpeta = h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 } }, App.icono('carpeta'),
+      h('span', { style: { color: 'var(--suave)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }, title: E.carpeta }, E.carpeta),
+      h('button.btn.chico', { style: { marginLeft: 'auto', flex: 'none' }, onclick: function () { if (App.nativo.hay) App.nativo.revelar(E.carpeta); else App.verArchivosOficina(); } },
+        App.nativo.hay ? 'Mostrar' : 'Ver archivos'));
     App.add(hj.cuerpo, h('div.fila-campo', h('label.etiqueta-campo', 'Nombre'), n),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Quién la dirige'), quien, h('div.ayuda', 'Cada oficina tiene su propio director.')), h('div.ayuda', E.carpeta), err);
-    App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), h('button.btn.primario', {
+      h('div.fila-campo', h('label.etiqueta-campo', 'Quién la dirige'), quien, h('div.ayuda', 'Cada oficina tiene su propio director.')),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Carpeta'), carpeta, h('div.ayuda', 'Ahí quedan los agentes, su conocimiento, las actas y los archivos.')), err);
+    App.add(hj.pie, hj.enVentana ? null : h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), h('button.btn.primario', {
       onclick: function () {
-        api.patch('/api/oficina', { nombre: n.value.trim() }).then(function (r) { hj.cerrar(); actualizar(r.oficina); }).catch(function (e) { err.textContent = e.message; });
+        err.textContent = '';
+        api.patch('/api/oficina', { nombre: n.value.trim() }).then(function (r) { actualizar(r.oficina); hj.cerrar(); if (hj.enVentana) App.aviso('Guardado.'); }).catch(function (e) { err.textContent = e.message; });
       }
     }, 'Guardar'));
   }

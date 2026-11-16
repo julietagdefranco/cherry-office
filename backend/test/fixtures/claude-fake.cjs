@@ -230,6 +230,7 @@ async function main() {
     salida('{"type":"system","subtype":"hook_started","hook_name":"x"}')
     salida(JSON.stringify({ type: 'system', subtype: 'init', session_id: `s-${agent}` }))
     salida('{"type":"assistant","message":{"content":[{"type":"thinking","thinking":""}]}}')
+    salida('{"type":"assistant","message":{"content":[{"type":"text","text":"Voy a mirar el plan."}]}}')
     salida('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/x/conocimiento/oficina.md"}}]}}')
     if (m.includes('PAUSA')) for (let n = 0; !fs.existsSync(p('go')) && n < 300; n++) await dormir(50)
     salida('{"type":"user","message":{"content":[{"type":"tool_result","content":"secreto"}]}}')

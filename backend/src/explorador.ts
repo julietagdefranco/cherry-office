@@ -18,7 +18,7 @@ const maxEntradas = 500
 const maxTexto = 512 * 1024
 const maxImagen = 2 * 1024 * 1024
 const maxNombre = 120
-const extTexto = new Set(['md', 'markdown', 'txt', 'json', 'csv', 'tsv', 'log'])
+const extTexto = new Set(['md', 'markdown', 'txt', 'json', 'csv', 'tsv', 'log', 'html', 'htm', 'svg', 'mmd', 'mermaid', 'xml', 'yaml', 'yml', 'js', 'mjs', 'ts', 'css', 'py', 'sh', 'sql'])
 const extImagen: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
 const rutas = new Set(['/api/fs/carpetas', '/api/oficina/archivos', '/api/oficina/archivo'])
 /** En Windows y macOS (por defecto) el sistema de archivos no distingue mayúsculas: la contención tampoco. */

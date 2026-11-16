@@ -321,7 +321,8 @@ export class ClaudeRunner {
     for (const h of q?.herramientas ?? []) if (!herramientas.includes(h)) herramientas.push(h)
     const a = ['-p', '--agent', p.agente, '--session-id', randomUUID().toLowerCase(), ...ClaudeRunner.formatoSalida,
       '--tools', herramientas.join(',')]
-    if (q) a.push('--permission-mode', 'default', '--permission-prompt-tool', q.herramientaPermiso, '--mcp-config', q.mcpConfig)
+    // en modo automático (preferencia de la app) el clasificador decide y lo que frena se le pregunta a la persona
+    if (q) a.push('--permission-mode', this.config.modoPermisos === 'auto' ? 'auto' : 'default', '--permission-prompt-tool', q.herramientaPermiso, '--mcp-config', q.mcpConfig)
     else a.push('--permission-mode', 'dontAsk')
     for (const d of [...this.config.oficinaDirsExtra, ...(p.dirsExtra ?? [])]) a.push('--add-dir', d)
     a.push('--allowedTools', 'Read', 'Glob', 'Grep')
