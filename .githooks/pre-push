@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Chequeos antes de pushear (reemplazan los workflows backend.yml y desktop.yml que corrían en cada push).
+# Solo corre lo que tocan los commits que se van a subir:
+#   backend/ u oficina/  -> tipos + tests del backend (vitest, con el claude falso)
+#   desktop/             -> tipos de la app Electron
+# Activarlo una vez por clon:  git config core.hooksPath .githooks
+# Saltearlo puntualmente:      git push --no-verify
+set -euo pipefail
+
+raiz="$(git rev-parse --show-toplevel)"
+cero="0000000000000000000000000000000000000000"
+cambios=""
+
+# git pasa por stdin: <ref local> <sha local> <ref remota> <sha remoto>
+while read -r _ sha_local _ sha_remoto; do
+  [ "$sha_local" = "$cero" ] && continue # borrado de rama
+  if [ "$sha_remoto" = "$cero" ]; then
+    # rama nueva: comparar contra main del remoto (o todo si no existe)
+    base="$(git merge-base "$sha_local" origin/main 2>/dev/null || true)"
+  else
+    base="$sha_remoto"
+  fi
+  if [ -n "$base" ]; then
+    cambios+="$(git diff --name-only "$base" "$sha_local")"$'\n'
+  else
+    cambios+="$(git ls-tree -r --name-only "$sha_local")"$'\n'
+  fi
+done
+
+backend=0; desktop=0
+grep -qE '^(backend|oficina)/' <<<"$cambios" && backend=1
+grep -qE '^(desktop|backend/src)/' <<<"$cambios" && desktop=1
+
+if [ $backend = 0 ] && [ $desktop = 0 ]; then
+  exit 0
+fi
+
+asegurar_deps() {
+  [ -d "$raiz/$1/node_modules" ] || { echo "pre-push: instalando dependencias de $1…"; npm ci --prefix "$raiz/$1" --silent; }
+}
+
+if [ $backend = 1 ]; then
+  echo "pre-push: backend — tipos y tests"
+  asegurar_deps backend
+  (cd "$raiz/backend" && npx tsc --noEmit && npx vitest run)
+fi
+
+if [ $desktop = 1 ]; then
+  echo "pre-push: desktop — tipos"
+  asegurar_deps backend
+  asegurar_deps desktop
+  (cd "$raiz/desktop" && npx tsc -p .)
+fi

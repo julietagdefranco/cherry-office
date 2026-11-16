@@ -82,7 +82,7 @@ jobs:
           (cd backend && npx tsc --noEmit)
           (cd desktop && npx tsc -p .)
 
-      # En Windows y Linux los corre backend.yml en cada cambio; acá, en Mac, antes de publicar.
+      # Localmente los corre el hook .githooks/pre-push; acá, en Mac, antes de publicar.
       - name: Tests del backend
         working-directory: backend
         run: npx vitest run

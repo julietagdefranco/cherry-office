@@ -67,7 +67,7 @@ Hecho:
 - `claude` falso en Node (`backend/test/fixtures/claude-fake.cjs`): la misma suite corre en macOS (contra Swift y TS), Linux y Windows. Los fixtures de zip usan `fflate` (sin ditto, zipinfo ni python3).
 - El runner manda el mensaje por la entrada estándar en Windows (probado con el claude real en Mac: mismo resultado y mismo tiempo que por argumento). `HQ_MENSAJE_STDIN=1` fuerza ese camino en Mac/Linux.
 - Un `.js`/`.cjs` como `claude` se lanza con node; un shim `.cmd` de npm se resuelve a `node …/cli.js`; el árbol de procesos se mata con `taskkill /T`.
-- CI: `.github/workflows/backend.yml` corre tipos y la suite contra TS en `windows-latest` y `ubuntu-latest` (en Linux, también con el mensaje por stdin).
+- Chequeos: el hook local `.githooks/pre-push` corre tipos y la suite antes de cada push; en CI solo corren en `release.yml` (Mac) al sacar una versión.
 
 Pendiente, a mano en una PC con Windows y Claude Code con sesión iniciada (`cd backend && npm ci && npm run dev`, abrir http://localhost:8765):
 1. Que encuentre `claude` (instalador nativo `claude.exe` y, aparte, instalación por npm) y que `/api/estado` diga `auth: true`.
