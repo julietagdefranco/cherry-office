@@ -119,6 +119,25 @@ select.campo { padding-right: 26px; }
 .capa3d { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .herramientas { position: absolute; top: 14px; right: 14px; display: flex; gap: 8px; z-index: 5; }
 .herramientas .btn { box-shadow: var(--sombra); }
+/* medidor de uso de Claude (uso.js): chip en la barra y popover */
+.btn.uso { gap: 7px; font-variant-numeric: tabular-nums; }
+.btn.uso .uso-txt { display: inline-flex; align-items: center; gap: 6px; }
+.btn.uso .uso-sep, .btn.uso .uso-nada, .uso-val .btn-txt { color: var(--tenue); }
+.btn.uso.cerca svg, .uso-val.cerca, .uso-cab b.cerca { color: var(--aviso); }
+.btn.uso.limite svg, .uso-val.limite, .uso-cab b.limite { color: var(--peligro); }
+.uso-pop { width: 270px; padding: 12px 14px; }
+.uso-tit { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.uso-tit .btn { width: 26px; height: 26px; padding: 0; }
+.uso-fila { margin-top: 10px; }
+.uso-cab { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--suave); margin-bottom: 5px; }
+.uso-cab b { color: var(--texto); font-weight: 600; font-variant-numeric: tabular-nums; }
+.uso-barra { height: 6px; border-radius: 3px; background: var(--linea); overflow: hidden; }
+.uso-barra i { display: block; height: 100%; border-radius: 3px; background: var(--ok); transition: width .4s; }
+.uso-barra.cerca i { background: var(--aviso); }
+.uso-barra.limite i { background: var(--peligro); }
+.uso-nota { font-size: 12px; color: var(--tenue); margin-top: 4px; }
+.uso-nota.mal { color: var(--aviso); }
+.uso-pie { font-size: 11.5px; color: var(--tenue); margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--linea); }
 .pista { position: absolute; left: 14px; bottom: 12px; font-size: 11px; color: var(--tenue); z-index: 5; pointer-events: none; }
 .aviso-reunion { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 6px 0 14px;
   background: var(--panel); border: 1px solid var(--linea); border-radius: 17px; box-shadow: var(--sombra); font-weight: 500; }
@@ -418,6 +437,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   /* herramientas: solo íconos */
   .herramientas { top: 12px; right: 12px; gap: 6px; }
   .herramientas .btn { width: 36px; padding: 0; }
+  .herramientas .btn.uso { width: auto; padding: 0 10px; gap: 5px; }
   .herramientas .btn-txt { display: none; }
   .herramientas .btn svg ~ svg { display: none; }
   .herramientas .btn svg { width: 17px; height: 17px; }

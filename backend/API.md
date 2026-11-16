@@ -203,6 +203,12 @@ Archivos y conocimiento de la oficina activa: se suben o se vinculan carpetas ex
 
 **Variables de entorno:** `HQ_BIBLIOTECA_MAX_MB`, `HQ_BIBLIOTECA_MAX_ARCHIVOS`, `HQ_BIBLIOTECA_MAX_TOTAL_MB`, `HQ_BIBLIOTECA_TIMEOUT` (ficha, 180 s), `HQ_BIBLIOTECA_IMAGEN_TIMEOUT` (120 s), `HQ_BIBLIOTECA_SIN_FTS=1` (fuerza la búsqueda con LIKE).
 
+## Uso del plan de Claude
+`GET /api/uso-claude[?forzar=1]` → `{disponible, fuente?, cinco_horas?, semana?, semana_opus?, actualizado?, motivo?}`. Cada ventana es `{pct (0–100), reinicia (ISO), estado: ok|cerca|limite}`. Lo usa el chip de la barra de herramientas (`oficina/ui/uso.js`). Funciona con o sin oficina abierta.
+- **`fuente: 'cuenta'`**: el endpoint que usa `/usage` de Claude Code (`api.anthropic.com/api/oauth/usage`, no documentado), con el token de Claude Code: en macOS sale del llavero («Claude Code-credentials», solo si HOME es el del usuario real y no hay `CLAUDE_CONFIG_DIR`); si no, de `<CLAUDE_CONFIG_DIR o ~/.claude>/.credentials.json`. El token no se loguea, no sale en ninguna respuesta y no se renueva acá. Caché de 90 s; `forzar` la saltea, pero nunca pide más de una vez cada 30 s.
+- **`fuente: 'corridas'`**: si la cuenta no responde, lo último que mandó claude en un `rate_limit_event` de cualquier corrida (`ClaudeRunner.alLimite`). Una ventana que ya se reinició se descarta.
+- **`motivo`**: `sin_sesion` (no hay credenciales), `vencido` (token vencido o 401/403: Claude Code lo renueva en la próxima corrida) o `error`. Puede venir junto a datos de `corridas`.
+
 ## Abrir archivos y créditos (app de escritorio)
 - El front manda `window.webkit.messageHandlers.hq.postMessage({accion: 'abrir' | 'revelar', ruta})` (`App.nativo` en `oficina/ui/base.js`). `desktop/src/main.ts` (`abrirRuta`, con `abrir.ts`) valida la ruta (enlaces simbólicos resueltos) contra la carpeta de la oficina activa y las carpetas vinculadas (las pide al backend) y la abre con su aplicación; nunca abre aplicaciones, scripts ni archivos ejecutables. `revelar` sin ruta abre la carpeta de la oficina (menú de la app, ⇧⌘O / Ctrl+Shift+O, y botón en la barra lateral).
 - «Acerca de Oficina» (menú de la app y enlace en la barra lateral): LDraw parts library (CC BY 4.0), three.js (MIT), Poppins (OFL) y aviso de que el proyecto no está afiliado a LEGO.

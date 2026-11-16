@@ -267,6 +267,8 @@ export class ClaudeRunner {
   static readonly sinConectores = ['--permission-mode', 'dontAsk', '--disallowedTools', 'mcp__claude_ai_*']
 
   readonly actividad = new ActividadRegistro()
+  /** Reciben el `rate_limit_info` de cada `rate_limit_event` de cualquier corrida (el medidor de uso). */
+  readonly alLimite: ((info: Obj) => void)[] = []
   private readonly carriles = new Carriles()
   private readonly limite: Limite
   private readonly vivos = new Set<Proceso>()
@@ -402,6 +404,18 @@ export class ClaudeRunner {
 
   // MARK: lanzar
 
+  /** Envuelve el lector de líneas para pasarle los `rate_limit_event` a `alLimite` (si hay alguien escuchando). */
+  private conLimites(alLinea?: (l: string) => void): ((l: string) => void) | undefined {
+    if (this.alLimite.length === 0) return alLinea
+    return (l) => {
+      if (l.includes('"rate_limit_event"')) {
+        const info = limiteDe(l)
+        if (info) for (const f of this.alLimite) { try { f(info) } catch {} }
+      }
+      alLinea?.(l)
+    }
+  }
+
   /** Lanza claude con `args` y espera. Un fallo de arranque es `no_ejecuta`. */
   async lanzar(args: string[], { timeout, cwd: cwdPedido, envExtra = {}, alLinea }: { timeout: number; cwd?: string; envExtra?: Record<string, string>; alLinea?: (l: string) => void }): Promise<ProcResult> {
     const exe = this.claudePath
@@ -419,7 +433,7 @@ export class ClaudeRunner {
       if (this.cerrado) throw new ClaudeError('cerrando')
       // a la lista antes de lanzarlo (sin await en el medio): shutdown() lo ve aunque todavía no haya llegado 'spawn'
       this.vivos.add(p)
-      return await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea, stdin: this.mensajePorStdin },
+      return await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea: this.conLimites(alLinea), stdin: this.mensajePorStdin },
         () => {}, () => this.vivos.delete(p))
     } catch (e) {
       if (e instanceof ClaudeError) throw e
@@ -464,6 +478,16 @@ export class ClaudeRunner {
       }
     })()
     return { cancelar: () => { cancelado = true } }
+  }
+}
+
+/** El `rate_limit_info` de una línea `{"type":"rate_limit_event", ...}`, o undefined. */
+function limiteDe(l: string): Obj | undefined {
+  try {
+    const o: unknown = JSON.parse(l)
+    return esObjeto(o) && o.type === 'rate_limit_event' && esObjeto(o.rate_limit_info) ? o.rate_limit_info : undefined
+  } catch {
+    return undefined
   }
 }
 

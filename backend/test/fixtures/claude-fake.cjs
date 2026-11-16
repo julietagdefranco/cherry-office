@@ -234,6 +234,7 @@ async function main() {
     salida('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/x/conocimiento/oficina.md"}}]}}')
     if (m.includes('PAUSA')) for (let n = 0; !fs.existsSync(p('go')) && n < 300; n++) await dormir(50)
     salida('{"type":"user","message":{"content":[{"type":"tool_result","content":"secreto"}]}}')
+    salida(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', rateLimitType: 'seven_day', resetsAt: Math.floor(Date.now() / 1000) + 86400, utilization: 0.83 } }))
     salida('{"type":"assistant","message":{"content":[{"type":"text","text":"listo"}]}}')
     salida(JSON.stringify({ type: 'result', subtype: 'success', result: `stream ${agent}`, is_error: false, total_cost_usd: 0.25 }))
     fin()

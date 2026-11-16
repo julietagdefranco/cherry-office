@@ -294,6 +294,7 @@
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu,
           h('button.btn.icono.boton-menu', { title: 'Equipo y secciones', onclick: function () { cajon(true); } }, App.icono('menu')),
           h('div.herramientas',
+            App.Uso ? App.Uso.boton() : null,
             h('button.btn', { title: 'Buscar agentes, salas y acciones (' + atajoBuscar + ')', onclick: function () { App.Paleta.abrir(); } }, App.icono('buscar'), h('span.btn-txt', 'Buscar'), h('kbd.btn-txt', atajoBuscar)),
             h('button.btn', { title: 'Llamar a reunión', onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), h('span.btn-txt', 'Llamar a reunión')),
             h('button.btn.primario', { title: 'Nuevo', onclick: function (ev) { menuNuevo(ev.currentTarget); } }, App.icono('mas'), h('span.btn-txt', 'Nuevo'), App.icono('abajo'))),

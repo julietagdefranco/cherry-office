@@ -15,4 +15,5 @@ import './dependencias.js' // [dependencias]
 import './paquete.js' // [paquete]
 import './importar.js' // [importar]
 import './migracion.js' // [migracion]
+import './uso-claude.js' // [uso-claude]
 export {}
