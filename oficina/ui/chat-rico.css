@@ -7,6 +7,12 @@
 .md img.md-img.cargando:not([src]) { display: block; }
 .md .md-img-falta { display: inline-flex; align-items: center; gap: 4px; color: var(--suave); font-size: 12px; }
 
+/* rutas de archivos de la oficina en el texto: se abren con un clic */
+.md-ruta { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.md-ruta code { text-decoration: underline; text-decoration-color: var(--tenue); text-underline-offset: 2px; }
+.md-ruta:hover code { background: rgba(127, 127, 127, .24); text-decoration-color: currentColor; }
+.md-ruta:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; border-radius: 4px; }
+
 /* bloques de código */
 .md .md-codigo { border: 1px solid var(--linea); border-radius: var(--radio-chico); overflow: hidden; margin: 6px 0; background: var(--panel); }
 .md .md-codigo pre { margin: 0; border-radius: 0; }

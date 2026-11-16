@@ -111,15 +111,15 @@
     return cacheImg[rel];
   }
   /* abre un archivo de la oficina con el visor que le toque */
-  function abrirArchivo(rel) {
-    var e = ext(rel), nombre = rel.split('/').pop();
-    if (EXT_IMAGEN[e]) { cargarImagen(rel).then(function (src) { verImagen(src, nombre); }, App.fallo); return; }
+  function abrirArchivo(rel, alFallar) {
+    var e = ext(rel), nombre = rel.split('/').pop(), fallo = alFallar || App.fallo;
+    if (EXT_IMAGEN[e]) { cargarImagen(rel).then(function (src) { verImagen(src, nombre); }, fallo); return; }
     App.api.get('/api/oficina/archivo', { ruta: rel }).then(function (c) {
       if (EXT_ARTEFACTO[e] && typeof c.texto === 'string') {
         if (c.truncado) App.aviso('El archivo es largo: se muestra solo el principio.', true);
         verArtefacto({ tipo: EXT_ARTEFACTO[e], codigo: c.texto, titulo: nombre, ruta: c.ruta });
       } else App.abrirContenido(c);
-    }).catch(App.fallo);
+    }).catch(fallo);
   }
 
   /* ---------------- hidratar el HTML de App.markdown ---------------- */
@@ -187,9 +187,25 @@
     cargarImagen(rel).then(function (src) { img.src = src; img.classList.remove('cargando'); }, function () { sinVista('no se pudo mostrar'); });
   }
 
+  /* `archivos/ventas/x.md` en el texto: si parece un archivo de la oficina, se abre con un clic (si no existe, avisa) */
+  var PARECE_RUTA = /^[^\s`<>"|*?]+\/[^\s`<>"|*?\/]+\.[a-z0-9]{1,8}$/i;
+  function hidratarRuta(code) {
+    if (code.closest('pre, a, button')) return;
+    var txt = code.textContent.trim();
+    if (!PARECE_RUTA.test(txt) || (/^[a-z][a-z0-9+.-]*:\/\//i.test(txt) && !/^file:\/\//i.test(txt))) return;
+    var rel = relOficina(txt);
+    if (rel === null) return;
+    var btn = h('button.md-ruta', { type: 'button', title: 'Abrir ' + rel, onclick: function () {
+      abrirArchivo(rel, function () { App.aviso('No encontré «' + rel + '» en la oficina.', true); });
+    } });
+    code.parentNode.replaceChild(btn, code);
+    btn.appendChild(code);
+  }
+
   function hidratar(el) {
     Array.prototype.forEach.call(el.querySelectorAll('.md-codigo'), hidratarCodigo);
     Array.prototype.forEach.call(el.querySelectorAll('img.md-img'), hidratarImagen);
+    Array.prototype.forEach.call(el.querySelectorAll('code'), hidratarRuta);
   }
 
   /* ---------------- pasos del agente ---------------- */
