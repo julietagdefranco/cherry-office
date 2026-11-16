@@ -3,6 +3,8 @@
 //   GET  /api/entregas/:id                               → {entrega} (con el texto completo)
 //   POST /api/entregas/:id/revisada | /sin-revisar       → {entrega, sinRevisar}
 //   POST /api/entregas/:id/cambios                       → 202 {entrega} (lo corre el Programador)
+//   POST /api/entregas/:id/biblioteca                    → {archivos, entrega, sinRevisar} (copia a la biblioteca)
+import type { Biblioteca } from './biblioteca.js'
 import { ErrorAPI } from './errores.js'
 import { entregaJSON, entregaJSONCompleto, estadosEntrega, type Entrega } from './entregas.js'
 import type { Obj } from './json.js'
@@ -32,6 +34,9 @@ export class EntregasRouter implements SubRouter {
 
   static esRuta = (p: string) => p === '/api/entregas' || p.startsWith('/api/entregas/')
 
+  /** La biblioteca, si el módulo está cargado (se busca en cada pedido: se registra después que este). */
+  private get biblioteca() { return this.s.huecos.biblioteca as Biblioteca | undefined }
+
   async handle(method: string, path: string, query: Query, body?: Buffer) {
     if (!EntregasRouter.esRuta(path)) return null
     return atrapar(async () => this.despachar(method, path, query, body))
@@ -55,6 +60,11 @@ export class EntregasRouter implements SubRouter {
       if (method !== 'GET') return no405
       const o = entregaJSONCompleto(e)
       o.enCambios = prog?.cambiandoEntrega(a.carpeta, id) ?? false
+      const bib = this.biblioteca
+      if (bib) {
+        o.guardables = bib.guardables(a, e)
+        o.enBiblioteca = bib.vistasDeEntrega(a.carpeta, id)
+      }
       return [200, { entrega: o }]
     }
     if (method !== 'POST') return no405
@@ -65,6 +75,29 @@ export class EntregasRouter implements SubRouter {
         if (!n) throw new ErrorAPI(500, 'No pude guardar.')
         for (const f of this.alRevisar) await f(n, a)
         return [200, { entrega: entregaJSON(n), sinRevisar: entregas.sinRevisar(a.carpeta) }]
+      }
+      case 'biblioteca': {
+        // Guarda una copia de archivos de la entrega en la biblioteca (`archivos/<departamento>/`, con ficha y catálogo).
+        // No la marca como revisada: eso lo hace «Listo» (que además mueve flujos y pendientes).
+        const bib = this.biblioteca
+        if (!bib) return no404
+        let d: Obj = {}
+        if (body && body.length > 0) {
+          if (body.length > maxBody) throw new ErrorAPI(400, 'pedido inválido')
+          let crudo: unknown
+          try { crudo = JSON.parse(body.toString('utf8')) } catch { throw new ErrorAPI(400, 'pedido inválido') }
+          if (typeof crudo !== 'object' || crudo === null || Array.isArray(crudo)) throw new ErrorAPI(400, 'pedido inválido')
+          d = crudo as Obj
+        }
+        let rels: string[]
+        if (d.archivos === undefined) rels = bib.guardables(a, e)
+        else if (Array.isArray(d.archivos) && d.archivos.every((x) => typeof x === 'string')) rels = [...new Set(d.archivos as string[])]
+        else throw new ErrorAPI(400, '«archivos» tiene que ser una lista de rutas de la entrega.')
+        if (rels.length === 0) throw new ErrorAPI(409, 'Esta entrega no tiene archivos que se puedan guardar en la biblioteca.')
+        const dep = Validar.texto(d.departamento, 'departamento', 41, false) ?? 'compartido'
+        const leer = typeof d.leer === 'boolean' ? d.leer : false
+        const archivos = bib.guardarDeEntrega(a, e, rels, dep, leer)
+        return [200, { archivos, entrega: entregaJSON(e), sinRevisar: entregas.sinRevisar(a.carpeta) }]
       }
       case 'sin-revisar': {
         if (e.estado === 'cambios') throw new ErrorAPI(409, 'Esa entrega ya tiene una versión nueva.')

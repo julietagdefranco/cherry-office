@@ -51,12 +51,14 @@
     return ds.length ? ds : [OFICINA];
   }
   function duenosArchivo(f) { return f.departamentos && f.departamentos.length ? f.departamentos : [f.departamento || OFICINA]; }
+  function nombreAgente(id) { var a = id && App.agente(id); return a ? a.nombre : (id || 'una reunión'); }
   function iniciales(n) { return String(n || '?').trim().slice(0, 2).toUpperCase(); }
 
-  function abrir() {
+  /* `slug` (opcional): abre con ese documento elegido (por ejemplo, recién guardado desde una entrega) */
+  function abrir(slug) {
     var hj = App.hoja({ titulo: 'Biblioteca', ancho: 1100, alto: 'min(740px, 92vh)', sinPie: true });
     var vista = 'todo';            // 'todo' | 'compartido' | id de departamento | 'propuestas'
-    var sel = null;                // {tipo: 'archivo'|'carpeta', id}
+    var sel = typeof slug === 'string' && slug ? { tipo: 'archivo', id: slug } : null;   // {tipo: 'archivo'|'carpeta', id}
     var abiertas = {};             // carpetas vinculadas desplegadas en la lista
     var archivos = [], vinculos = [];
     var buscar = h('input.campo', { placeholder: 'Buscar en todos los documentos…', style: { maxWidth: '320px' } });
@@ -205,7 +207,7 @@
     function filaArchivo(f, dentroDeCarpeta) {
       var duenos = duenosArchivo(f);
       var otros = App.depto(vista) ? duenos.filter(function (x) { return x !== vista; }) : [];
-      var meta = [metaEstado(f), otros.length ? 'también de ' + frase(otros) : null, f.nombre, App.fecha(f.actualizado)].filter(Boolean);
+      var meta = [metaEstado(f), otros.length ? 'también de ' + frase(otros) : null, f.entrega ? 'de ' + nombreAgente(f.entrega.agente) : null, f.nombre, App.fecha(f.actualizado)].filter(Boolean);
       var esSel = sel && sel.tipo === 'archivo' && sel.id === f.slug;
       return h('div.archivo' + (esSel ? '.sel' : '') + (dentroDeCarpeta ? '.en-carpeta' : ''), { onclick: function () { sel = { tipo: 'archivo', id: f.slug }; pintar(); } },
         h('div.tipo', (f.tipo || '').slice(0, 4)),
@@ -296,7 +298,9 @@
       App.add(App.vaciar(det),
         volver(),
         h('h3', { style: { fontSize: '15px', marginBottom: '4px' } }, f.titulo),
-        h('div.ayuda', { style: { marginBottom: '12px' } }, f.nombre + ' · ' + App.tam(f.tam || 0) + (v ? ' · en la carpeta «' + nombreCarpeta(v) + '»' : '')),
+        h('div.ayuda', { style: { marginBottom: f.entrega ? '6px' : '12px' } }, f.nombre + ' · ' + App.tam(f.tam || 0) + (v ? ' · en la carpeta «' + nombreCarpeta(v) + '»' : '')),
+        f.entrega ? h('div.biblio-entrega', App.icono('bandeja'), h('span', 'Lo entregó ' + nombreAgente(f.entrega.agente) + '. Es una copia de cuando lo guardaste. ',
+          App.Entregables ? h('a', { href: '#', onclick: function (e) { e.preventDefault(); hj.cerrar(); App.Entregables.abrir(f.entrega.id); } }, 'Ver la entrega') : null)) : null,
         tarjetaDueno(duenos, vinc ? 'Su carpeta es de ' + (duenos[0] === OFICINA ? 'toda la oficina' : frase(duenos)) : titulo, cambiar, vinc,
           [gente(f, duenos), sugerencia]),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '12px 0 14px' } },

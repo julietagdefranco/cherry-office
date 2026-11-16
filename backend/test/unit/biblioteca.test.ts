@@ -47,6 +47,25 @@ describe('arranque', () => {
     })
   }
 
+  test('una base vieja sin la columna entrega la agrega; el origen de una entrega va y vuelve', () => {
+    const db = new SQLiteDB(path.join(tmp(), 'hq.db'))
+    db.exec(`CREATE TABLE archivos (slug TEXT NOT NULL, oficina TEXT NOT NULL, nombre TEXT NOT NULL, departamento TEXT NOT NULL,
+      ruta TEXT NOT NULL, origen TEXT NOT NULL, vinculo TEXT, tipo TEXT NOT NULL, tam INTEGER NOT NULL DEFAULT 0, hash TEXT NOT NULL DEFAULT '',
+      estado TEXT NOT NULL, error TEXT, aviso TEXT, ficha TEXT, leer TEXT, lectura TEXT, creado REAL NOT NULL, actualizado REAL NOT NULL,
+      papelera INTEGER NOT NULL DEFAULT 0, leer_pedido INTEGER NOT NULL DEFAULT 0, departamentos TEXT, PRIMARY KEY (oficina, slug))`)
+    db.run("INSERT INTO archivos(slug,oficina,nombre,departamento,ruta,origen,tipo,estado,creado,actualizado) VALUES('viejo','/of','v.txt','compartido','archivos/compartido/v.txt','subido','txt','listo',1,1)")
+    const datos = new BibliotecaDatos(db)
+    datos.preparar(true)
+    expect(datos.archivo('viejo', '/of')?.entrega).toBeUndefined()
+    datos.archivoGuardar(fila('nuevo', 'pendiente', { entrega: { id: 7, agente: 'marce', ruta: 'archivos/entregables/marce/x.md' } }))
+    expect(datos.archivo('nuevo', '/of')?.entrega).toEqual({ id: 7, agente: 'marce', ruta: 'archivos/entregables/marce/x.md' })
+    datos.archivoEntrega('viejo', '/of', { id: 8, agente: '', ruta: 'reuniones/acta.md' })
+    expect(datos.archivosDeEntrega('/of', 8).map((f) => f.slug)).toEqual(['viejo'])
+    datos.archivoEntrega('viejo', '/of', undefined)
+    expect(datos.archivosDeEntrega('/of', 8)).toEqual([])
+    db.close()
+  })
+
   test('una base con índice sin la columna norm la agrega y reindexa', () => {
     const db = new SQLiteDB(path.join(tmp(), 'hq.db'))
     db.exec('CREATE TABLE archivos_fts (slug TEXT, oficina TEXT, titulo TEXT, resumen TEXT, temas TEXT, texto TEXT)')

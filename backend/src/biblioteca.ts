@@ -11,7 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { ClaudeError, ClaudeRunner } from './claude-runner.js'
-import { iso } from './entregas.js'
+import { iso, type Entrega } from './entregas.js'
 import { ErrorAPI } from './errores.js'
 import { dentro, realAunqueFalte } from './explorador.js'
 import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
@@ -70,6 +70,15 @@ export type ArchivoFila = {
   papelera: boolean
   /** El usuario pidió lectura por rol al subirlo. */
   leerPedido: boolean
+  /** Si es la copia de un entregable que la persona guardó al revisarlo: de qué entrega, de qué agente y de qué archivo. */
+  entrega?: OrigenEntrega
+}
+
+export type OrigenEntrega = { id: number; agente: string; ruta: string }
+
+function origenEntregaDe(v: unknown): OrigenEntrega | undefined {
+  if (!esObjeto(v) || typeof v.id !== 'number' || typeof v.ruta !== 'string') return undefined
+  return { id: v.id, agente: typeof v.agente === 'string' ? v.agente : '', ruta: v.ruta }
 }
 
 /** ArchivoFila con los valores por omisión de Swift. */
@@ -122,7 +131,7 @@ export function fichaDesde(o: Obj): Ficha {
 
 // MARK: - SQLite
 
-const colsArchivo = 'slug,oficina,nombre,departamento,ruta,origen,vinculo,tipo,tam,hash,estado,error,aviso,ficha,leer,lectura,creado,actualizado,papelera,leer_pedido,departamentos'
+const colsArchivo = 'slug,oficina,nombre,departamento,ruta,origen,vinculo,tipo,tam,hash,estado,error,aviso,ficha,leer,lectura,creado,actualizado,papelera,leer_pedido,departamentos,entrega'
 const colsPropuesta = 'id,oficina,archivo,titulo,actual,nuevo,sugerencia,estado,creada,resuelta'
 
 const jsonA = (o: unknown) => JSON.stringify(o)
@@ -146,6 +155,8 @@ function archivoDe(r: Fila): ArchivoFila {
   if (r.error !== null) f.error = txt(r.error)
   if (r.aviso !== null) f.aviso = txt(r.aviso)
   if (esObjeto(fi)) f.ficha = fichaDesde(fi)
+  const ent = r.entrega === null || r.entrega === undefined ? undefined : origenEntregaDe(analizar(txt(r.entrega)))
+  if (ent) f.entrega = ent
   return f
 }
 
@@ -213,6 +224,10 @@ export class BibliotecaDatos {
     if (!db.query("SELECT name FROM pragma_table_info('archivos')").some((f) => txt(f.name) === 'departamentos')) {
       db.exec('ALTER TABLE archivos ADD COLUMN departamentos TEXT')
     }
+    // copia de un entregable (bases viejas no tienen la columna: NULL = no viene de una entrega)
+    if (!db.query("SELECT name FROM pragma_table_info('archivos')").some((f) => txt(f.name) === 'entrega')) {
+      db.exec('ALTER TABLE archivos ADD COLUMN entrega TEXT')
+    }
     const hay = db.query("SELECT 1 AS x FROM sqlite_master WHERE name='archivos_fts'").length > 0
     if (!hay) {
       const comun = 'CREATE TABLE archivos_fts (slug TEXT, oficina TEXT, titulo TEXT, resumen TEXT, temas TEXT, texto TEXT, norm TEXT)'
@@ -248,13 +263,24 @@ export class BibliotecaDatos {
   }
 
   archivoGuardar(f: ArchivoFila) {
-    this.db.run(`INSERT OR REPLACE INTO archivos(${colsArchivo}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    this.db.run(`INSERT OR REPLACE INTO archivos(${colsArchivo}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       f.slug, f.oficina, f.nombre, f.departamento, f.ruta, f.origen, f.vinculo ?? null, f.tipo, f.tam, f.hash, f.estado,
       f.error ?? null, f.aviso ?? null, f.ficha ? jsonA(fichaJSON(f.ficha)) : null,
       f.leer.length === 0 ? null : jsonA(f.leer), Object.keys(f.lectura).length === 0 ? null : jsonA(f.lectura),
       f.creado, f.actualizado, f.papelera ? 1 : 0, f.leerPedido ? 1 : 0,
       f.departamentos.length > 1 || f.departamentos[0] !== f.departamento ? jsonA(f.departamentos) : null,
+      f.entrega ? jsonA(f.entrega) : null,
     ])
+  }
+
+  /** Anota de qué entrega viene (o lo borra con undefined). */
+  archivoEntrega(slug: string, oficina: string, entrega: OrigenEntrega | undefined) {
+    this.db.run('UPDATE archivos SET entrega=? WHERE oficina=? AND slug=?', [entrega ? jsonA(entrega) : null, oficina, slug])
+  }
+
+  /** Los documentos (sin la papelera) que salieron de esa entrega. */
+  archivosDeEntrega(oficina: string, id: number): ArchivoFila[] {
+    return this.archivos(oficina).filter((f) => f.entrega?.id === id)
   }
 
   archivo(slug: string, oficina: string): ArchivoFila | undefined {
@@ -858,6 +884,109 @@ export class Biblioteca {
 
   // MARK: rutas de archivos (las usa el router)
 
+  // MARK: guardar (subidas y entregables)
+
+  /** Guarda un archivo en `archivos/<dep>/` y lo deja `pendiente` para fichar (lo que hace una subida). Mismo contenido en
+   *  la misma carpeta = duplicado (no se vuelve a procesar); mismo nombre con otro contenido = se reemplaza y se reprocesa.
+   *  `nombre` ya saneado y con un tipo soportado. */
+  guardarSubido(a: OficinaActiva, p: { nombre: string; data: Buffer; dep: string; leerPedido: boolean; entrega?: OrigenEntrega }): { fila: ArchivoFila; duplicado?: true; reemplazado?: true } {
+    const { nombre, data, dep, leerPedido } = p
+    const ext = TipoArchivo.extension(nombre)
+    const hash = Extraccion.sha256(data)
+    const carpeta = a.carpeta
+    const existentes = this.datos.archivos(carpeta)
+    const anotar = (slug: string) => { if (p.entrega) this.datos.archivoEntrega(slug, carpeta, p.entrega) }
+
+    // mismo contenido en la misma carpeta: ya está
+    const ya = existentes.find((x) => x.origen === 'subido' && x.departamento === dep && x.hash === hash)
+    if (ya) {
+      if (p.entrega && !ya.entrega) anotar(ya.slug)
+      return { fila: this.datos.archivo(ya.slug, carpeta) ?? ya, duplicado: true }
+    }
+    // mismo nombre en la misma carpeta con otro contenido: se reemplaza y se vuelve a procesar
+    const relBase = `archivos/${dep}`
+    const viejo = existentes.find((x) => x.origen === 'subido' && x.departamento === dep && x.nombre === nombre)
+    if (viejo) {
+      try {
+        fs.mkdirSync(a.ruta(relBase), { recursive: true })
+        escribirAtomico(data, a.ruta(viejo.ruta))
+        this.datos.archivoReprocesar(viejo.slug, carpeta, hash, data.length, leerPedido)
+        anotar(viejo.slug)
+      } catch {
+        throw new ErrorAPI(500, 'No pude guardar el archivo.')
+      }
+      this.despertar()
+      return { fila: this.datos.archivo(viejo.slug, carpeta) ?? viejo, reemplazado: true }
+    }
+    const destino = Extraccion.rutaLibre(a.ruta(relBase), nombre)
+    try {
+      fs.mkdirSync(a.ruta(relBase), { recursive: true })
+      escribirAtomico(data, destino)
+    } catch {
+      throw new ErrorAPI(500, 'No pude guardar el archivo.')
+    }
+    const slug = Slug.unico(TipoArchivo.sinExtension(nombre), this.datos.slugsUsados(carpeta), 'archivo')
+    const t = ahora()
+    const f = nuevaFila({ slug, oficina: carpeta, nombre: path.basename(destino), departamento: dep, ruta: `${relBase}/${path.basename(destino)}`,
+      origen: 'subido', tipo: ext, tam: data.length, hash, estado: 'pendiente', creado: t, actualizado: t, leerPedido })
+    if (p.entrega) f.entrega = p.entrega
+    try { this.datos.archivoGuardar(f) } catch { throw new ErrorAPI(500, 'No pude registrar el archivo.') }
+    this.despertar()
+    this.log.info(`biblioteca: archivo ${p.entrega ? 'de una entrega' : 'subido'} tipo=${ext} tam=${data.length}`)
+    return { fila: f }
+  }
+
+  /** Guarda en la biblioteca una copia de archivos de una entrega (los que la persona eligió al revisarla). Cada ruta tiene
+   *  que ser uno de los archivos de la entrega, estar dentro de la oficina, existir y tener un tipo soportado. La copia
+   *  queda fija: si el agente hace una versión nueva, la de la biblioteca no cambia. */
+  guardarDeEntrega(a: OficinaActiva, e: Entrega, rels: string[], dep: string, leerPedido: boolean): Obj[] {
+    if (dep !== carpetaCompartido && !a.oficina.departamentos.some((x) => x.id === dep)) throw new ErrorAPI(400, `El departamento «${dep}» no existe.`)
+    if (rels.length === 0) throw new ErrorAPI(400, 'Elegí al menos un archivo.')
+    const lim = this.limites(a.oficina)
+    const base = realAunqueFalte(path.resolve(a.carpeta))
+    const datos: { rel: string; nombre: string; data: Buffer }[] = []
+    for (const rel of rels) {
+      if (!e.archivos.includes(rel)) throw new ErrorAPI(400, `«${rel}» no es un archivo de esta entrega.`)
+      const abs = realAunqueFalte(path.resolve(a.carpeta, rel))
+      if (!dentro(base, abs) || abs === base) throw new ErrorAPI(400, `«${rel}» no está dentro de la oficina.`)
+      const nombre = Extraccion.nombreSeguro(path.basename(rel))
+      const ext = TipoArchivo.extension(nombre)
+      if (!TipoArchivo.soportados.has(ext)) throw new ErrorAPI(400, `«${nombre}» no se puede guardar en la biblioteca (${ext === '' ? 'sin extensión' : '.' + ext}).`)
+      let st: fs.Stats
+      try { st = fs.statSync(abs) } catch { throw new ErrorAPI(404, `«${nombre}» ya no está en la oficina.`) }
+      if (!st.isFile()) throw new ErrorAPI(400, `«${rel}» no es un archivo.`)
+      if (st.size > lim.maxArchivoBytes) throw new ErrorAPI(413, `«${nombre}» pesa ${tamTexto(st.size)} y el máximo es ${Math.floor(lim.maxArchivoBytes / MB)} MB.`)
+      let data: Buffer
+      try { data = fs.readFileSync(abs) } catch { throw new ErrorAPI(500, `No pude leer «${nombre}».`) }
+      if (data.length === 0) throw new ErrorAPI(400, `«${nombre}» está vacío.`)
+      datos.push({ rel, nombre, data })
+    }
+    return datos.map((d) => {
+      const r = this.guardarSubido(a, { nombre: d.nombre, data: d.data, dep, leerPedido, entrega: { id: e.id, agente: e.agente, ruta: d.rel } })
+      const v = archivoVista(r.fila)
+      if (r.duplicado) v.duplicado = true
+      if (r.reemplazado) v.reemplazado = true
+      return v
+    })
+  }
+
+  /** Los archivos de la entrega que se pueden guardar en la biblioteca: dentro de la oficina, que existen y con un tipo
+   *  soportado (las actas de reunión cuentan; las carpetas y los tipos que no se leen, no). */
+  guardables(a: OficinaActiva, e: Entrega): string[] {
+    const base = realAunqueFalte(path.resolve(a.carpeta))
+    return e.archivos.filter((rel) => {
+      if (!TipoArchivo.soportados.has(TipoArchivo.extension(path.basename(rel)))) return false
+      const abs = realAunqueFalte(path.resolve(a.carpeta, rel))
+      if (!dentro(base, abs) || abs === base) return false
+      try { return fs.statSync(abs).isFile() } catch { return false }
+    })
+  }
+
+  /** Los documentos de la biblioteca que salieron de esa entrega (`Archivo` de la API). */
+  vistasDeEntrega(oficina: string, id: number): Obj[] {
+    return this.datos.archivosDeEntrega(oficina, id).map((f) => archivoVista(f))
+  }
+
   /** `{nombre, tipo, mime, tam, ruta, base64?}`: la app no puede abrir un archivo local desde el WebView, así que los
    *  archivos de hasta 8 MB viajan en base64 (el front arma un Blob); los más grandes devuelven solo la ruta. */
   contenidoDe(ruta: string, nombre: string, tipo: string): Obj {
@@ -876,6 +1005,25 @@ export const bibliotecaDe = (s: Servicios) => s.huecos.biblioteca as Biblioteca
 // MARK: - rutas
 
 const sinSuperficie = (v: unknown): v is Obj => esObjeto(v)
+
+/** `Archivo` de la API (ver API.md). */
+export function archivoVista(f: ArchivoFila, snippet?: string): Obj {
+  const o: Obj = {
+    slug: f.slug, nombre: f.nombre, titulo: f.ficha && f.ficha.titulo !== '' ? f.ficha.titulo : f.nombre,
+    departamento: f.departamento, departamentos: f.departamentos, tipo: f.tipo, tam: f.tam, hash: f.hash, estado: f.estado, origen: f.origen, ruta: f.ruta,
+    creado: iso(f.creado), actualizado: iso(f.actualizado),
+    fichaRuta: `conocimiento/fuentes/${f.slug}.md`, textoRuta: `archivos/.texto/${f.slug}.md`,
+  }
+  if (f.vinculo !== undefined) o.vinculo = f.vinculo
+  if (f.error !== undefined) o.error = f.error
+  if (f.aviso !== undefined) o.aviso = f.aviso
+  if (f.ficha) o.ficha = fichaJSON(f.ficha)
+  if (f.leer.length > 0) o.leer = f.leer
+  if (Object.keys(f.lectura).length > 0) o.lectura = f.lectura
+  if (f.entrega) o.entrega = { id: f.entrega.id, agente: f.entrega.agente, ruta: f.entrega.ruta }
+  if (snippet !== undefined && snippet !== '') o.snippet = snippet
+  return o
+}
 
 /** `/api/archivos*`, `/api/vinculos*`, `/api/biblioteca*`. */
 export class BibliotecaRouter implements SubRouter {
@@ -958,22 +1106,7 @@ export class BibliotecaRouter implements SubRouter {
   private get oficinas() { return this.b.oficinas }
   private get datos() { return this.b.datos }
 
-  private vista(f: ArchivoFila, snippet?: string): Obj {
-    const o: Obj = {
-      slug: f.slug, nombre: f.nombre, titulo: f.ficha && f.ficha.titulo !== '' ? f.ficha.titulo : f.nombre,
-      departamento: f.departamento, departamentos: f.departamentos, tipo: f.tipo, tam: f.tam, hash: f.hash, estado: f.estado, origen: f.origen, ruta: f.ruta,
-      creado: iso(f.creado), actualizado: iso(f.actualizado),
-      fichaRuta: `conocimiento/fuentes/${f.slug}.md`, textoRuta: `archivos/.texto/${f.slug}.md`,
-    }
-    if (f.vinculo !== undefined) o.vinculo = f.vinculo
-    if (f.error !== undefined) o.error = f.error
-    if (f.aviso !== undefined) o.aviso = f.aviso
-    if (f.ficha) o.ficha = fichaJSON(f.ficha)
-    if (f.leer.length > 0) o.leer = f.leer
-    if (Object.keys(f.lectura).length > 0) o.lectura = f.lectura
-    if (snippet !== undefined && snippet !== '') o.snippet = snippet
-    return o
-  }
+  private vista(f: ArchivoFila, snippet?: string): Obj { return archivoVista(f, snippet) }
 
   private fila(slug: string, a: OficinaActiva): ArchivoFila {
     const f = this.datos.archivo(slug, a.carpeta)
@@ -1037,48 +1170,11 @@ export class BibliotecaRouter implements SubRouter {
     if (data.length === 0) throw new ErrorAPI(400, 'El contenido del archivo no es base64 válido.')
     if (data.length > lim.maxArchivoBytes) throw new ErrorAPI(413, `El archivo pesa ${tamTexto(data.length)} y el máximo es ${mb} MB.`)
     const leerPedido = typeof d.leer === 'boolean' ? d.leer : false
-    const hash = Extraccion.sha256(data)
-    const carpeta = a.carpeta
-    const existentes = this.datos.archivos(carpeta)
-
-    // mismo contenido en la misma carpeta: ya está
-    const ya = existentes.find((x) => x.origen === 'subido' && x.departamento === dep && x.hash === hash)
-    if (ya) {
-      const v = this.vista(ya)
-      v.duplicado = true
-      return { archivo: v, duplicado: true }
-    }
-    // mismo nombre en la misma carpeta con otro contenido: se reemplaza y se vuelve a procesar
-    const relBase = `archivos/${dep}`
-    const viejo = existentes.find((x) => x.origen === 'subido' && x.departamento === dep && x.nombre === nombre)
-    if (viejo) {
-      try {
-        fs.mkdirSync(a.ruta(relBase), { recursive: true })
-        escribirAtomico(data, a.ruta(viejo.ruta))
-        this.datos.archivoReprocesar(viejo.slug, carpeta, hash, data.length, leerPedido)
-      } catch {
-        throw new ErrorAPI(500, 'No pude guardar el archivo.')
-      }
-      const v = this.vista(this.datos.archivo(viejo.slug, carpeta) ?? viejo)
-      v.reemplazado = true
-      this.b.despertar()
-      return { archivo: v, reemplazado: true }
-    }
-    const destino = Extraccion.rutaLibre(a.ruta(relBase), nombre)
-    try {
-      fs.mkdirSync(a.ruta(relBase), { recursive: true })
-      escribirAtomico(data, destino)
-    } catch {
-      throw new ErrorAPI(500, 'No pude guardar el archivo.')
-    }
-    const slug = Slug.unico(TipoArchivo.sinExtension(nombre), this.datos.slugsUsados(carpeta), 'archivo')
-    const t = ahora()
-    const f = nuevaFila({ slug, oficina: carpeta, nombre: path.basename(destino), departamento: dep, ruta: `${relBase}/${path.basename(destino)}`,
-      origen: 'subido', tipo: ext, tam: data.length, hash, estado: 'pendiente', creado: t, actualizado: t, leerPedido })
-    try { this.datos.archivoGuardar(f) } catch { throw new ErrorAPI(500, 'No pude registrar el archivo.') }
-    this.b.despertar()
-    this.b.log.info(`biblioteca: archivo subido tipo=${ext} tam=${data.length}`)
-    return { archivo: this.vista(f) }
+    const r = this.b.guardarSubido(a, { nombre, data, dep, leerPedido })
+    const v = this.vista(r.fila)
+    if (r.duplicado) { v.duplicado = true; return { archivo: v, duplicado: true } }
+    if (r.reemplazado) { v.reemplazado = true; return { archivo: v, reemplazado: true } }
+    return { archivo: v }
   }
 
   /** Asigna un archivo subido a uno o más departamentos (o a «compartido», toda la oficina): el original queda en la

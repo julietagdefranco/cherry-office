@@ -165,7 +165,11 @@ App.Entregables = (function () {
     }
     if (e.archivos && e.archivos.length) {
       App.add(cuerpo, h('div.entrega-archivos', h('div.etiqueta-campo', 'Archivos'), e.archivos.map(function (rel) {
-        return h('button.archivo-fila', { onclick: function () { abrirArchivo(rel); }, title: rel }, App.icono('abrir'), h('span', rel));
+        var guardado = enBiblioteca(e, rel);
+        return h('div.entrega-archivo',
+          h('button.archivo-fila', { onclick: function () { abrirArchivo(rel); }, title: rel }, App.icono('abrir'), h('span', rel)),
+          guardado && App.Biblioteca ? h('button.insignia.ok.insignia-link', { title: 'Ver la copia en la biblioteca', onclick: function () { App.Biblioteca.abrir(guardado.slug); } },
+            App.icono('libro'), 'En la biblioteca') : null);
       })));
     }
     App.add(cuerpo, App.htmlSeguro(h('div.msg.a.entrega-texto', { style: { maxWidth: 'none' } }), App.markdown(e.texto || '(sin texto)')));
@@ -314,11 +318,60 @@ App.Entregables = (function () {
         }).catch(App.fallo);
       } }, 'Descartar'), ok);
     } else if (e.estado === 'sin_revisar' && !(ac && ac.estado === 'ejecutando')) {
+      if (guardables(e).length) botones.push(h('button.btn', { onclick: function () { hojaBiblioteca(e, true, pasoAprobacion); } }, App.icono('libro'), 'Listo y a la biblioteca'));
       botones.push(h('button.btn.primario', { onclick: function () { marcar(e, 'revisada', pasoAprobacion); } }, pasoAprobacion ? 'Listo, seguí' : 'Listo'));
     } else if (e.estado === 'revisada') {
+      if (guardables(e).some(function (rel) { return !enBiblioteca(e, rel); })) botones.push(h('button.btn', { onclick: function () { hojaBiblioteca(e, false); } }, App.icono('libro'), 'Guardar en la biblioteca'));
       botones.push(h('button.btn.fantasma', { onclick: function () { marcar(e, 'sin-revisar'); } }, 'Marcar sin revisar'));
     }
-    App.add(App.vaciar(pie), h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, botones));
+    App.add(App.vaciar(pie), h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', justifyContent: 'flex-end' } }, botones));
+  }
+
+  /* ---------------- guardar en la biblioteca ---------------- */
+  /* la copia de la biblioteca que salió de ese archivo de la entrega (si ya se guardó) */
+  function enBiblioteca(e, rel) {
+    return (e.enBiblioteca || []).filter(function (f) { return f.entrega && f.entrega.ruta === rel; })[0] || null;
+  }
+  function guardables(e) { return e.guardables || []; }
+
+  /* elige qué archivos, para quién y si lo leen; guarda una copia y, si viene de «Listo y a la biblioteca», la marca revisada */
+  function hojaBiblioteca(e, yListo, sigueFlujo) {
+    var rels = guardables(e);
+    var hj = App.hoja({ titulo: yListo ? 'Listo y a la biblioteca' : 'Guardar en la biblioteca', ancho: 520 });
+    var checks = rels.map(function (rel) {
+      var ck = h('input', { type: 'checkbox', checked: !enBiblioteca(e, rel) || rels.length === 1 });
+      return { rel: rel, ck: ck, fila: h('label.biblio-elegir', ck, h('span', { title: rel }, rel.split('/').pop()),
+        enBiblioteca(e, rel) ? h('span.insignia', 'ya está') : null) };
+    });
+    var ag = e.agente && App.agente(e.agente), deps = (App.E.oficina && App.E.oficina.departamentos) || [];
+    var porDefecto = ag && ag.departamento && deps.some(function (d) { return d.id === ag.departamento; }) ? ag.departamento : 'compartido';
+    var sel = h('select.campo', [h('option', { value: 'compartido' }, 'Toda la oficina')].concat(deps.map(function (d) {
+      return h('option', { value: d.id }, d.nombre);
+    })));
+    sel.value = porDefecto;
+    var leer = h('input', { type: 'checkbox' });
+    var err = h('div.error-txt');
+    App.add(hj.cuerpo,
+      h('div.fila-campo', h('label.etiqueta-campo', rels.length > 1 ? 'Qué archivos' : 'Archivo'),
+        rels.length > 1 ? h('div', checks.map(function (c) { return c.fila; })) : h('div', rels[0].split('/').pop())),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Para quién'), sel,
+        h('div.ayuda', 'Lo puede consultar quien elijas. Después lo podés cambiar desde la biblioteca.')),
+      h('label.biblio-elegir', leer, h('span', 'Que lo lean ahora y tomen notas desde su rol')),
+      h('div.ayuda', { style: { marginTop: '10px' } }, 'Se guarda una copia: si después pedís cambios, la de la biblioteca queda como está. El bibliotecario le arma una ficha y la suma al catálogo.'),
+      err);
+    var ok = h('button.btn.primario', { onclick: function () {
+      var elegidos = rels.length > 1 ? checks.filter(function (c) { return c.ck.checked; }).map(function (c) { return c.rel; }) : rels;
+      if (!elegidos.length) { err.textContent = 'Elegí al menos un archivo.'; return; }
+      ok.disabled = true; err.textContent = '';
+      api().post('/api/entregas/' + e.id + '/biblioteca', { archivos: elegidos, departamento: sel.value, leer: leer.checked }).then(function (r) {
+        hj.cerrar();
+        if (App.Biblioteca && App.Biblioteca.vigilarEstado) App.Biblioteca.vigilarEstado();
+        var n = (r.archivos || []).length, msg = n === 1 ? 'Guardado en la biblioteca.' : 'Guardados ' + n + ' archivos en la biblioteca.';
+        if (yListo) marcar(e, 'revisada', sigueFlujo, msg + (sigueFlujo ? ' El flujo sigue.' : ''));
+        else { App.aviso(msg); verEntrega(e.id); }
+      }).catch(function (x) { err.textContent = x.message; ok.disabled = false; });
+    } }, yListo ? 'Guardar y marcar listo' : 'Guardar');
+    App.add(hj.pie, h('button.btn', { onclick: hj.cerrar }, 'Cancelar'), ok);
   }
 
   /* ---------------- pedir cambios (E4) ---------------- */
@@ -362,12 +415,12 @@ App.Entregables = (function () {
     }, 3000);
   }
 
-  function marcar(e, como, sigueFlujo) {
+  function marcar(e, como, sigueFlujo, msg) {
     api().post('/api/entregas/' + e.id + '/' + como).then(function (r) {
       sinRevisar = r.sinRevisar | 0;
       refrescarUltimas();
       if (como === 'revisada') {
-        App.aviso(sigueFlujo ? 'Listo: el flujo sigue.' : 'Marcada como revisada.');
+        App.aviso(msg || (sigueFlujo ? 'Listo: el flujo sigue.' : 'Marcada como revisada.'));
         siguienteOLista(e.id);
       } else verEntrega(e.id);
     }).catch(App.fallo);

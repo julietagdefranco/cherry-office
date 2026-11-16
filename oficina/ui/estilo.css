@@ -586,6 +586,13 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .archivo-fila:hover { border-color: var(--linea-fuerte); }
 .archivo-fila span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entrega-texto { margin: 12px 14px 16px; }
+.entrega-archivo { display: flex; align-items: center; gap: 6px; }
+.entrega-archivo .archivo-fila { flex: 1; min-width: 0; }
+.entrega-archivo .insignia { margin-top: 4px; flex-shrink: 0; }
+.biblio-elegir { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; font-size: 13px; }
+.biblio-elegir span:not(.insignia) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.biblio-entrega { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 12px; font-size: 12px; color: var(--suave); }
+.biblio-entrega svg { flex-shrink: 0; margin-top: 1px; }
 
 /* tarjetas e insignia informativa (las usan Parte del día, Flujos y el Creador) */
 .tarjeta { background: var(--panel); border: 1px solid var(--linea); border-radius: var(--radio); padding: 12px; }

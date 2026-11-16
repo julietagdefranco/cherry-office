@@ -1,6 +1,7 @@
 // Port de app/Tests/BackendTests/EntregasTests.swift.
 // Sin acceso a internals: la suite de lógica pura (ArchivosEntrega, TextoEntrega) está en test/unit/entregas.test.ts
 // (EventoClaude.parsear y CajaArchivos viven en el runner), y el callback `avisos.alCrear` (notificación nativa) se omite en «un chat que solo responde…».
+import fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { Fix, Sandbox, U, chat, esperar, llamar, lista, str, type Obj } from '../support/sandbox.js'
 
@@ -111,6 +112,64 @@ describe('Entregas (API)', () => {
     await f.post(`/api/reuniones/${id}/cerrar`)
     const acta = num((await entregas(f, { origen: 'reunion' }))[0]?.id)
     expect((await f.post(`/api/entregas/${acta}/cambios`, { texto: 'x' })).status).toBe(409)
+  })
+
+  test('guardar en la biblioteca: copia fija con ficha, marca de qué entrega viene y no la da por revisada', async () => {
+    const f = await Fix.crear({ agentes: [{ id: 'marce', depto: 'direccion' }] })
+    const rel = 'archivos/entregables/marce/hipotesis.md'
+    await chat(f.b, { agent: 'marce', message: `Hipótesis de cliente ENTREGA:${rel}`, session: U.a })
+    const id = num((await entregas(f))[0]?.id)
+    const det0 = (await f.get(`/api/entregas/${id}`)).obj.entrega as Obj
+    expect(det0.guardables).toEqual([rel])
+    expect(det0.enBiblioteca).toEqual([])
+
+    const r = await f.post(`/api/entregas/${id}/biblioteca`, { departamento: 'redes' })
+    expect(r.status, JSON.stringify(r.obj)).toBe(200)
+    const a = (r.obj.archivos as Obj[])[0]!
+    expect(a.departamento).toBe('redes')
+    expect(str(a.ruta)).toBe('archivos/redes/hipotesis.md')
+    expect(a.entrega).toEqual({ id, agente: 'marce', ruta: rel })
+    expect(str((r.obj.entrega as Obj).estado)).toBe('sin_revisar')
+    expect(r.obj.sinRevisar).toBe(1)
+    expect(fs.readFileSync(f.ruta('archivos/redes/hipotesis.md'), 'utf8')).toBe('entregado por marce\n')
+    // queda en la biblioteca con su marca y se ficha como cualquier subida
+    const slug = str(a.slug)
+    const listo = await esperar(async () => ['listo', 'error'].includes(str(((await f.get(`/api/archivos/${slug}`)).obj.archivo as Obj).estado)), 15)
+    expect(listo).toBe(true)
+    const enLista = lista((await f.get('/api/archivos')).obj.archivos).find((x) => x.slug === slug)
+    expect(enLista?.entrega).toEqual({ id, agente: 'marce', ruta: rel })
+    const det1 = (await f.get(`/api/entregas/${id}`)).obj.entrega as Obj
+    expect(lista(det1.enBiblioteca).map((x) => x.slug)).toEqual([slug])
+    // la copia es fija: si el agente cambia el original, la de la biblioteca no se toca
+    fs.writeFileSync(f.ruta(rel), 'versión 2\n')
+    expect(fs.readFileSync(f.ruta('archivos/redes/hipotesis.md'), 'utf8')).toBe('entregado por marce\n')
+    // guardar dos veces lo mismo no duplica
+    fs.writeFileSync(f.ruta(rel), 'entregado por marce\n')
+    const otra = await f.post(`/api/entregas/${id}/biblioteca`, { departamento: 'redes' })
+    expect((otra.obj.archivos as Obj[])[0]!.duplicado).toBe(true)
+    expect(lista((await f.get('/api/archivos')).obj.archivos).length).toBe(1)
+  })
+
+  test('guardar en la biblioteca: errores (archivo ajeno, departamento, tipo no soportado, sin entrega)', async () => {
+    const f = await Fix.crear({ agentes: [{ id: 'marce', depto: 'direccion' }] })
+    await chat(f.b, { agent: 'marce', message: 'ENTREGA:archivos/entregables/marce/a.md', session: U.a })
+    await chat(f.b, { agent: 'marce', message: 'ENTREGA:archivos/entregables/marce/datos.zzz', session: U.b })
+    const [rara, buena] = (await entregas(f)).map((e) => num(e.id))
+    expect((await f.post(`/api/entregas/${buena}/biblioteca`, { archivos: ['archivos/compartido/otro.md'] })).status).toBe(400)
+    expect((await f.post(`/api/entregas/${buena}/biblioteca`, { archivos: ['../../etc/hosts'] })).status).toBe(400)
+    expect((await f.post(`/api/entregas/${buena}/biblioteca`, { archivos: 'a.md' })).status).toBe(400)
+    expect((await f.post(`/api/entregas/${buena}/biblioteca`, { archivos: [] })).status).toBe(409)
+    expect((await f.post(`/api/entregas/${buena}/biblioteca`, { departamento: 'nada' })).status).toBe(400)
+    expect(((await f.get(`/api/entregas/${rara}`)).obj.entrega as Obj).guardables).toEqual([])
+    expect((await f.post(`/api/entregas/${rara}/biblioteca`)).status).toBe(409)
+    expect((await f.post(`/api/entregas/${rara}/biblioteca`, { archivos: ['archivos/entregables/marce/datos.zzz'] })).status).toBe(400)
+    // si el archivo ya no está, no se ofrece y no se guarda
+    fs.rmSync(f.ruta('archivos/entregables/marce/a.md'))
+    expect(((await f.get(`/api/entregas/${buena}`)).obj.entrega as Obj).guardables).toEqual([])
+    expect((await f.post(`/api/entregas/${buena}/biblioteca`, { archivos: ['archivos/entregables/marce/a.md'] })).status).toBe(404)
+    expect((await f.post('/api/entregas/9999/biblioteca')).status).toBe(404)
+    expect((await f.get(`/api/entregas/${buena}/biblioteca`)).status).toBe(405)
+    expect(lista((await f.get('/api/archivos')).obj.archivos)).toEqual([])
   })
 
   test('sin oficina: /api/entregas 409 y /api/actividad trae el contador en 0', async () => {
