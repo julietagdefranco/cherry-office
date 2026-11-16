@@ -83,7 +83,8 @@
           h('button.agente-cara', { title: 'Ver la ficha de ' + a.nombre + ' (perfil, permisos, notas, tareas, archivos)', onclick: function () { irPestana('perfil'); } },
             App.retratoImg(a, 'retrato', 120), h('span.agente-lapiz', App.icono('lapiz'))),
           h('div.der-tit', h('h2', a.nombre), sub),
-          h('div.der-acciones', h('button.btn.fantasma.icono', { title: 'Charla nueva con ' + a.nombre, onclick: function () { nueva(a.id); } }, App.icono('mas'))),
+          /* con texto: un «+» solo no dice qué agrega. La charla actual no se pierde: queda en la lista de Charlas */
+          h('div.der-acciones', h('button.btn.chico', { title: 'Empezar de cero con ' + a.nombre + '. Esta charla queda guardada en Charlas.', onclick: function () { nueva(a.id); } }, App.icono('mas'), 'Nueva charla')),
           cerrarBtn),
         cuerpo, pie);
     } else {
