@@ -91,7 +91,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "julietagdefranco",
+        "owner": "salaesp",
         "repo": "cherry-office",
         "releaseType": "release"
       }

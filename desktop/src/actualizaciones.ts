@@ -138,7 +138,7 @@ async function buscarMac(esManual: boolean) {
     const bundle = mac.bundleActual(app.getPath('exe'))
     const motivo = mac.impedimento(bundle)
     if (motivo) {
-      const e = { tipo: 'manual' as const, version, motivo, url: entrada.notas || 'https://github.com/julietagdefranco/cherry-office/releases/latest' }
+      const e = { tipo: 'manual' as const, version, motivo, url: entrada.notas || 'https://github.com/salaesp/cherry-office/releases/latest' }
       cambiar(e)
       if (esManual) void ofrecerDescarga(e)
       return

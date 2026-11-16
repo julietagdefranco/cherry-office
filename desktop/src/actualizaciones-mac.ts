@@ -14,7 +14,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-export const FEED = 'https://github.com/julietagdefranco/cherry-office/releases/latest/download/appcast.xml'
+export const FEED = 'https://github.com/salaesp/cherry-office/releases/latest/download/appcast.xml'
 /** Clave pública EdDSA del proyecto (la privada es el secret SPARKLE_PRIVATE_KEY del workflow de release). También va
  *  en el Info.plist (`build.mac.extendInfo.SUPublicEDKey` en package.json): Sparkle de la 1.0 Swift rechaza una
  *  actualización sin firma de Developer ID si la app nueva no trae la misma clave. */
