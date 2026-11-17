@@ -314,6 +314,9 @@
           if (!vivoEl.isConnected) return;
           var abajo = cuerpo.scrollHeight - cuerpo.scrollTop - cuerpo.clientHeight < 80;
           var nuevo = App.ChatRico.burbujaVivo(vivos[a.id], a.nombre);
+          /* los comandos que la persona desplegó siguen abiertos al refrescar */
+          var abiertos = Array.prototype.map.call(vivoEl.querySelectorAll('details.paso-detalle'), function (d) { return d.open; });
+          Array.prototype.forEach.call(nuevo.querySelectorAll('details.paso-detalle'), function (d, i) { if (abiertos[i]) d.open = true; });
           vivoEl.replaceWith(nuevo); vivoEl = nuevo;
           if (abajo) cuerpo.scrollTop = cuerpo.scrollHeight;
         } };

@@ -241,9 +241,19 @@
     if (!o) return '';
     return DE_ARCHIVO.test(p.nombre) || (/\//.test(o) && !/\s/.test(o)) ? App.humano.ruta(o).corta : o;
   }
+  /* qué se le pidió a la herramienta (el comando de Bash, la búsqueda, la URL), para verlo desplegando la línea */
+  var ETIQUETA_DETALLE = { Bash: 'Comando', Grep: 'Búsqueda', Glob: 'Búsqueda', WebFetch: 'Dirección', Task: 'Encargo', Agent: 'Encargo' };
   function lineaHerramienta(p) {
     var o = objetivoCorto(p);
-    return h('div.paso-herr', h('span.paso-punto'), h('span', verbo(p.nombre)), o ? h('span.paso-obj', { title: p.objetivo !== o ? App.humano.ruta(p.objetivo).completa : '' }, o) : null);
+    var partes = [h('span.paso-punto'), h('span', verbo(p.nombre)), o ? h('span.paso-obj', { title: p.objetivo !== o ? App.humano.ruta(p.objetivo).completa : '' }, o) : null];
+    if (!p.detalle) return h('div.paso-herr', partes);
+    var pre = h('pre.paso-detalle-cod', p.detalle);
+    return h('details.paso-detalle',
+      h('summary.paso-herr', partes),
+      h('div.paso-detalle-caja',
+        h('div.paso-detalle-cab', h('span', ETIQUETA_DETALLE[p.nombre] || 'Detalle'),
+          h('button.md-codigo-btn', { type: 'button', onclick: function (ev) { ev.preventDefault(); copiar(p.detalle); } }, 'Copiar')),
+        pre));
   }
   /* los pasos en orden: textos intermedios formateados y una línea por herramienta (los archivos van en tarjetas) */
   function listaPasos(pasos) {
