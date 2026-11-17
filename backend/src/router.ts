@@ -60,7 +60,7 @@ export class Router implements APIHandler {
     if (enPrefijo(p, '/api/tareas')) return seccion(this.tareas)
     if (enPrefijo(p, '/api/entregas')) return seccion(this.entregas)
     if (p === '/api/oficina/exportar' || p === '/api/oficinas/importar') return seccion(this.paquete)
-    if (p === '/api/fs/carpetas' || p === '/api/oficina/archivos' || p === '/api/oficina/archivo') return seccion(this.explorador)
+    if (p === '/api/fs/carpetas' || p === '/api/oficina/archivos' || p === '/api/oficina/archivo' || p === '/api/oficina/vista') return seccion(this.explorador)
     const [status, obj] = await this.despachar(m, p, query, body)
     return { status, json: codificar(obj) }
   }

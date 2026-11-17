@@ -34,6 +34,27 @@ describe('Vista previa de entregas (API)', () => {
     expect((await f.get(`/api/entregas/${id}/vista`, { ruta: rel })).status).toBe(404)
   })
 
+  test('/api/oficina/vista: cualquier página de la oficina, empaquetada; nada de afuera ni ocultos', async () => {
+    const f = await Fix.crear({ agentes: [{ id: 'marce', depto: 'direccion' }] })
+    fs.mkdirSync(f.ruta('landings/prosperas/img'), { recursive: true })
+    fs.writeFileSync(f.ruta('landings/prosperas/estilos.css'), 'body{background:url(img/fondo.png)}')
+    fs.writeFileSync(f.ruta('landings/prosperas/img/fondo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    fs.writeFileSync(f.ruta('landings/prosperas/index.html'), '<html><head><link rel="stylesheet" href="estilos.css"></head><body><img src="../../../afuera.png"></body></html>')
+    const r = await f.get('/api/oficina/vista', { ruta: 'landings/prosperas/index.html' })
+    expect(r.status, JSON.stringify(r.obj)).toBe(200)
+    const v = r.obj.vista as Obj
+    expect(v.tipo).toBe('html')
+    expect(str(v.html)).toContain('<style>body{background:url(data:image/png;base64,')
+    expect(str(v.html)).toContain('src="../../../afuera.png"')   // sale de la oficina: queda como estaba, con aviso
+    expect((v.avisos as string[]).length).toBe(1)
+    expect((await f.get('/api/oficina/vista', { ruta: '../afuera.html' })).status).toBe(403)
+    expect((await f.get('/api/oficina/vista', { ruta: '/etc/hosts' })).status).toBe(403)
+    expect((await f.get('/api/oficina/vista', { ruta: '.git/config' })).status).toBe(403)
+    expect((await f.get('/api/oficina/vista', { ruta: 'landings' })).status).toBe(400)
+    expect((await f.get('/api/oficina/vista', { ruta: 'landings/nada.html' })).status).toBe(404)
+    expect((await f.post('/api/oficina/vista', {})).status).toBe(405)
+  })
+
   test('vista de markdown y CSV', async () => {
     const { f, id } = await conEntrega('archivos/entregables/marce/datos.csv')
     fs.writeFileSync(f.ruta('archivos/entregables/marce/datos.csv'), 'nombre,precio\n"Remera, azul",100\n')

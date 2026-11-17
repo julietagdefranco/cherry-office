@@ -5,6 +5,7 @@
 //   POST /api/fs/carpetas {padre, nombre}     crea una subcarpeta dentro de $HOME
 //   GET  /api/oficina/archivos?ruta=<rel>     lista de la carpeta de la oficina activa
 //   GET  /api/oficina/archivo?ruta=<rel>      vista previa: {texto} (512 KB) o {base64, mime} (imágenes, 2 MB)
+//   GET  /api/oficina/vista?ruta=<rel>        lista para mostrar (Vista.leer): una página trae adentro su CSS, JS e imágenes
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Config } from './config.js'
@@ -12,6 +13,7 @@ import { ErrorAPI } from './errores.js'
 import { esObjeto, type Obj } from './json.js'
 import type { HQLog } from './log.js'
 import type { Oficinas } from './oficinas.js'
+import { Vista } from './vista.js'
 import { atrapar, no405, type Query, type RespuestaAPI, type SubRouter } from './router.js'
 
 const maxEntradas = 500
@@ -20,7 +22,7 @@ const maxImagen = 2 * 1024 * 1024
 const maxNombre = 120
 const extTexto = new Set(['md', 'markdown', 'txt', 'json', 'csv', 'tsv', 'log', 'html', 'htm', 'svg', 'mmd', 'mermaid', 'xml', 'yaml', 'yml', 'js', 'mjs', 'ts', 'css', 'py', 'sh', 'sql'])
 const extImagen: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
-const rutas = new Set(['/api/fs/carpetas', '/api/oficina/archivos', '/api/oficina/archivo'])
+const rutas = new Set(['/api/fs/carpetas', '/api/oficina/archivos', '/api/oficina/archivo', '/api/oficina/vista'])
 /** En Windows y macOS (por defecto) el sistema de archivos no distingue mayúsculas: la contención tampoco. */
 const sinMayusculas = process.platform === 'win32'
 
@@ -87,6 +89,7 @@ export class ExploradorRouter implements SubRouter {
         if (p === '/api/fs/carpetas' && method === 'POST') return [200, this.crearCarpeta(body)]
         if (p === '/api/oficina/archivos' && method === 'GET') return [200, this.archivos(query)]
         if (p === '/api/oficina/archivo' && method === 'GET') return [200, this.archivo(query)]
+        if (p === '/api/oficina/vista' && method === 'GET') return [200, this.vista(query)]
         return no405
       } catch (e) {
         if (!(e instanceof ErrorAPI)) this.log.error('explorador: error interno')
@@ -222,6 +225,15 @@ export class ExploradorRouter implements SubRouter {
       carpeta: base, ruta: partes.join('/'), truncado,
       archivos: filas.map((f) => ({ rel: f.rel, nombre: f.nombre, esCarpeta: f.dir, tam: f.tam, mod: f.mod })),
     }
+  }
+
+  /** Como `archivo`, pero lista para mostrar: una página HTML viene empaquetada (vista.ts), así el visor aislado del
+   *  chat la ve con sus estilos e imágenes. Mismas reglas de ruta que el resto de la oficina. */
+  private vista(q: Query): Obj {
+    const { partes, real: r } = this.resolverEnOficina(q.ruta ?? '')
+    if (partes.length === 0) throw new ErrorAPI(400, 'Falta la ruta del archivo.')
+    if (!esArchivoRegular(r)) throw new ErrorAPI(400, 'Eso no es un archivo.')
+    return { vista: Vista.leer(this.oficinas.requerirActiva().carpeta, partes.join('/')) }
   }
 
   private archivo(q: Query): Obj {

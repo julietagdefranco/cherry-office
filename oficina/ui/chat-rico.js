@@ -69,14 +69,15 @@
   }
 
   /* visor grande: vista / código, copiar y abrir el archivo con otra app si lo hay */
+  /* `op.vista`: lo que se dibuja, si no es el código mismo (una página de la oficina empaquetada con su CSS e imágenes) */
   function verArtefacto(op) {
-    var tipo = op.tipo, codigo = op.codigo || '';
+    var tipo = op.tipo, codigo = op.codigo || '', vista = op.vista || codigo;
     var hj = App.hoja({ titulo: op.titulo || tituloDe(tipo, codigo), ancho: 1040, alto: '90vh' });
     hj.el.classList.add('hoja-artefacto');
     var verCodigo = false;
     function pintar() {
       App.vaciar(hj.cuerpo);
-      hj.cuerpo.appendChild(verCodigo ? h('pre.artefacto-codigo', codigo) : iframe(tipo, codigo));
+      hj.cuerpo.appendChild(verCodigo ? h('pre.artefacto-codigo', codigo) : iframe(tipo, vista));
       alternar.textContent = verCodigo ? 'Ver vista' : 'Ver código';
     }
     var alternar = h('button.btn.izq', { onclick: function () { verCodigo = !verCodigo; pintar(); } });
@@ -114,10 +115,17 @@
   function abrirArchivo(rel, alFallar) {
     var e = ext(rel), nombre = rel.split('/').pop(), fallo = alFallar || App.fallo;
     if (EXT_IMAGEN[e]) { cargarImagen(rel).then(function (src) { verImagen(src, nombre); }, fallo); return; }
-    App.api.get('/api/oficina/archivo', { ruta: rel }).then(function (c) {
+    // una página se dibuja empaquetada (/api/oficina/vista): el iframe aislado no puede pedir su CSS, JS ni imágenes
+    var empaquetada = EXT_ARTEFACTO[e] === 'html'
+      ? App.api.get('/api/oficina/vista', { ruta: rel }).then(function (r) { return r.vista; }, function () { return null; })
+      : Promise.resolve(null);
+    Promise.all([App.api.get('/api/oficina/archivo', { ruta: rel }), empaquetada]).then(function (rs) {
+      var c = rs[0], v = rs[1];
       if (EXT_ARTEFACTO[e] && typeof c.texto === 'string') {
-        if (c.truncado) App.aviso('El archivo es largo: se muestra solo el principio.', true);
-        verArtefacto({ tipo: EXT_ARTEFACTO[e], codigo: c.texto, titulo: nombre, ruta: c.ruta });
+        if (c.truncado && !(v && v.html)) App.aviso('El archivo es largo: se muestra solo el principio.', true);
+        var avisos = v && v.avisos || [];
+        if (avisos.length) App.aviso(avisos.length === 1 ? avisos[0] : avisos[0] + ' (y ' + (avisos.length - 1) + ' más)', true);
+        verArtefacto({ tipo: EXT_ARTEFACTO[e], codigo: c.texto, vista: v && v.html, titulo: nombre, ruta: c.ruta });
       } else App.abrirContenido(c);
     }).catch(fallo);
   }
