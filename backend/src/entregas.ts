@@ -29,7 +29,17 @@ export type Entrega = {
   revisada?: number
   padre?: number
   costo?: number
+  /** Las notas de «Pedir cambios» con las que la persona pidió la versión siguiente (docs/plan-vista-previa.md). */
+  notas?: NotaEntrega[]
+  /** Retoques a mano de la persona sobre los archivos de esta entrega, del más viejo al más nuevo. */
+  retoques?: Retoque[]
 }
+
+/** Dónde apunta una nota: un elemento de la página, una cita del texto o un punto de una imagen. */
+export type AnclaNota = { cita?: string; selector?: string; seccion?: string; x?: number; y?: number }
+export type NotaEntrega = { archivo: string; ancla?: AnclaNota; texto: string }
+/** `foto`: copia del archivo antes del retoque, relativa a la oficina (en la papelera). */
+export type Retoque = { archivo: string; ts: number; foto: string }
 
 export const iso = (t: number) => new Date(t * 1000).toISOString()
 
@@ -57,6 +67,7 @@ export function entregaJSON(e: Entrega): Obj {
     id: e.id, agente: e.agente, origen: e.origen, ref: e.ref, titulo: e.titulo, resumen: TextoEntrega.resumen(e.texto),
     sid: e.sid, archivos: e.archivos, creada: iso(e.creada), estado: e.estado,
     revisada: e.revisada === undefined ? null : iso(e.revisada), padre: e.padre ?? null, costo: e.costo ?? null,
+    notas: e.notas ?? [], retoques: (e.retoques ?? []).map((r) => ({ archivo: r.archivo, ts: iso(r.ts) })),
   }
 }
 export const entregaJSONCompleto = (e: Entrega): Obj => ({ ...entregaJSON(e), texto: e.texto })
@@ -100,7 +111,7 @@ function realAunqueFalte(p: string): string {
 
 // MARK: - SQLite
 
-const columnas = 'id,oficina,agente,origen,ref,titulo,texto,sid,archivos,creada,estado,revisada,padre,costo'
+const columnas = 'id,oficina,agente,origen,ref,titulo,texto,sid,archivos,creada,estado,revisada,padre,costo,notas,retoques'
 
 function deFila(f: Fila): Entrega {
   let archivos: string[] = []
@@ -115,7 +126,21 @@ function deFila(f: Fila): Entrega {
   if (f.revisada !== null && f.revisada !== undefined) e.revisada = num(f.revisada)
   if (f.padre !== null && f.padre !== undefined) e.padre = num(f.padre)
   if (f.costo !== null && f.costo !== undefined) e.costo = num(f.costo)
+  const notas = listaJSON(f.notas)
+  if (notas.length) e.notas = notas as NotaEntrega[]
+  const retoques = listaJSON(f.retoques)
+  if (retoques.length) e.retoques = retoques as Retoque[]
   return e
+}
+
+function listaJSON(v: SQLValor | undefined): unknown[] {
+  if (v === null || v === undefined) return []
+  try {
+    const a = JSON.parse(txt(v))
+    return Array.isArray(a) ? a.filter((x) => typeof x === 'object' && x !== null) : []
+  } catch {
+    return []
+  }
 }
 
 export type GanchoRegistro = (e: Entrega) => void
@@ -145,6 +170,20 @@ export class Entregas {
     CREATE INDEX IF NOT EXISTS entregas_oficina ON entregas(oficina, estado, id);
     CREATE INDEX IF NOT EXISTS entregas_ref ON entregas(oficina, ref);
     `)
+    const cols = store.db.query('PRAGMA table_info(entregas)').map((f) => txt(f.name))
+    for (const c of ['notas', 'retoques']) if (!cols.includes(c)) store.db.exec(`ALTER TABLE entregas ADD COLUMN ${c} TEXT`)
+  }
+
+  /** Guarda las notas con las que se pidieron cambios sobre esta entrega. */
+  guardarNotas(oficina: string, id: number, notas: NotaEntrega[]): Entrega | undefined {
+    this.store.db.run('UPDATE entregas SET notas=? WHERE oficina=? AND id=?', [notas.length ? JSON.stringify(notas) : null, oficina, id])
+    return this.una(oficina, id)
+  }
+
+  /** Reemplaza la lista de retoques (sumar uno o deshacer el último). */
+  guardarRetoques(oficina: string, id: number, retoques: Retoque[]): Entrega | undefined {
+    this.store.db.run('UPDATE entregas SET retoques=? WHERE oficina=? AND id=?', [retoques.length ? JSON.stringify(retoques) : null, oficina, id])
+    return this.una(oficina, id)
   }
 
   crear(p: { oficina: string; agente: string; origen: string; ref: string; titulo: string; texto: string; sid?: string; archivos?: string[]; padre?: number; costo?: number }): Entrega | undefined {
