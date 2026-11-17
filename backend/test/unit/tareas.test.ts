@@ -188,6 +188,12 @@ describe('Tareas: validación y formato del modelo', () => {
     const muchas = (n: number) => Array.from({ length: n }, (_, i) => tarea({ id: `t${i}` }))
     expect(valida(...muchas(50))).toBe(true)
     expect(valida(...muchas(51))).toBe(false)
+    // las únicas hechas no cuentan para las 50 por hacer, pero sí para el total guardado (500)
+    const hechas = (n: number) => Array.from({ length: n }, (_, i) => tarea({ id: `h${i}`, dias: [], fecha: '2026-11-20', hecha: '2026-11-20T11:00:00Z', activa: false }))
+    expect(valida(...muchas(50), ...hechas(100))).toBe(true)
+    expect(valida(...muchas(50), ...hechas(450))).toBe(true)
+    expect(valida(...muchas(50), ...hechas(451))).toBe(false)
+    expect(valida(...muchas(10), ...hechas(491))).toBe(false)
     // una tarea desactivada de un agente que ya no está se conserva (así se guardan al despedir)
     expect(valida(tarea({ agente: 'nadie', activa: false }))).toBe(true)
     // una sola vez

@@ -824,7 +824,7 @@ export const Creador = {
         const [tarea] = of.modificar((o) => {
           if (!o.agentes.some((a) => a.id === agente)) throw new ErrorAPI(404, `No existe el agente «${agente}».`)
           const ts = o.tareas ?? []
-          if (ts.length >= ValidarTareas.maxTareas) throw new ErrorAPI(400, `Máximo ${ValidarTareas.maxTareas} tareas programadas.`)
+          ValidarTareas.hayLugar(ts)
           const usados = new Set(ts.map((x) => x.id))
           const pedido = texto(d.id)
           if (pedido !== undefined && usados.has(pedido)) throw new ErrorAPI(409, 'Ya hay una tarea con ese id.')

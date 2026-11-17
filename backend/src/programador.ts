@@ -814,6 +814,9 @@ export class TareasRouter implements SubRouter {
       const c = Programacion.instanteUnica(t, this.sistema)
       o.cuando = c ? Programacion.iso(c) : null
     }
+    // salió de una charla: con quién era (para «Salió de un chat con…» y abrir esa charla)
+    const de = charlaDe(t, a, this.s.store)
+    if (de) o.charla = { agente: de.id, nombre: de.nombre }
     return o
   }
 
@@ -881,12 +884,23 @@ export class TareasRouter implements SubRouter {
     return v
   }
 
-  /** `{reunion, pendiente}` opcional («Convertir en tarea» desde el acta). */
-  private static origen(v: unknown): OrigenTarea | undefined {
+  /** Opcional: `{reunion, pendiente}` («Convertir en tarea» desde el acta) o `{chat}` («Sacar tareas» de una charla de la
+   *  oficina activa). */
+  private origen(v: unknown): OrigenTarea | undefined {
     if (v === undefined || v === null) return undefined
-    const malo = () => new ErrorAPI(400, '«origen» tiene que ser {reunion, pendiente}.')
-    if (!esObjeto(v) || typeof v.reunion !== 'string' || typeof v.pendiente !== 'number' || !Number.isInteger(v.pendiente)) throw malo()
-    const o: OrigenTarea = { reunion: v.reunion.toLowerCase(), pendiente: v.pendiente }
+    const malo = () => new ErrorAPI(400, '«origen» tiene que ser {reunion, pendiente} o {chat}.')
+    if (!esObjeto(v)) throw malo()
+    let o: OrigenTarea
+    if (v.chat !== undefined) {
+      if (typeof v.chat !== 'string') throw malo()
+      o = { chat: v.chat.toLowerCase() }
+      if (!ValidarTareas.origenValido(o)) throw malo()
+      const act = this.s.oficinas.requerirActiva()
+      if (this.s.store.oficinaDe(o.chat) !== act.carpeta) throw new ErrorAPI(400, 'Esa charla no es de esta oficina.')
+      return o
+    }
+    if (typeof v.reunion !== 'string' || typeof v.pendiente !== 'number' || !Number.isInteger(v.pendiente)) throw malo()
+    o = { reunion: v.reunion.toLowerCase(), pendiente: v.pendiente }
     if (!ValidarTareas.origenValido(o)) throw malo()
     return o
   }
@@ -945,7 +959,7 @@ export class TareasRouter implements SubRouter {
       hora = TareasRouter.hora(d.hora)
     }
     const activa = TareasRouter.booleano(d.activa, 'activa') ?? true
-    const origen = TareasRouter.origen(d.origen)
+    const origen = this.origen(d.origen)
     const pedidoId = Validar.texto(d.id, 'id', 41, false)
     if (pedidoId !== undefined && !Slug.valido(pedidoId)) throw new ErrorAPI(400, 'Id de tarea inválido (usá minúsculas, números y guiones).')
     const adjuntos = this.guardarAdjuntos(Adjuntos.leer(d.archivos), agente)
@@ -953,7 +967,7 @@ export class TareasRouter implements SubRouter {
     const [t, a] = this.s.oficinas.modificar((o) => {
       if (!o.agentes.some((x) => x.id === agente)) throw new ErrorAPI(404, 'No existe ese agente.')
       const ts = o.tareas ?? []
-      if (ts.length >= ValidarTareas.maxTareas) throw new ErrorAPI(400, `Máximo ${ValidarTareas.maxTareas} tareas programadas.`)
+      ValidarTareas.hayLugar(ts)
       const usados = new Set(ts.map((x) => x.id))
       if (pedidoId !== undefined && usados.has(pedidoId)) throw new ErrorAPI(409, 'Ya hay una tarea con ese id.')
       const id = pedidoId ?? Slug.unico(nombre, usados, 'tarea')
@@ -1122,8 +1136,11 @@ export function instalar(s: Servicios) {
   prog.alTerminar((e) => {
     if (e.estado === 'ok') return
     const of = s.oficinas.activa()?.oficina
-    const tarea = of?.tareas?.find((t) => t.id === e.tarea)?.nombre ?? nombreCorrida(e.tarea)
-    const texto = `«${tarea}» falló: ` + (e.error ?? 'error')
+    const t = of?.tareas?.find((x) => x.id === e.tarea)
+    const tarea = t?.nombre ?? nombreCorrida(e.tarea)
+    const act = s.oficinas.activa()
+    const de = t && act ? charlaDe(t, act, s.store) : undefined
+    const texto = `«${tarea}» falló: ` + (e.error ?? 'error') + (de ? ` (salió de un chat con ${de.nombre})` : '')
     const av = s.avisos.crear({ oficina: e.oficina, tipo: 'error', agente: e.agente, texto, ref: e.sid })
     if (av) s.avisos.emitir(av, of?.agentes.find((a) => a.id === e.agente)?.nombre ?? e.agente)
   })
@@ -1133,6 +1150,13 @@ export function instalar(s: Servicios) {
   // Swift: programador.detener → mcp.cerrar → runner.shutdown → programador.esperar
   s.alCerrar.unshift(() => prog.detener())
   s.despuesDeProcesos.push(() => prog.esperar())
+}
+
+/** Si la tarea salió de una charla de la oficina: el agente de esa charla (si todavía está). */
+function charlaDe(t: TareaProgramada, a: OficinaActiva, store: Servicios['store']): AgenteDef | undefined {
+  if (!t.origen || !('chat' in t.origen)) return undefined
+  const id = store.agenteDe(t.origen.chat)
+  return id === undefined ? undefined : a.oficina.agentes.find((x) => x.id === id)
 }
 
 registrarModulo('tareas', 40, instalar)

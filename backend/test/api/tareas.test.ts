@@ -4,6 +4,7 @@
 // Sin acceso a internals: la lógica pura (Programacion.*, Validar.oficina, decodificación de Oficina), todo lo que usa el
 // reloj del programador (`revisar()` / `fijarReloj`) y la tabla `ejecuciones` están en test/unit/tareas.test.ts. Los ganchos
 // (`alTerminar`, `avisos.alCrear`) se omiten en los tests de abajo (comentarios `interno`).
+import fs from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { Fix, Sandbox, esperar, dict, historial, lista, llamar, msgs, sinPrivate, str, type Obj, ruta, regla } from '../support/sandbox.js'
 
@@ -62,7 +63,7 @@ describe('Tareas programadas (API y programador)', () => {
     expect(str(dict((await nueva(f)).obj.tarea).id)).toBe('informe-diario-2')
   })
 
-  test('crear: validaciones (400), agente inexistente (404), id repetido (409), tope de 50', async () => {
+  test('crear: validaciones (400), agente inexistente (404), id repetido (409), tope de 50 por hacer (las hechas no cuentan)', async () => {
     const f = await fix()
     const malo = async (extra: Obj, estado = 400) => {
       const r = await nueva(f, extra)
@@ -95,6 +96,17 @@ describe('Tareas programadas (API y programador)', () => {
     expect(lista(f.oficinaJSON().tareas).length).toBe(50)
     await malo({})
     expect(lista(f.oficinaJSON().tareas).length).toBe(50)
+    // una de una sola vez que ya se hizo no cuenta: libera lugar
+    const o = f.oficinaJSON()
+    const ts = lista(o.tareas)
+    Object.assign(ts[0]!, { dias: [], fecha: '2026-11-20', hecha: '2026-11-20T11:00:00Z', activa: false })
+    fs.writeFileSync(f.ruta('oficina.json'), JSON.stringify(o))
+    expect((await nueva(f, { nombre: 'Entra' })).status).toBe(200)
+    expect(lista(f.oficinaJSON().tareas).length).toBe(51)
+    await malo({})
+    // reactivar la hecha (cambiarle la fecha) también choca con el tope
+    const id = str(ts[0]!.id)
+    expect((await f.patch(`/api/tareas/${id}`, { fecha: '2099-01-01' })).status).toBe(400)
   })
 
   test('editar: parcial, valida igual, 404 si no existe; el horario o reactivar fijan «desde»', async () => {
