@@ -425,5 +425,11 @@ addEventListener('hashchange', () => render(T));
 new ResizeObserver(resize).observe(stage);
 resize(); render(0); requestAnimationFrame(frame);
 
-window.OFI = { AG, ST, TEAMS, TOOLTXT, SALAS, drawChar: (...x) => drawChar(...x), ALTO: () => drawChar.ALTO || 42, go, resize, setSel: x => { sel = x; }, pickAgent: a => pick(a) };
+window.OFI = { AG, ST, TEAMS, TOOLTXT, SALAS, drawChar: (...x) => drawChar(...x), ALTO: () => drawChar.ALTO || 42, go, resize, setSel: x => { sel = x; }, pickAgent: a => pick(a),
+  /* dónde está la cabeza de un agente, en px CSS relativos al canvas (para anclar la tarjeta de estado) */
+  /* centra a un agente en el hueco que dejan los paneles (izq/der en px CSS tapados a cada lado) */
+  enfocar: (a, izq = 0, der = 0) => { zone = null; const k = Math.max(kNear, cam.k), to = { cx: a.sx - (izq - der) / 2 * dpr / k, cy: a.sy - 24, k };
+    document.querySelectorAll('#zones button[data-z]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    if (reduce) { Object.assign(cam, to); tween = null; } else tween = { from: { ...cam }, to, t0: performance.now() }; },
+  aPantalla: a => ({ x: (a.sx * lastK + lastDx) / dpr, y: (a.top * lastK + lastDy) / dpr, pie: (a.sy * lastK + lastDy) / dpr }) };
 })();
