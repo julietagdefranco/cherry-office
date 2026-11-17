@@ -161,7 +161,8 @@ App.Entregables = (function () {
     App.Nav.ir('#/archivos/carpeta' + (rel ? '/' + rel.split('/').map(encodeURIComponent).join('/') : ''));
   }
 
-  function abrirArchivo(rel) {
+  function abrirArchivo(rel, e) {
+    if (e && App.Revisar && App.Revisar.tipo(rel) !== 'otro') { revisar(e, rel); return; }
     if (App.esMarkdown(rel)) { App.abrirMarkdownOficina(rel); return; }
     if (App.nativo.hay && App.E.carpeta) { App.nativo.abrir(App.E.carpeta.replace(/\/$/, '') + '/' + rel); return; }
     api().get('/api/oficina/archivo', { ruta: rel }).then(App.abrirContenido).catch(App.fallo);
@@ -193,16 +194,31 @@ App.Entregables = (function () {
       var carpeta = e.archivos[0].split('/').slice(0, -1).join('/');
       App.add(cuerpo, h('div.entrega-archivos',
         h('div.entrega-archivos-cab', h('span.etiqueta-campo', e.archivos.length === 1 ? 'Archivo' : e.archivos.length + ' archivos'),
-          h('button.btn.chico.fantasma', { title: carpeta || 'Carpeta de la oficina', onclick: function () { mostrarCarpeta(carpeta); } }, App.icono('carpeta'),
-            App.nativo.hay ? 'Mostrar ' + App.nativo.enExplorador : 'Ver la carpeta')),
+          h('div.acciones-chicas',
+            App.Revisar && App.Revisar.conVista(e).length ? h('button.btn.chico', { title: 'Ver los archivos tal cual quedan y marcar qué cambiar', onclick: function () { revisar(e); } },
+              App.icono('lapiz'), App.Revisar.cuantasNotas(e) ? 'Revisar (' + App.Revisar.cuantasNotas(e) + ' notas)' : 'Revisar') : null,
+            h('button.btn.chico.fantasma', { title: carpeta || 'Carpeta de la oficina', onclick: function () { mostrarCarpeta(carpeta); } }, App.icono('carpeta'),
+              App.nativo.hay ? 'Mostrar ' + App.nativo.enExplorador : 'Ver la carpeta'))),
         h('div.adjuntos', e.archivos.map(function (rel) {
           var guardado = enBiblioteca(e, rel);
           return h('span.entrega-archivo',
-            h('button.adjunto', { onclick: function () { abrirArchivo(rel); }, title: rel }, App.icono(App.esMarkdown(rel) ? 'libro' : 'abrir'), h('span', nombreCorto(rel, e.archivos))),
+            h('button.adjunto', { onclick: function () { abrirArchivo(rel, e); }, title: rel }, App.icono(App.esMarkdown(rel) ? 'libro' : 'abrir'), h('span', nombreCorto(rel, e.archivos))),
             guardado && App.Biblioteca ? h('button.insignia.ok.insignia-link', { title: 'Ver la copia en la biblioteca', onclick: function () { App.Biblioteca.abrir(guardado.slug); } },
               App.icono('libro'), 'En la biblioteca') : null);
         }))));
     }
+    if (e.retoques && e.retoques.length) meta.appendChild(h('span.insignia', { title: 'Cambiaste algo a mano después de que lo entregó' }, App.icono('lapiz'), 'Retocada a mano'));
+    /* la versión con cambios: lo que pediste con notas sobre la anterior */
+    var pediste = h('div');
+    App.add(cuerpo, pediste);
+    if (e.padre) api().get('/api/entregas/' + e.padre).then(function (r) {
+      var notas = (r.entrega && r.entrega.notas) || [];
+      if (!notas.length || abierta !== e.id) return;
+      App.add(pediste, h('div.entrega-pediste', h('b', 'Lo que pediste'), h('ol', notas.map(function (n) {
+        var a = n.ancla || {};
+        return h('li', a.cita ? h('span.suave', '«' + a.cita + '»: ') : null, n.texto);
+      }))));
+    }).catch(function () { /* sin la anterior: no se muestra */ });
     App.add(cuerpo, App.htmlSeguro(h('div.md-doc.doc-panel.entrega-texto'), App.markdown(e.texto || '(sin texto)')));
     /* flujo y acción llegan aparte: hasta entonces el pie queda vacío, para no ofrecer «Listo» sobre una propuesta sin resolver */
     var extra = { corrida: null, accion: null };
@@ -360,7 +376,25 @@ App.Entregables = (function () {
   }
   var relojAccion = null;
 
+  /* «Listo» tal como lo ofrece el pie ahora (con su paso de flujo), para que la hoja de revisar lo pueda usar */
+  var listoActual = null;
+  function revisar(e, rel) {
+    App.Revisar.abrir(e, {
+      archivo: rel, nombreAgente: nombre(e.agente),
+      puedeCambiar: e.estado !== 'cambios' && !!e.sid && !!e.agente && !e.enCambios,
+      puedeRetocar: e.estado !== 'cambios' && !e.enCambios,
+      listo: function () { return abierta === e.id ? listoActual : null; },
+      alCambios: function () {
+        App.aviso(nombre(e.agente) + ' se puso a hacer los cambios.');
+        if (App.Actividad) App.Actividad.ya();
+        vigilarCambios(e.id);   // cuando llegue la versión nueva, se muestra sola (aunque el agente termine enseguida)
+      },
+      alCerrar: function () { if (abierta === e.id && abiertoPanel()) verEntrega(e.id); }
+    });
+  }
+
   function pintarPie(e, extra, pie) {
+    listoActual = null;
     var ac = extra.accion, pendiente = !!(ac && ac.estado === 'pendiente');
     var pasoAprobacion = !!(extra.corrida && extra.corrida.pasoEstado === 'esperando_aprobacion' && extra.corrida.entrega === e.id);
     var botones = [];
@@ -386,7 +420,8 @@ App.Entregables = (function () {
       } }, 'Descartar'), ok);
     } else if (e.estado === 'sin_revisar' && !(ac && ac.estado === 'ejecutando')) {
       if (guardables(e).length) botones.push(h('button.btn', { onclick: function () { hojaBiblioteca(e, true, pasoAprobacion); } }, App.icono('libro'), 'Listo y a la biblioteca'));
-      botones.push(h('button.btn.primario', { onclick: function () { marcar(e, 'revisada', pasoAprobacion); } }, pasoAprobacion ? 'Listo, seguí' : 'Listo'));
+      listoActual = function () { marcar(e, 'revisada', pasoAprobacion); };
+      botones.push(h('button.btn.primario', { onclick: listoActual }, pasoAprobacion ? 'Listo, seguí' : 'Listo'));
     } else if (e.estado === 'revisada') {
       if (guardables(e).some(function (rel) { return !enBiblioteca(e, rel); })) botones.push(h('button.btn', { onclick: function () { hojaBiblioteca(e, false); } }, App.icono('libro'), 'Guardar en la biblioteca'));
       botones.push(h('button.btn.fantasma', { onclick: function () { marcar(e, 'sin-revisar'); } }, 'Marcar sin revisar'));

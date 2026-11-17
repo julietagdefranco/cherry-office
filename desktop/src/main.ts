@@ -125,7 +125,9 @@ async function crearVentana() {
     width: b?.width ?? 1280, height: b?.height ?? 820, x: b?.x, y: b?.y,
     minWidth: 900, minHeight: 600, title: 'Oficina', show: false,
     backgroundColor: '#f6f1ea', autoHideMenuBar: esWindows,
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false, spellcheck: false },
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false, spellcheck: false,
+      // visor de PDF de Chromium para la vista previa de entregas (revisar.js)
+      plugins: true },
   })
   ventana = w
   const guardar = () => { try { if (!w.isMinimized() && !w.isMaximized()) fs.writeFileSync(archivoVentana(), JSON.stringify(w.getBounds())) } catch {} }

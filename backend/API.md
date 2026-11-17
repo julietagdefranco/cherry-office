@@ -203,6 +203,21 @@ Archivos y conocimiento de la oficina activa: se suben o se vinculan carpetas ex
 
 **Variables de entorno:** `HQ_BIBLIOTECA_MAX_MB`, `HQ_BIBLIOTECA_MAX_ARCHIVOS`, `HQ_BIBLIOTECA_MAX_TOTAL_MB`, `HQ_BIBLIOTECA_TIMEOUT` (ficha, 180 s), `HQ_BIBLIOTECA_IMAGEN_TIMEOUT` (120 s), `HQ_BIBLIOTECA_SIN_FTS=1` (fuerza la búsqueda con LIKE).
 
+## Revisar entregas: vista previa, notas y retoques
+Para ver un entregable tal cual queda, marcarle encima qué cambiar y retocar un texto chico sin el agente. Código:
+`backend/src/vista.ts` y `backend/src/rutas-entregas.ts`; front en `oficina/ui/revisar.js`. Plan: `docs/plan-vista-previa.md`.
+
+| Método | Ruta | Cuerpo | Respuesta |
+|---|---|---|---|
+| GET | `/api/entregas/:id/vista?ruta=<rel>` | | `{vista:{rel, nombre, tam, mod, ruta, tipo, retocable, …}}`. `tipo`: `html` (`html` empaquetado + `avisos:[…]`, tope 5 MB), `markdown`/`texto` (`texto`, `truncado`; 512 KB), `csv` (`filas` hasta 500, `texto`, `truncado`), `imagen` (`base64`, `mime`; 2 MB, SVG incluido), `pdf` (`base64`; 10 MB) u `otro`. 400 si `ruta` falta o no es de la entrega; 403 fuera de la oficina; 404 si ya no está; 413 si pasa el tope |
+| POST | `/api/entregas/:id/cambios` | `{texto?, notas?:[{archivo?, ancla?:{cita?, selector?, seccion?, x?, y?}, texto}]}` | Como antes, ahora con notas (hasta 30, de 1000 caracteres; `archivo` de la entrega o vacío = general; `x`/`y` en % se recortan a 0–100). `texto` es obligatorio solo sin notas. El pedido al agente agrupa las notas por archivo («En <archivo>: 1. En «cita» (selector): …»), suma «Además: <texto>» y, si hubo retoques, «Ojo: retoqué a mano …». Las notas quedan en la entrega vieja (`notas`) |
+| POST | `/api/entregas/:id/retoque` | HTML: `{archivo, antes, despues}`; markdown/texto/CSV: `{archivo, texto, mod?}` | `{entrega, vista}`. En HTML reemplaza `antes` (texto visible, sin recortar) por `despues` escapado, solo si aparece **una vez** en el fuente (también se busca con `&amp;`/`&lt;`/`&gt;`/`&nbsp;`) y no cae dentro de una etiqueta o comentario; si no, 409 con «Pedíselo al agente». En texto reemplaza el archivo entero; con `mod` distinto del archivo, 409. Antes de escribir copia el archivo a `archivos/.papelera/retoques/<id>/<ms>-<nombre>` y suma `{archivo, ts, foto}` a `retoques`. 400 tipo sin retoque; 409 si la entrega fue reemplazada o el agente está haciendo cambios |
+| POST | `/api/entregas/:id/deshacer-retoque` | | `{entrega, vista}`: vuelve el último retoque desde su foto y lo saca de la lista. 409 si no hay |
+
+**Empaquetado de páginas.** El iframe de la vista es `sandbox` sin `allow-same-origin` y no puede pedir nada a `hq://`, así que el backend mete en el HTML lo relativo que vive en la oficina: `<link rel=stylesheet>` → `<style>` (con sus `url()`), `<script src>` → en línea, `src`/`poster` de `img`, `source`, `video`, `audio` y los `url()` de `<style>` y `style="…"` → `data:`. Lo que empieza con un esquema, `//` o `#` queda igual. Una ruta que sale de la oficina, falta, es una carpeta, pasa 2 MB o lleva el total arriba de 5 MB queda como estaba y suma un aviso.
+
+**Entrega.** `entregaJSON` suma `notas:[NotaEntrega]` y `retoques:[{archivo, ts}]` (columnas nuevas `notas` y `retoques` de `entregas`, JSON; se agregan solas a bases viejas).
+
 ## Uso del plan de Claude
 `GET /api/uso-claude[?forzar=1]` → `{disponible, fuente?, cinco_horas?, semana?, semana_opus?, actualizado?, motivo?}`. Cada ventana es `{pct (0–100), reinicia (ISO), estado: ok|cerca|limite}`. Lo usa el chip de la barra de herramientas (`oficina/ui/uso.js`). Funciona con o sin oficina abierta.
 - **`fuente: 'cuenta'`**: el endpoint que usa `/usage` de Claude Code (`api.anthropic.com/api/oauth/usage`, no documentado), con el token de Claude Code: en macOS sale del llavero («Claude Code-credentials», solo si HOME es el del usuario real y no hay `CLAUDE_CONFIG_DIR`); si no, de `<CLAUDE_CONFIG_DIR o ~/.claude>/.credentials.json`. El token no se loguea, no sale en ninguna respuesta y no se renueva acá. Caché de 90 s; `forzar` la saltea, pero nunca pide más de una vez cada 30 s.
