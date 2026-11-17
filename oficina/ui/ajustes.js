@@ -327,37 +327,52 @@ App.Ajustes = (function () {
   /* `ia` (toda la app, PUT /api/preferencias): esfuerzo y opciones de consumo por defecto. Valen para todo lo que usa la IA
      (charlas, reuniones, tareas, flujos, consultas y tareas de fondo); el esfuerzo de un agente (su ficha) le gana, y cada
      charla o reunión nueva puede cambiarlos para sí. Se guarda al elegir. */
-  /* opciones de consumo con más de dos valores: su orden en el deslizador, de menos a más tokens */
-  var ESCALAS_IA = { skills: ['ninguna', 'agente', 'resumidas', 'completas'] };
   function consumo(crear) {
     var hj = crear({ titulo: 'Consumo de IA' });
     var err = h('div.error-txt');
     App.add(hj.cuerpo, h('div.ayuda', { style: { marginTop: 0 } },
       'Vale para todas tus oficinas y para todo lo que hace la IA: charlas, reuniones, tareas, flujos y consultas entre colegas. ' +
       'Cada charla y cada reunión nueva lo pueden cambiar para sí, y el esfuerzo de un agente se elige en su ficha.'));
-    function guardar(clave, valor, el, antes, texto) {
-      var cuerpo = { ia: {} }; cuerpo.ia[clave] = valor;
+    /* guarda varias claves juntas (el nivel de ahorro fija cuatro); deshacer vuelve a las de antes */
+    function guardar(cambios, texto) {
+      var ia = App.iaApp(), antes = {};
+      Object.keys(cambios).forEach(function (k) { antes[k] = ia[k]; });
       err.textContent = '';
-      api().put('/api/preferencias', cuerpo).then(function (r) {
+      api().put('/api/preferencias', { ia: cambios }).then(function (r) {
         if (App.E && App.E.estado) App.E.estado.ia = r.ia;
-        App.guardado(texto + '.', function () { el.poner(antes); guardar(clave, antes, el, valor, texto); });
-      }).catch(function (e) { err.textContent = e.message; el.poner(antes); });
+        sincronizar();
+        App.guardado(texto + '.', function () { guardar(antes, texto + ' (deshecho)'); });
+      }).catch(function (e) { err.textContent = e.message; sincronizar(); });
     }
-    var ia = App.iaApp();
-    /* Esfuerzo y skills van en escala (deslizador), de lo que menos gasta a lo que más; las de sí o no, en interruptor */
+    function uno(k, v, texto) { var c = {}; c[k] = v; guardar(c, texto); }
+    var ia = App.iaApp(), controles = [];
     var esf = App.elegir({ forma: 'deslizador', etiqueta: 'Esfuerzo', valor: ia.esfuerzo,
       opciones: App.ESFUERZOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub, aparte: m.valor === '' }; }),
-      alCambiar: function (v) { var antes = App.iaApp().esfuerzo; guardar('esfuerzo', v, esf, antes, 'Esfuerzo: ' + App.tituloEsfuerzo(v)); } });
-    hj.cuerpo.appendChild(App.ajuste('Esfuerzo', 'Cuánto piensa antes de responder. Lo que piensa se cobra como texto escrito: para el día a día, Bajo o Medio alcanza.', esf));
-    App.OPCIONES_IA.forEach(function (o) {
-      var escala = ESCALAS_IA[o.clave];
-      var opciones = escala ? escala.map(function (v) { return o.opciones.filter(function (x) { return x.valor === v; })[0]; }) : o.opciones;
-      var el = App.elegir({ forma: escala ? 'deslizador' : o.opciones.length === 2 ? 'interruptor' : 'chips', etiqueta: o.titulo, valor: ia[o.clave],
-        opciones: opciones.map(function (x) { return { valor: x.valor, titulo: x.titulo, sub: x.sub }; }),
-        alCambiar: function (v) { var antes = App.iaApp()[o.clave]; guardar(o.clave, v, el, antes, o.titulo + ': ' + App.tituloOpcionIA(o, v)); } });
-      hj.cuerpo.appendChild(App.ajuste(o.titulo, o.sub, el));
+      alCambiar: function (v) { uno('esfuerzo', v, 'Esfuerzo: ' + App.tituloEsfuerzo(v)); } });
+    /* un nivel de ahorro en vez de cuatro decisiones; el detalle queda plegado para quien quiera elegir cada una */
+    var detalle = h('details.avanzado.consumo-detalle', h('summary', 'Elegir cada opción por separado'));
+    var ahorro = App.controlAhorro(App.ahorroDe(ia), function (a) {
+      var nivel = App.AHORROS.filter(function (x) { return x.valor === a; })[0];
+      if (nivel) guardar(nivel.ia, 'Ahorro de tokens: ' + nivel.titulo.toLowerCase());
+      else { detalle.open = true; sincronizar(); }
     });
-    hj.cuerpo.appendChild(err);
+    App.OPCIONES_IA.forEach(function (o) {
+      var el = App.controlOpcionIA(o, ia[o.clave], function (v) { uno(o.clave, v, o.titulo + ': ' + App.tituloOpcionIA(o, v)); });
+      controles.push({ clave: o.clave, el: el });
+      detalle.appendChild(App.ajuste(o.titulo, o.sub, el));
+    });
+    if (App.ahorroDe(ia) === 'medida') detalle.open = true;
+    function sincronizar() {
+      var x = App.iaApp();
+      esf.poner(x.esfuerzo);
+      ahorro.poner(App.ahorroDe(x));
+      controles.forEach(function (c) { c.el.poner(x[c.clave]); });
+    }
+    App.add(hj.cuerpo,
+      App.ajuste('Esfuerzo', 'Cuánto piensa antes de responder. Lo que piensa se cobra como texto escrito: para el día a día, Bajo o Medio alcanza.', esf),
+      App.ajuste('Ahorro de tokens', 'Cuánto contexto lee y cuántas herramientas tiene a mano en cada paso. Más ahorro, menos gasto, pero sabe y puede hacer menos sin que se lo pidas.', ahorro),
+      detalle,
+      err);
   }
 
   /* ---------------- skills, MCP y conectores habilitados (habilitados.ts) ----------------

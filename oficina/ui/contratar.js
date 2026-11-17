@@ -48,54 +48,135 @@
   App.opcionIA = function (clave) { return App.OPCIONES_IA.filter(function (o) { return o.clave === clave; })[0]; };
   App.tituloOpcionIA = function (o, v) { var x = o.opciones.filter(function (y) { return y.valor === v; })[0]; return x ? x.titulo : String(v); };
 
-  /* Selector de una charla (como en Claude): un botón chico que abre un menú con modelo, esfuerzo y las opciones de
-     consumo. Pisa lo del agente y lo de Ajustes solo en esa charla.
+  /* opciones de consumo con más de dos valores: su orden en el deslizador, de menos a más tokens */
+  App.ESCALAS_IA = { skills: ['ninguna', 'agente', 'resumidas', 'completas'] };
+  /* El control de una opción de consumo: deslizador si tiene escala, interruptor si es de sí o no, chips si no */
+  App.controlOpcionIA = function (o, valor, alCambiar) {
+    var escala = App.ESCALAS_IA[o.clave];
+    var opciones = escala ? escala.map(function (v) { return o.opciones.filter(function (x) { return x.valor === v; })[0]; }) : o.opciones;
+    return App.elegir({ forma: escala ? 'deslizador' : o.opciones.length === 2 ? 'interruptor' : 'chips', etiqueta: o.titulo, valor: valor,
+      opciones: opciones.map(function (x) { return { valor: x.valor, titulo: x.titulo, sub: x.sub }; }), alCambiar: alCambiar });
+  };
+
+  /* Ahorro de tokens en un solo control: tres niveles que fijan todas las opciones de consumo juntas. Si se eligió cada
+     una por separado y no coincide con ningún nivel, es «A medida». Lo usan Ajustes › Consumo de IA y cada charla. */
+  App.AHORROS = [
+    { valor: 'nada', titulo: 'Nada', sub: 'Skills completas, lee la memoria, consulta a colegas y usa tus MCP. El que más gasta.',
+      ia: { skills: 'completas', memoria: 'completa', colegas: true, mcpLocales: true } },
+    { valor: 'algo', titulo: 'Algo', sub: 'Igual que «Nada», pero la lista de skills va resumida. Gasta bastante menos y casi no se nota.',
+      ia: { skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true } },
+    { valor: 'mucho', titulo: 'Mucho', sub: 'Solo las skills de cada agente, la memoria si hace falta, sin colegas ni tus MCP. Responde con lo suyo.',
+      ia: { skills: 'agente', memoria: 'liviana', colegas: false, mcpLocales: false } },
+  ];
+  App.AHORRO_MEDIDA = { valor: 'medida', titulo: 'A medida', sub: 'Elegiste cada opción por separado.', aparte: true };
+  App.ahorroDe = function (e) {
+    var n = App.AHORROS.filter(function (a) { return Object.keys(a.ia).every(function (k) { return e[k] === a.ia[k]; }); })[0];
+    return n ? n.valor : 'medida';
+  };
+  App.tituloAhorro = function (v) { var a = App.AHORROS.filter(function (x) { return x.valor === v; })[0]; return a ? a.titulo : App.AHORRO_MEDIDA.titulo; };
+  App.controlAhorro = function (valor, alCambiar) {
+    var el = App.elegir({ forma: 'deslizador', etiqueta: 'Ahorro de tokens', valor: valor,
+      opciones: App.AHORROS.map(function (a) { return { valor: a.valor, titulo: a.titulo, sub: a.sub }; }).concat([App.AHORRO_MEDIDA]), alCambiar: alCambiar });
+    el.classList.add('elegir-ahorro');
+    return el;
+  };
+
+  /* Selector de una charla (como en Claude): un botón chico que abre un panel con modelo (chips), esfuerzo y ahorro
+     (deslizadores) y, plegado, cada opción de consumo. Pisa lo del agente y lo de Ajustes solo en esa charla.
      op: {modelo, esfuerzo (los del agente), valor (lo elegido antes), soloModelo (sin opciones: el Creador), alCambiar(v)}.
      .valor() devuelve solo lo que difiere de lo de por defecto. */
   App.SelectorCharla = function (op) {
     var v = Object.assign({}, op.valor || {});
-    var b = h('button.btn.chico.fantasma.selector-charla', { type: 'button', title: 'Modelo, esfuerzo y consumo de esta charla' });
+    var b = h('button.btn.chico.fantasma.selector-charla', { type: 'button', title: 'Modelo, esfuerzo y ahorro de esta charla' });
     function defecto() {
       var ia = App.iaApp();
       return { modelo: op.modelo || 'sonnet', esfuerzo: op.esfuerzo || ia.esfuerzo || '', skills: ia.skills, memoria: ia.memoria, colegas: ia.colegas, mcpLocales: ia.mcpLocales };
     }
     function efectivo() { return Object.assign(defecto(), v); }
-    function ahorros() {
-      if (op.soloModelo) return 0;
-      var e = efectivo();
-      return App.OPCIONES_IA.filter(function (o) { return !o.soloAjustes && e[o.clave] !== o.completo; }).length;
-    }
     function pintar() {
-      var e = efectivo(), n = ahorros();
+      var e = efectivo(), ah = op.soloModelo ? null : App.ahorroDe(e);
       App.vaciar(b);
-      App.add(b, App.icono('deslizadores'), h('span', App.tituloModelo(e.modelo) + (e.esfuerzo ? ' · ' + App.tituloEsfuerzo(e.esfuerzo) : '') + (n ? ' · ' + n + (n === 1 ? ' ahorro' : ' ahorros') : '')));
+      App.add(b, App.icono('deslizadores'), h('span', App.tituloModelo(e.modelo) + (e.esfuerzo ? ' · ' + App.tituloEsfuerzo(e.esfuerzo) : '') +
+        (ah && ah !== 'algo' ? ' · Ahorro: ' + App.tituloAhorro(ah).toLowerCase() : '')));
       b.classList.toggle('cambiado', Object.keys(v).length > 0);
     }
-    function cambiar(clave, valor) {
+    function cambiar(cambios) {
       var d = defecto();
-      if (valor === d[clave]) delete v[clave]; else v[clave] = valor;
+      Object.keys(cambios).forEach(function (k) { if (cambios[k] === d[k]) delete v[k]; else v[k] = cambios[k]; });
       pintar();
       if (op.alCambiar) op.alCambiar(b.valor());
     }
-    b.addEventListener('click', function () {
+    function uno(k, val) { var c = {}; c[k] = val; cambiar(c); }
+
+    function contenido(caja) {
+      App.vaciar(caja);
       var e = efectivo(), d = defecto();
-      var marca = function (si) { return si ? 'ok' : null; };
-      var items = [{ titulo: 'Modelo' }].concat(App.MODELOS.map(function (m) {
-        return { texto: m.titulo + (m.valor === d.modelo ? ' (por defecto)' : ''), nota: m.sub, icono: marca(e.modelo === m.valor), accion: function () { cambiar('modelo', m.valor); } };
-      }), ['-', { titulo: 'Esfuerzo' }], App.ESFUERZOS.map(function (x) {
-        return { texto: x.titulo + (x.valor === d.esfuerzo && d.esfuerzo ? ' (por defecto)' : ''), nota: x.sub, icono: marca(e.esfuerzo === x.valor), accion: function () { cambiar('esfuerzo', x.valor); } };
-      }));
+      var subModelo = h('div.pc-nota');
+      function notaModelo(m) {
+        var x = App.MODELOS.filter(function (y) { return y.valor === m; })[0];
+        subModelo.textContent = (x ? x.sub : '') + (m !== d.modelo ? ' El de este agente es ' + App.tituloModelo(d.modelo) + '.' : '');
+      }
+      var modelo = App.elegir({ forma: 'chips', etiqueta: 'Modelo', valor: e.modelo,
+        opciones: App.MODELOS.map(function (m) { return { valor: m.valor, titulo: m.valor === 'inherit' ? 'Claude Code' : m.titulo, sub: m.sub }; }),
+        alCambiar: function (m) { uno('modelo', m); notaModelo(m); pintarPie(); } });
+      notaModelo(e.modelo);
+      var esfuerzo = App.elegir({ forma: 'deslizador', etiqueta: 'Esfuerzo', valor: e.esfuerzo,
+        opciones: App.ESFUERZOS.map(function (m) { return { valor: m.valor, titulo: m.valor ? m.titulo : 'El de Claude Code', sub: m.sub, aparte: m.valor === '' }; }),
+        alCambiar: function (x) { uno('esfuerzo', x); pintarPie(); } });
+      App.add(caja,
+        h('div.pc-sec', h('div.pc-tit', 'Modelo'), modelo, subModelo),
+        h('div.pc-sec', h('div.pc-tit', 'Esfuerzo', h('span', 'cuánto piensa antes de responder')), esfuerzo));
+
       if (!op.soloModelo) {
+        var controles = [];
+        var detalle = h('details.avanzado.pc-detalle', h('summary', 'Cada opción'));
+        var ahorro = App.controlAhorro(App.ahorroDe(e), function (a) {
+          var nivel = App.AHORROS.filter(function (x) { return x.valor === a; })[0];
+          if (nivel) cambiar(nivel.ia); else detalle.open = true;   // «A medida» abre el detalle
+          sincronizar();
+        });
+        function sincronizar() {
+          var e2 = efectivo();
+          ahorro.poner(App.ahorroDe(e2));
+          controles.forEach(function (c) { c.el.poner(e2[c.clave]); });
+          pintarPie();
+        }
         App.OPCIONES_IA.forEach(function (o) {
           if (o.soloAjustes) return;
-          items.push('-', { titulo: o.titulo });
-          o.opciones.forEach(function (x) {
-            items.push({ texto: x.titulo + (x.valor === d[o.clave] ? ' (por defecto)' : ''), nota: x.sub, icono: marca(e[o.clave] === x.valor),
-              accion: function () { cambiar(o.clave, x.valor); } });
-          });
+          var el = App.controlOpcionIA(o, e[o.clave], function (x) { uno(o.clave, x); sincronizar(); });
+          controles.push({ clave: o.clave, el: el });
+          detalle.appendChild(h('div.pc-fila', h('div.pc-fila-tit', { title: o.sub }, o.titulo), el));
         });
+        if (App.ahorroDe(e) === 'medida') detalle.open = true;
+        detalle.addEventListener('toggle', reubicar);
+        App.add(caja, h('div.pc-sec', h('div.pc-tit', 'Ahorro de tokens', h('span', 'lo que lee y usa en cada paso')), ahorro, detalle));
       }
-      App.menu(b, items);
+
+      var restablecer = h('button.btn.chico.fantasma', { type: 'button', onclick: function () {
+        v = {}; pintar(); if (op.alCambiar) op.alCambiar(b.valor()); contenido(caja); reubicar();
+      } }, 'Volver a lo de siempre');
+      function pintarPie() { restablecer.disabled = !Object.keys(v).length; }
+      pintarPie();
+      App.add(caja, h('div.pc-pie', restablecer,
+        op.soloModelo ? null : h('button.btn.chico.fantasma', { type: 'button', title: 'Lo de siempre, para todas las charlas',
+          onclick: function () { if (panel) panel.cerrar(); App.Ajustes.abrir('consumo'); } }, 'Ajustes › Consumo de IA')));
+    }
+
+    var panel = null;
+    /* al abrir «Cada opción» el panel crece: si está arriba del botón, sube para no taparlo ni salirse de la pantalla */
+    function reubicar() {
+      var el = b._panel && b._panel.parentNode;
+      if (!el || !el.isConnected) return;
+      var r = b.getBoundingClientRect(), hh = el.offsetHeight;
+      var y = r.bottom + 6;
+      if (y + hh > window.innerHeight - 8) y = Math.max(8, r.top - hh - 6);
+      el.style.top = y + 'px';
+    }
+    b.addEventListener('click', function () {
+      var caja = h('div.pc-cuerpo');
+      contenido(caja);
+      b._panel = caja;
+      panel = App.emergente(b, caja, 'panel-charla');
     });
     b.valor = function () { return Object.assign({}, v); };
     pintar();

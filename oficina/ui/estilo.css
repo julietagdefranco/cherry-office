@@ -219,6 +219,22 @@ select.campo { padding-right: 26px; }
 .selector-charla { height: 26px; padding: 0 8px; font-size: 12px; gap: 5px; color: var(--tenue); }
 .selector-charla svg { width: 14px; height: 14px; }
 .selector-charla.cambiado { color: var(--texto); box-shadow: inset 0 0 0 1px var(--linea-fuerte); }
+/* panel del selector de la charla: modelo en chips, esfuerzo y ahorro en deslizador, el detalle plegado */
+.panel-charla { width: min(380px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 14px 16px 10px; }
+.pc-sec { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--linea); }
+.pc-sec:first-child { border-top: 0; padding-top: 0; }
+.pc-tit { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--suave); display: flex; align-items: baseline; gap: 8px; }
+.pc-tit span { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--tenue); }
+.pc-nota { color: var(--suave); font-size: 12px; line-height: 1.4; }
+.panel-charla .desliz-escala { flex-basis: 100%; }
+.panel-charla .desliz-apartes { order: -1; }
+/* «A medida» no es algo que se elija: aparece solo cuando las opciones sueltas no coinciden con ningún nivel */
+.elegir-ahorro .desliz-apartes .chip:not(.sel) { display: none; }
+.pc-detalle { margin-top: 2px; }
+.pc-fila { display: grid; gap: 6px; padding: 8px 0; border-top: 1px dashed var(--linea); }
+.pc-fila:first-of-type { border-top: 0; }
+.pc-fila-tit { font-size: 12.5px; font-weight: 500; }
+.pc-pie { display: flex; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--linea); }
 .chat-intro { text-align: center; color: var(--suave); padding: 22px 18px 8px; }
 .chat-intro img { width: 96px; height: 96px; border-radius: 18px; margin: 0 auto 10px; display: block; }
 
@@ -969,6 +985,9 @@ button.adjunto:hover { background: var(--panel-2); }
 .ajuste-ayuda { color: var(--suave); font-size: 12px; margin-top: 2px; }
 .resumen-ui { background: var(--panel-2); border: 1px solid var(--linea); border-radius: var(--radio); padding: 9px 12px; color: var(--suave); font-size: 12.5px; margin: 4px 0 8px; }
 @media (max-width: 720px) { .ajuste { grid-template-columns: minmax(0, 1fr); } }
+/* Ajustes › Consumo de IA: el detalle de cada opción, plegado bajo el nivel de ahorro */
+.consumo-detalle { border-top: 1px solid var(--linea); padding-top: 8px; }
+.consumo-detalle .ajuste { padding-left: 12px; border-left: 2px solid var(--linea); }
 
 /* celular: las acciones de la cabecera bajan a su propia fila y las pestañas se deslizan */
 @media (max-width: 720px) {
