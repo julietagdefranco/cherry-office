@@ -100,6 +100,7 @@
     if (!a || !viejo || App.modoDerecho() !== 'agente') return;
     viejo.replaceWith(columnaLado(a));
     der.setAttribute('data-lado', lado === 'detalles' ? 'detalles' : 'ancho');
+    if (App.Nav && App.Nav.acomodar) App.Nav.acomodar();   // cambió el ancho: ¿sigue flotando? y la cámara recentra
     var lp = der.querySelector('.agente-lapiz-btn'); if (lp) lp.setAttribute('aria-pressed', String(lado === 'perfil' || lado === 'permisos'));
   }
   /* la columna del costado: detalles, la ficha (perfil o permisos) o la lista completa de algo */

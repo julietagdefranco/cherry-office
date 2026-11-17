@@ -125,7 +125,7 @@ App.Nav = (function () {
   }
   /* En la compu: si lista + panel dejan menos de LIBRE px de oficina, la lista se pliega (tocar la sección en el riel la
      muestra encima). Y la cámara de la oficina centra en el hueco que deja el panel. */
-  var LIBRE = 360;
+  var LIBRE = 360, FLOTA = 560;   // FLOTA: oficina libre (sumando los dos lados) para que el panel flote centrado
   function acomodar() {
     var app = App.dom && App.dom.app; if (!app) return;
     requestAnimationFrame(function () {
@@ -136,7 +136,10 @@ App.Nav = (function () {
       var plegar = enSec && panel > 0 && window.innerWidth - riel - lista - panel < LIBRE;
       app.classList.toggle('lista-plegada', plegar);
       if (!plegar) app.classList.remove('lista-ver');
-      if (App.Oficina3D && App.Oficina3D.margen) App.Oficina3D.margen(panel);
+      /* con oficina de sobra, el panel flota centrado como una tarjeta; la cámara centra en el hueco de su derecha */
+      var flota = panel > 0 && !plegar && window.innerWidth - riel - lista - panel >= FLOTA;
+      app.classList.toggle('panel-flotante', flota);
+      if (App.Oficina3D && App.Oficina3D.margen) App.Oficina3D.margen(flota ? der.offsetLeft + panel : panel);
     });
   }
   window.addEventListener('resize', function () { if (App.dom && App.dom.app) acomodar(); });
