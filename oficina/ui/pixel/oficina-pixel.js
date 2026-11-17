@@ -464,11 +464,34 @@ App.OficinaPixel = (function () {
       e.el.style.display = e.oculta || fuera ? 'none' : '';
       if (!e.oculta && !fuera) e.el.style.transform = 'translate(' + R(sx) + 'px,' + R(sy) + 'px)';
     });
+    if (pin) { var pf = figs[pin.id];
+      if (!pf || performance.now() > pin.hasta) { pin.el.remove(); pin = null; }
+      else { var pp = iso(pf.x, pf.y), pa = (pf.sit && !pf.ruta ? (drawChar.ALTO_SENTADO || 26) + 10 : (drawChar.ALTO || 43)) + 6;
+        pin.el.style.transform = 'translate(' + R((pp[0] * cam.kv + cam.dx) / dpr) + 'px,' + R(((pp[1] - pa) * cam.kv + cam.dy) / dpr) + 'px)'; pedir(); } }
+  }
+  /* «¿Dónde está?»: un pin como el de un mapa cae sobre la persona, la sigue si camina y se va solo */
+  var pin = null;
+  function marcar(id) {
+    if (!figs[id] || !capa) return false;
+    if (pin) pin.el.remove();
+    var el = document.createElement('div'); el.className = 'pin-mapa';
+    el.innerHTML = '<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M12 21s-6.5-5.8-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 15.2 12 21 12 21z" fill="#d6453a" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="9.8" r="2.4" fill="#fff"/></svg>';
+    capa.appendChild(el); pin = { id: id, el: el, hasta: performance.now() + 2800 };
+    enfocarAgente(id); moverEtiquetas(); pedir(); return true;
+  }
+  /* el panel de la izquierda cambió de ancho: si había alguien enfocado, se vuelve a centrar en el hueco nuevo */
+  function margen(px) {
+    px = Math.max(0, Math.round(px || 0)); if (px === margenIzq) return;
+    margenIzq = px;
+    if (elegido && figs[elegido]) enfocarAgente(elegido); else if (cam.k <= kLejos) irCamara(encuadreGeneral());
   }
 
   /* ---------- cámara ---------- */
   var cam = { cx: 0, cy: 0, k: 1, kv: 1, dx: 0, dy: 0 }, kLejos = 1, kCerca = 3, tween = null, cw = 1, ch = 1;
-  function encuadreGeneral() { return { cx: W / 2, cy: H / 2 - 10, k: kLejos }; }
+  /* px (CSS) tapados por un panel a la izquierda: la cámara centra en el hueco que queda a la derecha */
+  var margenIzq = 0;
+  function corrimiento(k) { return margenIzq / 2 * (window.devicePixelRatio || 1) / (k || 1); }
+  function encuadreGeneral() { return { cx: W / 2 - corrimiento(kLejos), cy: H / 2 - 10, k: kLejos }; }
   function ajustar() {
     if (!vista) return;
     var dpr = window.devicePixelRatio || 1, cssW = cont.clientWidth || 800, cssH = cont.clientHeight || 600;
@@ -488,7 +511,7 @@ App.OficinaPixel = (function () {
   function limitar() { var k = cam.kv || cam.k, hw = cw / 2 / k, hh = ch / 2 / k; cam.cx = Math.max(Math.min(hw, W / 2), Math.min(Math.max(W - hw, W / 2), cam.cx)); cam.cy = Math.max(Math.min(hh, H / 2), Math.min(Math.max(H - hh, H / 2), cam.cy)); }
   function irCamara(to) { if (reducido) { Object.assign(cam, to); tween = null; } else tween = { from: { cx: cam.cx, cy: cam.cy, k: cam.k }, to: to, t0: performance.now() }; pedir(); }
   function encuadrar() { irCamara(encuadreGeneral()); }
-  function enfocar(x, y) { var p = iso(x, y); irCamara({ cx: p[0], cy: p[1] - 24, k: kCerca }); return true; }
+  function enfocar(x, y) { var p = iso(x, y); irCamara({ cx: p[0] - corrimiento(kCerca), cy: p[1] - 24, k: kCerca }); return true; }
   function enfocarAgente(id) { var f = figs[id]; if (!f) return false; return enfocar(f.x, f.y); }
   function enfocarLugar(tipo) {
     if (tipo === 'entregables' && bandeja) { var p = iso(bandeja.x, bandeja.y); irCamara({ cx: p[0], cy: p[1] - 20, k: kCerca + 1 }); return true; }
@@ -603,7 +626,7 @@ App.OficinaPixel = (function () {
   return {
     iniciar: iniciar, construir: construir, alElegirAgente: function (fn) { cbAgente = fn || function () {}; }, alElegirLugar: function (fn) { cbLugar = fn || function () {}; },
     alPasar: function (fn) { cbPasar = fn; }, elegir: elegir, ocupado: ocupado, reunion: reunion, finReunion: finReunion, encuadrar: encuadrar, actividad: actividad,
-    faros: faros, enfocar: function (x, z) { return enfocar(x, z); }, enfocarAgente: enfocarAgente, enfocarLugar: enfocarLugar, muro: muro, pieza: pieza, pedir: pedir, pausar: pausar,
+    faros: faros, enfocar: function (x, z) { return enfocar(x, z); }, enfocarAgente: enfocarAgente, margen: margen, marcar: marcar, enfocarLugar: enfocarLugar, muro: muro, pieza: pieza, pedir: pedir, pausar: pausar,
     pixel: true, _estado: function () { return { salas: salas.length, figuras: Object.keys(figs).length, items: items.length, W: W, H: H, cam: cam, fase: FASE && FASE.k }; }
   };
 })();

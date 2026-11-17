@@ -139,6 +139,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     escudo: 'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6zM9 12l2 2 4-4',
     parte: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
     lapiz: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
+    pin: 'M12 21s-6.5-5.8-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 15.2 12 21 12 21zM12 12.3a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5',
     candado: 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z',
     ok: 'M5 12.5l4.5 4.5L19 7',
     bandeja: 'M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z',

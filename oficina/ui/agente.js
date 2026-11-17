@@ -1,8 +1,15 @@
-/* Panel del agente (a la derecha, sin tapar la maqueta): conversación, perfil, notas y tareas programadas. */
+/* Panel del agente: su charla y, en la compu, una columna al costado («lado»): sus detalles (charlas, tareas, archivos y
+   notas, con «Ver todas») o, desde el lápiz, su ficha (perfil y apariencia, permisos). En el celular la ficha reemplaza
+   a la charla, con pestañas. */
 (function () {
   'use strict';
   var h = App.h, api = App.api;
   var actual = null, pestana = 'chat';
+  var PESTANAS = ['perfil', 'permisos', 'notas', 'tareas', 'archivos'];
+  var lado = 'detalles', ladoFiltro = '';   // la columna al costado de la charla (compu)
+  function esCompu() { return !window.matchMedia('(max-width: 720px)').matches; }
+  /* ¿se está mostrando esa parte de la ficha? (como pantalla en el celular, o en la columna del costado en la compu) */
+  function viendo(p) { return pestana === p || (pestana === 'chat' && lado === p && esCompu()); }
   var sesionFija = null;  // la charla que se abrió por su id (desde la lista de charlas): va en la ruta #/charlas/<agente>/<sesión>
   var sesiones = {};      // id -> session uuid
   var chats = {};         // id -> [{r, t, e}]  (cache en memoria)
@@ -66,11 +73,14 @@
   function abrir(id, pest) {
     var a = App.agente(id); if (!a) return;
     var mismo = actual === id;
-    if (!mismo) sesionFija = null;
+    if (!mismo) { sesionFija = null; lado = 'detalles'; ladoFiltro = ''; }
     actual = id; pestana = pest || (mismo ? pestana : 'chat');
+    /* en la compu la ficha va al costado de la charla */
+    if (esCompu() && pestana !== 'chat') { lado = pestana; pestana = 'chat'; }
     App.Oficina3D.elegir(id);
-    App.abrirDerecho('agente');   // primero: así ya está en su sección (y con lugar para «Relacionado») al pintar
+    App.abrirDerecho('agente');   // primero: así ya está en su sección al pintar
     pintar();
+    if (esCompu() && App.Oficina3D.enfocarAgente) App.Oficina3D.enfocarAgente(id);
     if (App.Avisos) App.Avisos.vistoAgente(id);
     App.marcarEstados();
   }
@@ -79,7 +89,56 @@
      Desde la charla se llega a la ficha de una sola forma: tocando la cara, como en una app de mensajes. */
   var FICHA = [['perfil', 'Perfil y apariencia'], ['permisos', 'Permisos'], ['notas', 'Notas'], ['tareas', 'Tareas'], ['archivos', 'Archivos']];
   /* cambia de cara o de pestaña: primero la sección y la ruta (Charlas o Equipo), después el panel */
-  function irPestana(p) { pestana = p; if (App.Nav) App.Nav.alAbrir('agente'); pintar(); }
+  function irPestana(p) {
+    if (esCompu() && p !== 'chat') { verLado(lado === p ? 'detalles' : p); return; }
+    pestana = p; if (App.Nav) App.Nav.alAbrir('agente'); pintar();
+  }
+  /* cambia lo que muestra la columna del costado sin rearmar la charla */
+  function verLado(cual) { lado = cual || 'detalles'; ladoFiltro = ''; pintarSoloLado(); }
+  function pintarSoloLado() {
+    var a = App.agente(actual), der = App.dom.derecho, viejo = der.querySelector(':scope > aside.relacionado');
+    if (!a || !viejo || App.modoDerecho() !== 'agente') return;
+    viejo.replaceWith(columnaLado(a));
+    der.setAttribute('data-lado', lado === 'detalles' ? 'detalles' : 'ancho');
+    var lp = der.querySelector('.agente-lapiz-btn'); if (lp) lp.setAttribute('aria-pressed', String(lado === 'perfil' || lado === 'permisos'));
+  }
+  /* la columna del costado: detalles, la ficha (perfil o permisos) o la lista completa de algo */
+  function columnaLado(a) {
+    var caja = h('aside.relacionado');
+    if (lado === 'detalles') { App.add(caja, h('div.lat-cab', h('b', 'Detalles')), App.Nav.relacionado(a.id)); return caja; }
+    var volver = h('button.btn.fantasma.icono', { title: 'Volver a los detalles', onclick: function () { verLado('detalles'); } }, App.icono('atras'));
+    var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
+    if (lado === 'perfil' || lado === 'permisos') {
+      App.add(caja, h('div.lat-cab', volver, h('div.pestanas.lat-pest', [['perfil', 'Perfil y apariencia'], ['permisos', 'Permisos']].map(function (p) {
+        return h('button.pestana' + (lado === p[0] ? '.activa' : ''), { onclick: function () { if (lado !== p[0]) verLado(p[0]); } }, p[1]);
+      }))), cuerpo, pie);
+      if (lado === 'perfil') pintarPerfil(a, cuerpo, pie); else pintarPermisos(a, cuerpo, pie);
+      return caja;
+    }
+    var TIT = { charlas: 'Charlas', tareas: 'Tareas', archivos: 'Archivos', notas: 'Notas' };
+    App.add(caja, h('div.lat-cab', volver, h('b', TIT[lado] || '')));
+    if (lado === 'charlas') {
+      var inp = h('input.campo', { placeholder: 'Buscar en sus charlas', value: ladoFiltro, 'aria-label': 'Buscar en sus charlas' });
+      var lista = h('div');
+      var llenar = function () { App.vaciar(lista).appendChild(App.Nav.todasLasCharlas(a.id, ladoFiltro.trim().toLowerCase())); };
+      inp.addEventListener('input', function () { ladoFiltro = inp.value; llenar(); });
+      llenar();
+      App.add(caja, h('div.lista-buscar', App.icono('buscar'), inp), App.add(cuerpo, lista));
+      setTimeout(function () { inp.focus(); }, 0);
+      return caja;
+    }
+    App.add(caja, cuerpo, pie);
+    if (lado === 'tareas') pintarTareas(a, cuerpo, pie);
+    else if (lado === 'archivos') pintarArchivos(a, cuerpo, pie);
+    else pintarNotas(a, cuerpo, pie);
+    return caja;
+  }
+  /* la lista de charlas cambió (mandaste un mensaje, empezaste otra): título de la charla y columna al día */
+  function repintarLado(cual) {
+    if (App.modoDerecho() !== 'agente' || !actual) return;
+    var t = App.dom.derecho.querySelector('.charla-tit'); if (t && App.Nav.tituloCharla) t.textContent = App.Nav.tituloCharla(actual);
+    if (lado === 'detalles' || lado === cual) pintarSoloLado();
+  }
   function pintar() {
     var a = App.agente(actual); if (!a) { cerrar(); return; }
     var d = App.depto(a.departamento);
@@ -87,6 +146,30 @@
     var sub = h('div.sub', a.rol, d ? h('span.insignia', h('span.punto', { style: { background: d.color, marginRight: '5px' } }), d.nombre) : null,
       (a.permisos || []).indexOf('coordinador') >= 0 ? h('span.insignia.coord', 'Coordinador/a') : null);
     var cerrarBtn = h('button.btn.fantasma.icono.cerrar-panel', { title: 'Cerrar', onclick: App.cerrarDerecho }, App.icono('cerrar'));
+    var der = App.dom.derecho;
+    der.removeAttribute('data-lado');
+    if (pestana === 'chat' && esCompu() && App.Nav && App.Nav.enSeccion()) {
+      /* compu: la charla con tres botones (lápiz: su ficha al costado · pin: dónde está en la oficina · cerrar) y, al
+         costado, la columna de detalles. Charla nueva y las otras charlas están en esa columna. */
+      App.add(App.vaciar(der),
+        h('div.der-cab.agente-cab',
+          App.retratoImg(a, 'retrato', 120),
+          h('div.der-tit', h('h2', a.nombre), sub),
+          h('div.der-acciones.agente-herr',
+            h('button.btn.fantasma.icono.agente-lapiz-btn', { title: 'Perfil, apariencia y permisos de ' + a.nombre, 'aria-pressed': String(lado === 'perfil' || lado === 'permisos'),
+              onclick: function () { verLado(lado === 'perfil' || lado === 'permisos' ? 'detalles' : 'perfil'); } }, App.icono('lapiz')),
+            h('button.btn.fantasma.icono', { title: 'Ver dónde está ' + a.nombre + ' en la oficina', onclick: function () {
+              if (App.Oficina3D.marcar) App.Oficina3D.marcar(a.id); else if (App.Oficina3D.enfocarAgente) App.Oficina3D.enfocarAgente(a.id); } }, App.icono('pin')),
+            h('button.btn.fantasma.icono', { title: 'Cerrar la charla', onclick: App.cerrarDerecho }, App.icono('cerrar')))),
+        h('div.charla-barra', h('b.charla-tit', App.Nav.tituloCharla ? App.Nav.tituloCharla(a.id) : ''),
+          h('button.btn.chico.fantasma.sacar-tareas', { title: 'Convertir esta charla en tareas (para ' + a.nombre + ' o para otros)', onclick: function () { App.ChatTareas.abrir(a, sesiones[a.id]); } }, App.icono('reloj'), 'Sacar tareas')),
+        cuerpo, pie);
+      der.classList.add('con-relacionado');
+      der.setAttribute('data-lado', lado === 'detalles' ? 'detalles' : 'ancho');
+      der.appendChild(columnaLado(a));
+      pintarChat(a, cuerpo, pie);
+      return;
+    }
     if (pestana === 'chat') {
       App.add(App.vaciar(App.dom.derecho),
         h('div.der-cab.agente-cab',
@@ -115,10 +198,7 @@
         })),
         cuerpo, pie);
     }
-    /* en la sección Charlas, a la derecha del chat: lo relacionado con el agente (nav.js) */
-    var conRel = pestana === 'chat' && App.Nav && App.Nav.enSeccion();
-    App.dom.derecho.classList.toggle('con-relacionado', !!conRel);
-    if (conRel) App.dom.derecho.appendChild(App.Nav.relacionado(a.id));
+    der.classList.remove('con-relacionado');
     if (pestana === 'chat') pintarChat(a, cuerpo, pie);
     else if (pestana === 'perfil') pintarPerfil(a, cuerpo, pie);
     else if (pestana === 'permisos') pintarPermisos(a, cuerpo, pie);
@@ -249,7 +329,7 @@
     var cont = h('div', { style: { padding: '14px' } }, App.cargando('Trayendo el perfil…'));
     cuerpo.appendChild(cont);
     api.get('/api/agentes/' + encodeURIComponent(a.id)).then(function (r) {
-      if (actual !== a.id || pestana !== 'perfil') return;
+      if (actual !== a.id || !viendo('perfil')) return;
       var datos = Object.assign({}, r.agente, { prompt: r.prompt, description: r.description || (r.agente && r.agente.description) });
       var ed = App.EditorAgente(datos, { editar: true });
       ed.el.style.gridTemplateColumns = '1fr';
@@ -282,7 +362,7 @@
       function poner(lista) { return api.patch('/api/agentes/' + encodeURIComponent(id), { permisos: lista }).then(function (r) { App.actualizar(r.oficina); }); }
       poner(antes.filter(function (x) { return x !== 'coordinador'; }).concat(si ? ['coordinador'] : [])).then(function () {
         App.guardado(si ? a.nombre + ' coordina la oficina.' : a.nombre + ' ya no coordina.', function () {
-          poner(antes).then(function () { if (actual === id && pestana === 'perfil') pintar(); }).catch(App.fallo);
+          poner(antes).then(function () { if (actual === id && viendo('perfil')) { if (pestana === 'chat') pintarSoloLado(); else pintar(); } }).catch(App.fallo);
         });
       }).catch(function (e) { App.fallo(e); ck.checked = !si; });
     });
@@ -308,7 +388,7 @@
   function pintarPermisos(a, cuerpo) {
     var id = a.id, cont = h('div.perm');
     cuerpo.appendChild(cont);
-    function vigente() { return actual === id && pestana === 'permisos' && cont.isConnected; }
+    function vigente() { return actual === id && viendo('permisos') && cont.isConnected; }
     function ag() { return App.agente(id) || a; }
     var lim = ag().limites || {};
     var solo = (lim.solo || []).slice(), proponer = (lim.proponer || []).slice();
@@ -561,7 +641,7 @@
     var cont = h('div', { style: { padding: '14px' } }, App.cargando('Trayendo las tareas…'));
     cuerpo.appendChild(cont);
     var id = a.id;
-    function vigente() { return actual === id && pestana === 'tareas' && cont.isConnected; }
+    function vigente() { return actual === id && viendo('tareas') && cont.isConnected; }
     function cargar() {
       clearTimeout(sondeoTareas);
       api.get('/api/tareas').then(function (r) {
@@ -876,5 +956,6 @@
     nueva: nueva,
     sesion: function (id) { return sesiones[id] || null; },
     sesionFija: function () { return sesionFija; },
-    pestana: function () { return actual ? pestana : 'chat'; } };
+    pestana: function () { return actual ? pestana : 'chat'; },
+    lado: function () { return pestana === 'chat' ? lado : pestana; }, verLado: verLado, repintarLado: repintarLado, PESTANAS: PESTANAS };
 })();

@@ -37,13 +37,13 @@
   function nombre(id) { var a = App.agente(id); return a ? a.nombre : id; }
 
   /* ---------------- nueva ---------------- */
-  /* `con`: ids que arrancan elegidos (p. ej. desde la ficha de un agente). Es una pantalla con ruta (#/charlas/nueva-reunion) */
+  /* `con`: ids que arrancan elegidos (p. ej. desde la ficha de un agente). Es una pantalla con ruta (#/equipo/nueva-reunion) */
   function nueva(con) {
     if (activa(E.reunion)) { App.aviso('Ya hay una reunión en curso.'); panel(E.reunion.id); return; }
     var o = E.oficina;
     if (o.agentes.length < 2) { App.aviso('Para una reunión hacen falta al menos dos agentes.', true); return; }
     var hj = App.hojaEnPanel({ titulo: 'Llamar a reunión', icono: 'reunion', sub: 'Elegí el tema, quiénes participan y cómo se habla' }, 'reunion-nueva');
-    function cancelar() { if (App.Nav && App.Nav.ir) App.Nav.ir('#/charlas'); else hj.cerrar(); }
+    function cancelar() { if (App.Nav && App.Nav.ir) App.Nav.ir('#/equipo/reuniones'); else hj.cerrar(); }
     var tema = h('textarea.campo', { rows: 3, maxlength: 500, autofocus: true, placeholder: 'Ej.: ¿Cómo lanzamos la colección de verano? Presupuesto, canales y fechas.' });
     var elegidos = [], grilla = h('div.elegir-agentes');
     o.agentes.forEach(function (a) {

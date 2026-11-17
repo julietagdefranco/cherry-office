@@ -4,9 +4,10 @@ La interfaz de Oficina: la maqueta 3D (three.js + piezas LDraw) y todas las pant
 (`desktop/`, Mac y Windows) la sirve tal cual.
 
 - `index.html`: punto de entrada.
-- `ui/`: un módulo por pantalla (`app.js` arma la base; `nav.js` el riel de secciones —Oficina, Charlas (con las reuniones adentro), Archivos y
-  Trabajo—, la columna de lista y las rutas con `#` (`#/charlas/<agente>/<sesión>`, `#/archivos/biblioteca`…): los módulos
-  siguen pintando en el panel `App.dom.derecho`, que sobre la maqueta flota y en las secciones ocupa todo; `oficina3d.js` la maqueta; `contratar.js` el editor de
+- `ui/`: un módulo por pantalla (`app.js` arma la base; `nav.js` el riel de secciones —Bandeja, Oficina, Equipo (personas y
+  reuniones), Archivos y Trabajo—, la columna de lista y las rutas con `#` (`#/equipo/<agente>/<sesión>`, `#/archivos/biblioteca`…;
+  `#/charlas/…` redirige a Equipo): los módulos siguen pintando en el panel `App.dom.derecho`, que sobre la maqueta flota y en
+  las secciones va pegado a la lista, con la oficina viva a la derecha (en el celular ocupa todo); `oficina3d.js` la maqueta; `contratar.js` el editor de
   agentes y minifigs; `flujos.js`, `reunion.js`, `biblioteca.js`, `parte.js`, `entregables.js`, `creador.js`…) y los
   estilos (`estilo.css` y uno por módulo grande).
 - `vendor/`: three.js, `LDrawLoader` y la fuente Poppins, offline (con sus licencias).

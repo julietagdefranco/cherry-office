@@ -25,7 +25,10 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
 - **Agentes y departamentos:** cada departamento es una sala del edificio. A los agentes los vestís con el editor de
   apariencia (piel, peinado, ropa, colores y accesorios) y les ajustás modelo, permisos y conectores. Los agentes sin
   trabajo caminan a la sala de juegos y café, y la luz de la oficina sigue la hora del día.
-- **Chat y reuniones:** clic en un personaje para hablarle en privado, o «Llamar a reunión» para juntar a varios. Desde una charla, «Sacar tareas» propone
+- **Equipo, chat y reuniones:** Equipo funciona como un chat: cada agente es un contacto y tocarlo (en la lista o en la oficina)
+  abre su charla pegada a la lista, con la oficina a la vista y la persona centrada. Al costado van sus charlas, tareas,
+  archivos y notas (el lápiz abre su perfil y permisos; el pin muestra dónde está). Las reuniones tienen su pestaña en Equipo,
+  desde donde se llama a una nueva. Desde una charla, «Sacar tareas» propone
   el trabajo que quedó pendiente (para ese agente o para otros) y, después de revisarlo, lo crea como tareas.
 - **Flujos:** procesos de varios pasos que pasan de agente en agente, con aprobaciones tuyas donde haga falta. Ves
   cada corrida en vivo y una pieza viaja por la maqueta.

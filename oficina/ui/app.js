@@ -272,8 +272,9 @@
     ]);
   }
 
-  /* Estructura: riel (secciones) · lista de la sección · vista. La vista tiene la maqueta 3D y el panel (dom.derecho)
-     donde pintan los módulos: en «Oficina» el panel flota sobre la maqueta; en las demás secciones ocupa todo (nav.js). */
+  /* Estructura: riel (secciones) · lista de la sección · vista. La vista tiene la maqueta y el panel (dom.derecho) donde
+     pintan los módulos: en «Oficina» el panel flota sobre la maqueta; en las demás secciones va pegado a la lista y la
+     oficina sigue a la vista a la derecha (nav.js). */
   function montar(carpeta, oficina) {
     E.carpeta = carpeta; E.oficina = oficina;
     document.title = oficina.nombre;
@@ -297,7 +298,7 @@
       dom.lista = h('aside.lista-col');
       var riel = App.Nav.riel({
         menuOficina: menuOficina, menuNuevo: menuNuevo,
-        insignias: { bandeja: dom.navEnt, charlas: dom.navReu, trabajo: dom.navTar },
+        insignias: { bandeja: dom.navEnt, equipo: dom.navReu, trabajo: dom.navTar },
         extra: [
           App.Uso ? App.Uso.boton() : null,
           h('button.riel-item.riel-extra', { title: 'Buscar o ir a… (' + App.atajoMod + 'K)', onclick: function () { App.Paleta.abrir(); } }, App.icono('buscar'), h('span', App.atajoMod + 'K')),
@@ -305,9 +306,8 @@
         ]
       });
       dom.app = h('div.app.en-oficina', riel, dom.lista,
+        /* llamar a reunión: en Equipo › Reuniones y en el «+» del riel (ya no flota un botón sobre la oficina) */
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu, dom.marca,
-          h('div.herramientas',
-            h('button.btn', { title: 'Llamar a reunión', onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), h('span.btn-txt', 'Llamar a reunión'))),
           h('div.pista', App.Paleta ? App.Paleta.BASE : 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte'),
           dom.derecho));
       App.vaciar(raiz).appendChild(dom.app);

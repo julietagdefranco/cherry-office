@@ -2,8 +2,10 @@
    Los módulos siguen pintando en App.dom.derecho y llamando a App.abrirDerecho(modo). Acá se decide dónde se ve:
    - Bandeja: lo que te espera (para revisar, permisos pendientes, parte del día).
    - Oficina: la maqueta 3D, sola.
-   - Charlas (con las reuniones), Equipo (la ficha de cada agente y los departamentos), Archivos y Trabajo: el panel ocupa
-     todo el ancho y a su izquierda queda la lista. Cada acción tiene una sola entrada por pantalla.
+   - Equipo (como un chat: cada persona es un contacto; tocarla abre su charla, con sus otras charlas, tareas, archivos y
+     notas al costado; en otra pestaña, las reuniones), Archivos y Trabajo.
+   En la compu todo crece desde el riel: la lista pegada al riel, el panel pegado a la lista, y la oficina queda viva a
+   la derecha (la cámara centra en el hueco que queda). En el celular, el panel ocupa la pantalla.
    Se sincroniza en los dos sentidos: una ruta abre el módulo, y un módulo abierto desde otro lado (un aviso, la
    maqueta, ⌘K) deja la ruta que le corresponde en el historial. */
 App.Nav = (function () {
@@ -15,22 +17,21 @@ App.Nav = (function () {
   var SECCIONES = [
     { id: 'bandeja', texto: 'Bandeja', icono: 'bandeja', ruta: '#/bandeja', movil: true },
     { id: 'oficina', texto: 'Oficina', icono: 'edificio', ruta: '#/oficina' },
-    { id: 'charlas', texto: 'Charlas', icono: 'charla', ruta: '#/charlas', movil: true },
     { id: 'equipo', texto: 'Equipo', icono: 'personas', ruta: '#/equipo', movil: true },
     { id: 'archivos', texto: 'Archivos', icono: 'carpeta', ruta: '#/archivos', movil: true },
     { id: 'trabajo', texto: 'Trabajo', icono: 'reloj', ruta: '#/trabajo' }
   ];
   /* modo del panel -> sección y subsección (el agente depende de la pestaña: la charla en Charlas, la ficha en Equipo) */
   var LUGAR = {
-    reunion: ['charlas'],
+    reunion: ['equipo', 'reuniones'],
     entregables: ['bandeja', 'revisar'], permisos: ['bandeja', 'permisos'], parte: ['bandeja', 'hoy'],
     deptos: ['equipo', 'departamentos'], contratar: ['equipo', 'contratar'], creador: ['equipo', 'creador'],
-    'reunion-nueva': ['charlas'], 'flujos-editor': ['trabajo', 'flujos'],
+    'reunion-nueva': ['equipo', 'reuniones'], 'flujos-editor': ['trabajo', 'flujos'],
     biblioteca: ['archivos', 'biblioteca'], conocimiento: ['archivos', 'conocimiento'], carpeta: ['archivos', 'carpeta'],
     tareas: ['trabajo', 'tareas'], flujos: ['trabajo', 'flujos']
   };
   function lugarDe(modo) {
-    if (modo === 'agente') return App.Agente.pestana() === 'chat' ? ['charlas'] : ['equipo'];
+    if (modo === 'agente') return ['equipo'];
     return LUGAR[modo];
   }
   var seccion = null, sub = null;
@@ -39,14 +40,16 @@ App.Nav = (function () {
   var sesiones = null;          // cache de /api/sesiones
   var reuniones = null;         // cache de /api/reuniones
   var buscar = '';
+  var eqTab = 'personas';       // pestaña de la lista de Equipo: personas o reuniones
   var plegado = {};
   try { plegado = JSON.parse(localStorage.getItem('oficina.nav.plegado') || '{}') || {}; } catch (e) {}
 
   function esMovil() { return window.matchMedia('(max-width: 720px)').matches; }
   function leer() {
     var p = (location.hash || '').replace(/^#\/?/, '').split('/').map(function (x) { try { return decodeURIComponent(x); } catch (e) { return x; } });
-    // #/reuniones/<id> es una reunión: se ve dentro de Charlas
-    var sec = p[0] === 'reuniones' || SECCIONES.some(function (s) { return s.id === p[0]; }) ? p[0] : 'oficina';
+    // #/reuniones/<id> es una reunión: se ve dentro de Equipo › Reuniones
+    // #/charlas/… es una ruta vieja (se redirige a Equipo en aplicar)
+    var sec = p[0] === 'reuniones' || p[0] === 'charlas' || SECCIONES.some(function (s) { return s.id === p[0]; }) ? p[0] : 'oficina';
     return { sec: sec, a: p[1] || null, b: p[2] || null, resto: p.slice(2).join('/') };
   }
   function empujar(ruta, reemplazar) {
@@ -59,7 +62,11 @@ App.Nav = (function () {
   function riel(op) {
     dom.items = {};
     var items = SECCIONES.map(function (s, i) {
-      var b = h('button.riel-item' + (s.movil ? '' : '.riel-no-movil'), { title: s.texto + ' (' + (App.atajoMod || '⌘') + (i + 1) + ')', onclick: function () { ir(s.id === 'oficina' ? s.ruta : rutaSeccion(s.id)); } },
+      var b = h('button.riel-item' + (s.movil ? '' : '.riel-no-movil'), { title: s.texto + ' (' + (App.atajoMod || '⌘') + (i + 1) + ')', onclick: function () {
+        var app = App.dom.app;   // con la lista plegada, tocar la sección en la que estás la muestra encima
+        if (s.id === seccion && app.classList.contains('lista-plegada')) { app.classList.toggle('lista-ver'); return; }
+        ir(s.id === 'oficina' ? s.ruta : rutaSeccion(s.id));
+      } },
         App.icono(s.icono), h('span', s.texto), op.insignias && op.insignias[s.id] ? op.insignias[s.id] : null);
       dom.items[s.id] = b;
       return b;
@@ -94,14 +101,16 @@ App.Nav = (function () {
   function ponerSeccion(sec, s) {
     var antes = seccion;
     seccion = sec; sub = s || null;
-    if (antes !== sec && sec === 'charlas' && sesiones) cargarSesiones();      // al entrar, se pone al día sin parpadear
-    if (antes !== sec && sec === 'charlas' && reuniones) cargarReuniones();
+    if (antes !== sec && sec === 'equipo' && sesiones) cargarSesiones();      // al entrar, se pone al día sin parpadear
+    if (antes !== sec && sec === 'equipo' && reuniones) cargarReuniones();
+    if (sec === 'equipo' && s === 'reuniones') eqTab = 'reuniones';
     if (s && ultimaSub[sec] !== undefined && s !== 'carpeta') ultimaSub[sec] = s;
     var app = App.dom.app;
     app.classList.toggle('en-oficina', sec === 'oficina');
     app.classList.toggle('en-seccion', sec !== 'oficina');
     app.setAttribute('data-seccion', sec);
-    if (App.Oficina3D && App.Oficina3D.pausar) App.Oficina3D.pausar(sec !== 'oficina');
+    /* la oficina sigue viva detrás de las secciones; solo en el celular (donde el panel la tapa entera) se pausa */
+    if (App.Oficina3D && App.Oficina3D.pausar) App.Oficina3D.pausar(sec !== 'oficina' && esMovil());
     Object.keys(dom.items || {}).forEach(function (k) {
       dom.items[k].classList.toggle('activo', k === sec);
       if (k === sec) dom.items[k].setAttribute('aria-current', 'page'); else dom.items[k].removeAttribute('aria-current');
@@ -112,7 +121,25 @@ App.Nav = (function () {
   function marcarDetalle() {
     var m = App.modoDerecho ? App.modoDerecho() : null;
     App.dom.app.classList.toggle('con-detalle', seccion !== 'oficina' && !!m && m !== 'vacio');
+    acomodar();
   }
+  /* En la compu: si lista + panel dejan menos de LIBRE px de oficina, la lista se pliega (tocar la sección en el riel la
+     muestra encima). Y la cámara de la oficina centra en el hueco que deja el panel. */
+  var LIBRE = 360;
+  function acomodar() {
+    var app = App.dom && App.dom.app; if (!app) return;
+    requestAnimationFrame(function () {
+      var der = App.dom.derecho, enSec = seccion && seccion !== 'oficina' && !esMovil();
+      var panel = enSec && app.classList.contains('con-detalle') ? der.offsetWidth : 0;
+      var lista = enSec ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lista')) || 284) : 0;
+      var riel = App.dom.riel ? App.dom.riel.offsetWidth : 68;
+      var plegar = enSec && panel > 0 && window.innerWidth - riel - lista - panel < LIBRE;
+      app.classList.toggle('lista-plegada', plegar);
+      if (!plegar) app.classList.remove('lista-ver');
+      if (App.Oficina3D && App.Oficina3D.margen) App.Oficina3D.margen(panel);
+    });
+  }
+  window.addEventListener('resize', function () { if (App.dom && App.dom.app) acomodar(); });
 
   /* El panel vacío de una sección (nada elegido todavía). Cierra lo que hubiera con su limpieza de siempre. */
   function vacio() {
@@ -122,14 +149,11 @@ App.Nav = (function () {
     der.classList.add('abierto'); der.setAttribute('data-modo', 'vacio');
     var txt = {
       bandeja: ['bandeja', 'Lo que te espera', 'Hoy junta lo que te entregaron, los permisos que te piden y lo que pasó.'],
-      charlas: ['charla', 'Elegí una charla o empezá una', 'Hablale a alguien del equipo, o juntá a varios en una reunión. Todo queda guardado a la izquierda.'],
-      equipo: ['personas', 'Tu equipo', 'Elegí a alguien para ver y cambiar su perfil, sus permisos, sus notas, sus tareas y sus archivos.'],
+      equipo: ['personas', 'Tu equipo', 'Tocá a alguien, acá o en la oficina, para charlar. Al costado de la charla vas a ver sus otras charlas, sus tareas, sus archivos y sus notas.'],
       archivos: ['carpeta', 'Archivos de la oficina', 'La carpeta de la oficina, la biblioteca y lo que sabe la oficina.'],
       trabajo: ['reloj', 'Lo que los agentes hacen solos', 'Tareas programadas y flujos que pasan de un agente a otro.']
     }[seccion] || ['edificio', '', ''];
-    var accion = seccion === 'charlas' ? h('div.acciones', { style: { justifyContent: 'center' } },
-      h('button.btn.primario', { onclick: function (ev) { elegirAgente(ev.currentTarget, nuevaCharla); } }, App.icono('charla'), 'Charlar con alguien'),
-      h('button.btn', { onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), 'Llamar a reunión'))
+    var accion = seccion === 'equipo' && eqTab === 'reuniones' ? h('button.btn.primario', { onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), 'Llamar a reunión')
       : seccion === 'equipo' ? h('button.btn.primario', { onclick: function () { App.Contratar.abrir(); } }, App.icono('mas'), 'Contratar un agente') : null;
     App.add(App.vaciar(der), h('div.nav-vacio', App.icono(txt[0]), h('b', txt[1]), h('p', txt[2]), accion));
     marcarDetalle();
@@ -142,6 +166,10 @@ App.Nav = (function () {
     try {
       /* rutas viejas: lo que esperaba tu revisión vivía en Archivos */
       if (r.sec === 'archivos' && r.a === 'revisar') { empujar('#/bandeja/revisar' + (r.b ? '/' + r.b : ''), true); r = leer(); }
+      /* rutas viejas: Charlas ya no existe; las charlas y las reuniones viven en Equipo */
+      if (r.sec === 'charlas') {
+        empujar(r.a === 'nueva-reunion' ? '#/equipo/nueva-reunion' : r.a ? '#/equipo/' + encodeURIComponent(r.a) + (r.b ? '/' + r.b : '') : '#/equipo', true); r = leer();
+      }
       var enChat = m === 'agente' && App.Agente.pestana() === 'chat';
       if (r.sec === 'oficina') {
         ponerSeccion('oficina');
@@ -157,31 +185,25 @@ App.Nav = (function () {
         else if (r.a === 'hoy' || r.a === 'parte') { if (m !== 'parte') App.Parte.abrir(); }
         else vacio();
       } else if (r.sec === 'equipo') {
-        ponerSeccion('equipo', ['departamentos', 'contratar', 'creador'].indexOf(r.a) >= 0 ? r.a : null);
+        ponerSeccion('equipo', ['departamentos', 'contratar', 'creador', 'reuniones', 'nueva-reunion'].indexOf(r.a) >= 0 ? (r.a === 'nueva-reunion' ? 'reuniones' : r.a) : null);
         if (r.a === 'departamentos') { if (m !== 'deptos') abrirDeptos(); }
         else if (r.a === 'contratar') { if (m !== 'contratar') App.Contratar.abrir(); }
         else if (r.a === 'creador') { if (m !== 'creador') App.Creador.abrir(); }
+        else if (r.a === 'nueva-reunion') { if (m !== 'reunion-nueva') App.Reunion.nueva(); }
+        else if (r.a === 'reuniones') { eqTab = 'reuniones'; vacio(); }
         else if (r.a && App.agente(r.a)) {
-          var pest = r.b || 'perfil';
-          if (!(m === 'agente' && App.Agente.actual() === r.a && App.Agente.pestana() === pest)) App.Agente.abrir(r.a, pest);
-        } else vacio();
-      } else if (r.sec === 'charlas') {
-        ponerSeccion('charlas');
-        if (r.a === 'nueva-reunion') { if (m !== 'reunion-nueva') App.Reunion.nueva(); }
-        else if (r.a && App.agente(r.a)) {
-          if (r.b) { if (!(enChat && App.Agente.actual() === r.a && App.Agente.sesion(r.a) === r.b)) App.Agente.abrirSesion(r.a, r.b); }
+          eqTab = 'personas';
+          /* #/equipo/<id> es su charla; #/equipo/<id>/<sesión> una charla guardada; #/equipo/<id>/<pestaña> abre su
+             ficha (perfil, permisos…): en la compu, al costado de la charla; en el celular, en lugar de la charla */
+          var esPest = App.Agente.PESTANAS.indexOf(r.b) >= 0;
+          if (r.b && !esPest) { if (!(enChat && App.Agente.actual() === r.a && App.Agente.sesion(r.a) === r.b)) App.Agente.abrirSesion(r.a, r.b); }
+          else if (esPest) { if (!(m === 'agente' && App.Agente.actual() === r.a && App.Agente.lado() === r.b)) App.Agente.abrir(r.a, r.b); }
           else if (!(enChat && App.Agente.actual() === r.a)) App.Agente.abrir(r.a, 'chat');
-        } else if (!esMovil() && sesiones && sesiones.length && !enChat) {
-          var s = sesiones[0];
-          empujar('#/charlas/' + encodeURIComponent(s.agente) + '/' + s.session, true);
-          App.Agente.abrirSesion(s.agente, s.session);
-        } else if (enChat && !esMovil()) {
-          empujar(rutaDe('agente'), true);
         } else vacio();
       } else if (r.sec === 'reuniones') {
-        ponerSeccion('charlas');
+        ponerSeccion('equipo', 'reuniones');
         if (r.a) { if (!(m === 'reunion' && App.Reunion.abierta() === r.a)) App.Reunion.ver(r.a); }
-        else { empujar('#/charlas', true); vacio(); }
+        else { empujar('#/equipo/reuniones', true); vacio(); }
       } else if (r.sec === 'archivos') {
         ponerSeccion('archivos', r.a);
         if (r.a === 'biblioteca') { if (m !== 'biblioteca') App.Biblioteca.abrir(); }
@@ -211,7 +233,7 @@ App.Nav = (function () {
     if (modo === 'agente') {
       var id = App.Agente.actual(), sid = App.Agente.sesionFija && App.Agente.sesionFija(), p = App.Agente.pestana();
       if (p !== 'chat') return '#/equipo/' + encodeURIComponent(id || '') + '/' + p;
-      return '#/charlas/' + encodeURIComponent(id || '') + (sid ? '/' + sid : '');
+      return '#/equipo/' + encodeURIComponent(id || '') + (sid ? '/' + sid : '');
     }
     if (modo === 'reunion') return '#/reuniones/' + encodeURIComponent((App.Reunion.abierta && App.Reunion.abierta()) || '');
     if (modo === 'entregables') { var e = App.Entregables.abierta(); return '#/bandeja/revisar' + (e ? '/' + e : ''); }
@@ -220,7 +242,7 @@ App.Nav = (function () {
     if (modo === 'deptos') return '#/equipo/departamentos';
     if (modo === 'contratar') return '#/equipo/contratar';
     if (modo === 'creador') return '#/equipo/creador';
-    if (modo === 'reunion-nueva') return '#/charlas/nueva-reunion';
+    if (modo === 'reunion-nueva') return '#/equipo/nueva-reunion';
     if (modo === 'flujos-editor') { var fe = App.Flujos.editando && App.Flujos.editando(); return '#/trabajo/flujos/editar' + (fe ? '/' + encodeURIComponent(fe) : ''); }
     if (modo === 'biblioteca') return '#/archivos/biblioteca';
     if (modo === 'conocimiento') return '#/archivos/conocimiento';
@@ -249,19 +271,20 @@ App.Nav = (function () {
   /* un módulo cambió algo que mira la lista (mandaste un mensaje, terminó una reunión…) */
   var refrescoPendiente = null;
   function refrescar() {
-    sesiones = seccion === 'charlas' ? sesiones : null;
+    sesiones = seccion === 'equipo' ? sesiones : null;
     clearTimeout(refrescoPendiente);
-    refrescoPendiente = setTimeout(function () { if (seccion === 'charlas') { cargarSesiones(); cargarReuniones(); } else pintarLista(); }, 150);
+    refrescoPendiente = setTimeout(function () {
+      if (seccion === 'equipo') { cargarSesiones().then(function () { if (App.Agente.repintarLado) App.Agente.repintarLado('charlas'); }); cargarReuniones(); } else pintarLista();
+    }, 150);
   }
 
-  function ir(ruta) { if (location.hash === ruta) aplicar(); else location.hash = ruta; }
+  function ir(ruta) { if (App.dom && App.dom.app) App.dom.app.classList.remove('lista-ver'); if (location.hash === ruta) aplicar(); else location.hash = ruta; }
 
   /* ---------------- columna de lista ---------------- */
   function lista() { return App.dom.lista; }
   function pintarLista() {
     var col = lista(); if (!col) return;
-    if (seccion === 'charlas') pintarCharlas(col);
-    else if (seccion === 'bandeja') pintarBandeja(col);
+    if (seccion === 'bandeja') pintarBandeja(col);
     else if (seccion === 'equipo') pintarEquipo(col);
     else if (seccion === 'archivos') pintarArchivos(col);
     else if (seccion === 'trabajo') pintarTrabajo(col);
@@ -282,62 +305,16 @@ App.Nav = (function () {
     return [tit, cuerpo];
   }
 
-  /* --- Charlas: el equipo arriba (plegable) y las charlas guardadas de todos, la más reciente primero --- */
+  /* --- charlas guardadas de todos (la más reciente primero): las usa el costado de cada charla --- */
   function cargarSesiones() {
     return api().get('/api/sesiones').then(function (r) {
       sesiones = r.sesiones || [];
-      if (seccion === 'charlas') pintarLista();
       return sesiones;
     }).catch(function () { sesiones = sesiones || []; });
-  }
-  function pintarCharlas(col) {
-    var inp = h('input.campo', { placeholder: 'Buscar en charlas', value: buscar });
-    var caja = h('div');
-    inp.addEventListener('input', function () { buscar = inp.value; llenar(); });
-    function llenar() {
-      App.vaciar(caja);
-      var q = buscar.trim().toLowerCase();
-      caja.appendChild(bloqueReuniones(q));
-      if (!sesiones) { caja.appendChild(App.cargando('Trayendo las charlas…')); return; }
-      caja.appendChild(h('div.lista-grupo', 'Charlas'));
-      var ss = sesiones.filter(function (s) {
-        var a = App.agente(s.agente); if (!a) return false;
-        return !q || (titulo(s) + ' ' + s.ultimo + ' ' + a.nombre).toLowerCase().indexOf(q) >= 0;
-      });
-      var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-      var corte = [hoy.getTime() / 1000, hoy.getTime() / 1000 - 86400, hoy.getTime() / 1000 - 6 * 86400];
-      var grupos = [['Hoy', []], ['Ayer', []], ['Esta semana', []], ['Antes', []]];
-      ss.forEach(function (s) { grupos[s.ts >= corte[0] ? 0 : s.ts >= corte[1] ? 1 : s.ts >= corte[2] ? 2 : 3][1].push(s); });
-      grupos.forEach(function (g) {
-        if (!g[1].length) return;
-        caja.appendChild(h('div.lista-subgrupo', g[0]));
-        g[1].forEach(function (s) { caja.appendChild(filaSesion(s)); });
-      });
-      if (!ss.length) caja.appendChild(h('div.vacio', q ? 'Nada con «' + buscar + '».' : 'Todavía no hay charlas. Tocá a alguien del equipo para empezar.'));
-    }
-    llenar();
-    App.add(App.vaciar(col),
-      cabecera('Charlas', h('button.btn.chico', { title: 'Charla con alguien o reunión', onclick: function (ev) { menuNueva(ev.currentTarget); } }, App.icono('mas'), 'Nueva')),
-      h('div.lista-buscar', App.icono('buscar'), inp),
-      h('div.lista-cuerpo', caja));
-    if (!sesiones) cargarSesiones().then(function () {
-      var r = leer();   // recién llegó la lista: en la compu se abre la charla más reciente
-      if (r.sec === 'charlas' && !r.a && !esMovil() && App.modoDerecho() !== 'agente' && sesiones.length) aplicar();
-    });
   }
   function titulo(s) {
     var t = App.Adjuntos && App.Adjuntos.separar ? App.Adjuntos.separar(s.titulo || '').texto : s.titulo;
     return (t || '').trim() || 'Charla con archivos';
-  }
-  function filaSesion(s) {
-    var a = App.agente(s.agente);
-    var activa = App.modoDerecho() === 'agente' && App.Agente.pestana() === 'chat' && App.Agente.actual() === s.agente && App.Agente.sesion(s.agente) === s.session;
-    var ult = App.Adjuntos && App.Adjuntos.separar ? App.Adjuntos.separar(s.ultimo || '').texto : s.ultimo;
-    return h('div.lista-item' + (activa ? '.activo' : ''), { onclick: function () { ir('#/charlas/' + encodeURIComponent(s.agente) + '/' + s.session); } },
-      App.retratoImg(a, 'retrato', 64),
-      h('div.lista-item-txt',
-        h('div.lista-item-tit', h('b', titulo(s)), h('small', corto(s.ts))),
-        h('div.lista-item-sub', a.nombre + ' · ' + (s.de === 'u' ? 'Vos: ' : '') + (ult || '').replace(/[*#`|>]/g, ''))));
   }
   function corto(ts) {
     var d = Date.now() / 1000 - ts;
@@ -356,31 +333,27 @@ App.Nav = (function () {
 
   /* --- Reuniones: la lista de siempre, a la izquierda --- */
   function cargarReuniones() {
-    return api().get('/api/reuniones').then(function (r) { reuniones = r.reuniones || []; if (seccion === 'charlas') pintarLista(); }).catch(function () { reuniones = reuniones || []; });
+    return api().get('/api/reuniones').then(function (r) { reuniones = r.reuniones || []; if (seccion === 'equipo' && eqTab === 'reuniones') pintarLista(); }).catch(function () { reuniones = reuniones || []; });
   }
-  /* Dentro de Charlas: las reuniones en curso y las últimas (con «Ver todas»). La búsqueda también las filtra. */
-  var todasReuniones = false;
-  function bloqueReuniones(q) {
+  /* Pestaña «Reuniones» de Equipo: llamar a una, las que están en curso y las terminadas. La búsqueda las filtra. */
+  function listaReuniones(q) {
     var caja = h('div');
     var abierta = App.modoDerecho() === 'reunion' ? App.Reunion.abierta() : null;
     if (reuniones && abierta && !reuniones.some(function (x) { return x.id === abierta; })) cargarReuniones();   // recién creada
-    if (!reuniones) { cargarReuniones(); return caja; }
+    caja.appendChild(filtroFila('mas', 'Llamar a reunión', App.modoDerecho() === 'reunion-nueva', function () { App.Reunion.nueva(); }));
+    if (!reuniones) { cargarReuniones(); caja.appendChild(App.cargando('Trayendo las reuniones…')); return caja; }
     var rs = reuniones.filter(function (x) { return !q || (x.tema + ' ' + nombresDe(x).join(' ')).toLowerCase().indexOf(q) >= 0; });
-    if (!rs.length) return caja;
     var vivas = rs.filter(function (x) { return x.estado !== 'cerrada'; });
     var cerradas = rs.filter(function (x) { return x.estado === 'cerrada'; });
-    var mostrar = vivas.concat(q || todasReuniones ? cerradas : cerradas.slice(0, Math.max(0, 3 - vivas.length)));
-    App.add(caja, h('div.lista-grupo', 'Reuniones', vivas.length ? h('span.insignia.ok', { style: { marginLeft: 'auto' } }, vivas.length === 1 ? 'En curso' : vivas.length + ' en curso') : null),
-      mostrar.map(function (x) {
-        var activa = abierta === x.id;
-        var est = x.estado === 'cerrada' ? h('small', App.fecha(x.creada)) : h('span.insignia.ok', x.estado === 'en_curso' ? 'En curso' : 'Esperando');
-        return h('div.lista-item' + (activa ? '.activo' : ''), { onclick: function () { ir('#/reuniones/' + encodeURIComponent(x.id)); } },
-          h('div.lista-icono', App.icono('reunion')),
-          h('div.lista-item-txt', h('div.lista-item-tit', h('b', x.tema), est), h('div.lista-item-sub', nombresDe(x).join(', '))));
-      }),
-      !q && cerradas.length > mostrar.length - vivas.length || (todasReuniones && cerradas.length > 3)
-        ? h('button.lista-mas', { onclick: function () { todasReuniones = !todasReuniones; pintarLista(); } },
-          todasReuniones ? 'Ver menos' : 'Ver todas las reuniones (' + rs.length + ')') : null);
+    function fila(x) {
+      var est = x.estado === 'cerrada' ? h('small', App.fecha(x.creada)) : h('span.insignia.ok', x.estado === 'en_curso' ? 'En curso' : 'Esperando');
+      return h('div.lista-item' + (abierta === x.id ? '.activo' : ''), { onclick: function () { ir('#/reuniones/' + encodeURIComponent(x.id)); } },
+        h('div.lista-icono', App.icono('reunion')),
+        h('div.lista-item-txt', h('div.lista-item-tit', h('b', x.tema), est), h('div.lista-item-sub', nombresDe(x).join(', '))));
+    }
+    if (vivas.length) App.add(caja, h('div.lista-grupo', 'En curso', h('span.cuenta', vivas.length)), vivas.map(fila));
+    if (cerradas.length) App.add(caja, h('div.lista-grupo', 'Terminadas', h('span.cuenta', cerradas.length)), cerradas.map(fila));
+    if (!rs.length) caja.appendChild(h('div.vacio', q ? 'Nada con «' + q + '».' : 'Todavía no hubo reuniones.'));
     return caja;
   }
   function nombresDe(x) { return (x.agentes || []).map(function (id) { var a = App.agente(id); return a ? a.nombre : id; }); }
@@ -405,13 +378,46 @@ App.Nav = (function () {
       filtroFila('escudo', 'Te piden permiso', sub === 'permisos', function () { ir('#/bandeja/permisos'); }, np ? h('span.insignia', np) : null)));
   }
 
-  /* --- Equipo: vos, los agentes por departamento y los departamentos. Tocar a alguien abre su ficha. --- */
+  /* --- Equipo: como un chat. Pestaña «Personas» (vos, los agentes por departamento y los departamentos: tocar a alguien
+     abre su charla) y pestaña «Reuniones». Separadas para que con mucha gente las reuniones no queden al fondo. --- */
+  var buscarEq = '';
   function pintarEquipo(col) {
+    var vivas = (reuniones || []).filter(function (x) { return x.estado !== 'cerrada'; }).length;
+    if (!reuniones) cargarReuniones();
+    function pest(id, texto, extra) {
+      return h('button', { role: 'tab', 'aria-selected': String(eqTab === id), onclick: function () {
+        if (eqTab === id) return; eqTab = id; buscarEq = '';
+        if (seccion === 'equipo' && (!App.modoDerecho() || App.modoDerecho() === 'vacio')) vacio();
+        pintarLista();
+      } }, texto, extra);
+    }
+    var inp = h('input.campo', { placeholder: eqTab === 'personas' ? 'Buscar persona' : 'Buscar reunión', value: buscarEq, 'aria-label': 'Buscar' });
+    var cuerpo = h('div.lista-cuerpo');
+    function llenar() {
+      var q = buscarEq.trim().toLowerCase();
+      App.vaciar(cuerpo);
+      if (eqTab === 'reuniones') { cuerpo.appendChild(listaReuniones(q)); return; }
+      App.add(cuerpo, App.dom.equipo, h('div.lista-grupo', 'La oficina'),
+        filtroFila('capas', 'Departamentos', sub === 'departamentos', function () { ir('#/equipo/departamentos'); }));
+      /* filtrar a la gente sin rearmar la lista (las filas las pinta app.js) */
+      App.dom.equipo.querySelectorAll('.persona[data-id]').forEach(function (el) {
+        var a = App.agente(el.getAttribute('data-id'));
+        el.classList.toggle('oculto', !!q && !!a && (a.nombre + ' ' + (a.rol || '')).toLowerCase().indexOf(q) < 0);
+      });
+      App.dom.equipo.querySelectorAll('.grupo-tit').forEach(function (g) {
+        var n = g.nextElementSibling, alguno = false;
+        while (n && n.classList.contains('persona')) { if (!n.classList.contains('oculto')) alguno = true; n = n.nextElementSibling; }
+        g.classList.toggle('oculto', !!q && !alguno);
+      });
+    }
+    inp.addEventListener('input', function () { buscarEq = inp.value; llenar(); });
+    llenar();
     App.add(App.vaciar(col),
       cabecera('Equipo', h('button.btn.chico', { title: 'Contratar un agente', onclick: function () { ir('#/equipo/contratar'); } }, App.icono('mas'), 'Contratar')),
-      h('div.lista-cuerpo', App.dom.equipo,
-        h('div.lista-grupo', 'La oficina'),
-        filtroFila('capas', 'Departamentos', sub === 'departamentos', function () { ir('#/equipo/departamentos'); })));
+      h('div.eq-tabs', { role: 'tablist' },
+        pest('personas', 'Personas', h('em', String((App.E.oficina.agentes || []).length))),
+        pest('reuniones', 'Reuniones', vivas ? h('span.en-curso', { title: vivas === 1 ? 'Una en curso' : vivas + ' en curso' }, h('i.vivo-p'), String(vivas)) : h('em', String((reuniones || []).length || '')))),
+      h('div.lista-buscar', App.icono('buscar'), inp), cuerpo);
     if (App.marcarEstados) App.marcarEstados();
   }
   /* Departamentos como pantalla (la misma sección de Ajustes): al guardar se vuelve a pintar */
@@ -442,47 +448,114 @@ App.Nav = (function () {
       filtroFila('flujo', 'Flujos', sub === 'flujos', function () { ir('#/trabajo/flujos'); }, d.navFlu)));
   }
 
-  /* --- «Relacionado»: a la derecha del chat (en una sección y con lugar): quién es, sus otras charlas, lo que te
-     entregó y sus tareas. Cada cosa lleva a su lugar. --- */
+  /* --- «Detalles»: la columna a la derecha de la charla (en la compu). Sus charlas arriba de todo, y sus tareas,
+     archivos y notas: de cada cosa se ven las primeras y «Ver todas» abre la lista completa en esa misma columna
+     (App.Agente.verLado), así la columna mide lo mismo con 3 cosas o con 300. --- */
+  var MAX_LADO = 3;
+  function charlasDe(id) { return (sesiones || []).filter(function (s) { return s.agente === id; }); }
+  function filaCharla(id, s, activa) {
+    return h('button.lat-fila.charla' + (activa ? '.act' : ''), { onclick: function () { ir('#/equipo/' + encodeURIComponent(id) + '/' + s.session); } },
+      App.icono('charla'), h('span', h('b', titulo(s)), h('small', activa ? 'abierta ahora' : corto(s.ts))));
+  }
   function relacionado(id) {
     var a = App.agente(id);
-    var caja = h('aside.relacionado');
+    var caja = h('div.lat-cuerpo');
     if (!a) return caja;
-    var charlas = h('div'), entregas = h('div', h('div.ayuda', '…')), tareas = h('div', h('div.ayuda', '…'));
-    function mini(icono, texto, nota, accion, cls) {
-      return h('button.rel-fila' + (cls || ''), { onclick: accion }, App.icono(icono), h('span', texto), nota ? h('small', nota) : null);
+    function seccion_(titulo_, cuenta, mas, cuerpo, ver) {
+      var tit = h('div.lat-sec-tit', h('span', titulo_), cuenta, mas || null);
+      return h('section.lat-sec', tit, cuerpo, ver || h('span'));
     }
-    function pintarCharlas() {
-      App.vaciar(charlas);
-      var actualSid = App.Agente.sesion(id);
-      var ss = (sesiones || []).filter(function (s) { return s.agente === id && s.session !== actualSid; }).slice(0, 6);
-      if (!ss.length) charlas.appendChild(h('div.ayuda', sesiones ? 'No hay otras.' : '…'));
-      ss.forEach(function (s) { charlas.appendChild(mini('charla', titulo(s), corto(s.ts), function () { ir('#/charlas/' + encodeURIComponent(id) + '/' + s.session); })); });
+    function verTodas(cual, n, texto) { return n > MAX_LADO ? h('button.lat-mas', { onclick: function () { App.Agente.verLado(cual); } }, (texto || 'Ver todas') + ' (' + n + ')', App.icono('flecha')) : null; }
+    function cuenta(n) { return h('em', n == null ? '' : String(n)); }
+    var botonMas = function (titulo_, accion) { return h('button.btn.fantasma.icono.chico', { title: titulo_, onclick: accion }, App.icono('mas')); };
+
+    /* charlas */
+    var charlas = h('div'), charlasVer = h('div'), charlasN = cuenta(null);
+    function pintarCharlas_() {
+      App.vaciar(charlas); App.vaciar(charlasVer);
+      var actualSid = App.Agente.sesion(id), ss = charlasDe(id);
+      charlasN.textContent = sesiones ? String(ss.length) : '';
+      var actual = ss.filter(function (s) { return s.session === actualSid; })[0];
+      if (!actual && App.Agente.actual() === id) charlas.appendChild(h('button.lat-fila.charla.act', App.icono('charla'), h('span', h('b', 'Charla nueva'), h('small', 'abierta ahora'))));
+      var vis = ss.slice(0, MAX_LADO + 1);
+      if (actual && vis.indexOf(actual) < 0) vis.push(actual);
+      vis.forEach(function (s) { charlas.appendChild(filaCharla(id, s, s === actual)); });
+      if (!ss.length && !charlas.children.length) charlas.appendChild(h('div.lat-vacio', sesiones ? 'Todavía no charlaron.' : '…'));
+      var v = ss.length > MAX_LADO + 1 ? h('button.lat-mas', { onclick: function () { App.Agente.verLado('charlas'); } }, 'Ver todas (' + ss.length + ')', App.icono('flecha')) : null;
+      if (v) charlasVer.appendChild(v);
     }
-    if (sesiones) pintarCharlas(); else cargarSesiones().then(pintarCharlas);
-    api().get('/api/entregas', { agente: id, limite: 5 }).then(function (r) {
-      App.vaciar(entregas);
-      var es = r.entregas || [];
-      if (!es.length) entregas.appendChild(h('div.ayuda', 'Todavía nada.'));
-      es.forEach(function (e) {
-        entregas.appendChild(mini('bandeja', e.titulo || 'Entrega', e.estado === 'sin_revisar' ? 'para revisar' : '', function () { App.Entregables.abrir(e.id); }, e.estado === 'sin_revisar' ? '.pendiente' : ''));
-      });
-    }).catch(function () { App.vaciar(entregas); });
+    if (sesiones) pintarCharlas_(); else cargarSesiones().then(pintarCharlas_);
+    caja.appendChild(seccion_('Charlas', charlasN, botonMas('Nueva charla con ' + a.nombre, function () { App.Agente.nueva(id); }), charlas, charlasVer));
+
+    /* tareas programadas */
+    var tareas = h('div', h('div.lat-vacio', '…')), tareasN = cuenta(null), tareasVer = h('div');
+    caja.appendChild(seccion_('Tareas', tareasN, botonMas('Nueva tarea para ' + a.nombre, function () { App.Agente.nuevaTarea(id, {}); }), tareas, tareasVer));
     api().get('/api/tareas').then(function (r) {
       App.vaciar(tareas);
       var ts = (r.tareas || []).filter(function (t) { return t.agente === id; });
-      if (!ts.length) tareas.appendChild(h('div.ayuda', 'Sin tareas programadas.'));
-      ts.slice(0, 5).forEach(function (t) { tareas.appendChild(mini('reloj', t.nombre, t.corriendo ? 'corriendo' : t.activa === false ? 'en pausa' : '', function () { App.Agente.abrir(id, 'tareas'); })); });
+      ts.sort(function (x, y) { return (y.activa !== false) - (x.activa !== false); });
+      tareasN.textContent = String(ts.length);
+      if (!ts.length) tareas.appendChild(h('div.lat-vacio', 'Sin tareas programadas.'));
+      ts.slice(0, MAX_LADO).forEach(function (t) {
+        tareas.appendChild(h('button.lat-fila', { onclick: function () { App.Agente.verLado('tareas'); } }, App.icono('reloj'),
+          h('span', h('b', t.nombre), h('small', t.corriendo ? 'corriendo' : t.activa === false ? 'en pausa' : (t.unica ? 'una vez' : 'programada')))));
+      });
+      var v = verTodas('tareas', ts.length); if (v) tareasVer.appendChild(v);
     }).catch(function () { App.vaciar(tareas); });
-    App.add(caja,
-      h('div.rel-sec.primera', h('h4', 'Otras charlas con ' + a.nombre), charlas),
-      h('div.rel-sec', h('h4', 'Lo que te entregó', h('button.btn.chico.fantasma', { onclick: function () { ir('#/bandeja/revisar'); } }, 'Todo')), entregas),
-      h('div.rel-sec', h('h4', 'Sus tareas', h('button.btn.chico.fantasma', { onclick: function () { App.Agente.nuevaTarea(id, {}); } }, '+ Nueva')), tareas));
+
+    /* archivos que guardó */
+    var archivos = h('div', h('div.lat-vacio', '…')), archivosN = cuenta(null), archivosVer = h('div');
+    caja.appendChild(seccion_('Archivos', archivosN, null, archivos, archivosVer));
+    api().get('/api/biblioteca/entregables', { agente: id }).then(function (r) {
+      App.vaciar(archivos);
+      var es = r.entregables || [];
+      archivosN.textContent = String(es.length);
+      if (!es.length) archivos.appendChild(h('div.lat-vacio', 'Lo que ' + a.nombre + ' guarde aparece acá.'));
+      es.slice(0, MAX_LADO).forEach(function (x) {
+        archivos.appendChild(h('button.lat-fila', { onclick: function () { api().get('/api/biblioteca/entregable', { agente: id, ruta: x.ruta }).then(App.abrirContenido).catch(App.fallo); } },
+          App.icono('parte'), h('span', h('b', x.nombre), h('small', App.tam(x.tam || 0)))));
+      });
+      var v = verTodas('archivos', es.length, 'Ver todos'); if (v) archivosVer.appendChild(v);
+    }).catch(function () { App.vaciar(archivos); });
+
+    /* notas: lo que fue anotando (su conocimiento), en renglones */
+    var notas = h('div', h('div.lat-vacio', '…')), notasN = cuenta(null), notasVer = h('div');
+    caja.appendChild(seccion_('Notas', notasN, null, notas, notasVer));
+    api().get('/api/agentes/' + encodeURIComponent(id) + '/conocimiento').then(function (r) {
+      App.vaciar(notas);
+      var renglones = (r.texto || '').split('\n').map(function (l) { return l.replace(/^\s*([-*+]|\d+\.|#+)\s*/, '').replace(/[*_`>]/g, '').trim(); }).filter(Boolean);
+      notasN.textContent = String(renglones.length);
+      if (!renglones.length) notas.appendChild(h('div.lat-vacio', 'Todavía no anotó nada.'));
+      renglones.slice(0, MAX_LADO).forEach(function (l) { notas.appendChild(h('div.lat-nota', l)); });
+      var v = verTodas('notas', renglones.length); if (v) notasVer.appendChild(v);
+    }).catch(function () { App.vaciar(notas); });
     return caja;
+  }
+  /* todas sus charlas, para «Ver todas» (con buscador) */
+  function todasLasCharlas(id, q) {
+    var caja = h('div'), actualSid = App.Agente.sesion(id);
+    var ss = charlasDe(id).filter(function (s) { return !q || (titulo(s) + ' ' + (s.ultimo || '')).toLowerCase().indexOf(q) >= 0; });
+    if (!sesiones) { cargarSesiones().then(function () { App.Agente.repintarLado('charlas'); }); caja.appendChild(h('div.lat-vacio', '…')); return caja; }
+    ss.forEach(function (s) {
+      var ult = App.Adjuntos && App.Adjuntos.separar ? App.Adjuntos.separar(s.ultimo || '').texto : s.ultimo;
+      caja.appendChild(h('button.lat-fila.charla' + (s.session === actualSid ? '.act' : ''), { onclick: function () { App.Agente.verLado('detalles'); ir('#/equipo/' + encodeURIComponent(id) + '/' + s.session); } },
+        App.icono('charla'), h('span', h('b', titulo(s)), h('small', (s.de === 'u' ? 'Vos: ' : '') + (ult || '').replace(/[*#`|>]/g, ''))), h('em.meta', corto(s.ts))));
+    });
+    if (!ss.length) caja.appendChild(h('div.lat-vacio', q ? 'Nada con «' + q + '».' : 'Todavía no charlaron.'));
+    return caja;
+  }
+  function tituloCharla(id) {
+    var sid = App.Agente.sesion(id), s = charlasDe(id).filter(function (x) { return x.session === sid; })[0];
+    return s ? titulo(s) : 'Charla nueva';
   }
 
   /* ---------------- arranque ---------------- */
   window.addEventListener('hashchange', function () { if (App.dom && App.dom.app) aplicar(); });
+  /* la lista desplegada sobre el panel se pliega al tocar fuera de ella */
+  document.addEventListener('pointerdown', function (e) {
+    var app = App.dom && App.dom.app;
+    if (app && app.classList.contains('lista-ver') && !e.target.closest('.lista-col, .riel')) app.classList.remove('lista-ver');
+  });
   window.addEventListener('popstate', function () { if (App.dom && App.dom.app) aplicar(); });
   document.addEventListener('keydown', function (e) {
     if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !/^[1-6]$/.test(e.key)) return;
@@ -495,6 +568,7 @@ App.Nav = (function () {
   return {
     riel: riel, aplicar: aplicar, ir: ir, alAbrir: alAbrir, alCerrar: alCerrar, refrescar: refrescar,
     seccion: function () { return seccion; }, enSeccion: function () { return !!seccion && seccion !== 'oficina'; },
-    pintarLista: pintarLista, elegirAgente: elegirAgente, relacionado: relacionado, menuNueva: menuNueva
+    pintarLista: pintarLista, elegirAgente: elegirAgente, relacionado: relacionado, menuNueva: menuNueva,
+    todasLasCharlas: todasLasCharlas, tituloCharla: tituloCharla, acomodar: acomodar
   };
 })();
