@@ -69,20 +69,23 @@ describe('Consumo de IA (Ajustes y charla)', () => {
   const herramientas = (a: string[]) => Sandbox.valor(a, '--tools') ?? ''
   const instrucciones = (a: string[]) => Sandbox.valor(a, '--append-system-prompt') ?? ''
 
-  test('por defecto: Skill, colegas y memoria completa, como siempre', async () => {
+  test('por defecto: skills resumidas, colegas, memoria completa y MCP locales', async () => {
     const f = await fix()
-    expect((await f.get('/api/preferencias')).obj.ia).toEqual({ esfuerzo: '', skills: true, memoria: 'completa', colegas: true })
+    expect((await f.get('/api/preferencias')).obj.ia).toEqual({ esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true })
     await chatear(f)
     const a = corridaDe(f, 'sofia')
     expect(herramientas(a).split(',')).toContain('Skill')
+    expect(Sandbox.valor(a, '--settings')).toBe('{"skillListingMaxDescChars":150}')
+    expect(a).not.toContain('--strict-mcp-config')
     expect(instrucciones(a)).not.toContain('modo liviano')
   })
 
   test('Ajustes: sin skills, memoria liviana, sin colegas y esfuerzo bajo valen para todo', async () => {
     const f = await fix()
-    const r = await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { skills: false, memoria: 'liviana', colegas: false, esfuerzo: 'low' } } })
+    const r = await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { skills: 'ninguna', memoria: 'liviana', colegas: false, esfuerzo: 'low', mcpLocales: false } } })
     expect(r.status, JSON.stringify(r.obj)).toBe(200)
-    expect(r.obj.ia).toEqual({ esfuerzo: 'low', skills: false, memoria: 'liviana', colegas: false })
+    expect(r.obj.ia).toEqual({ esfuerzo: 'low', skills: 'ninguna', memoria: 'liviana', colegas: false, mcpLocales: false })
+
     await chatear(f)
     const a = corridaDe(f, 'sofia')
     const t = herramientas(a).split(',')
@@ -91,6 +94,8 @@ describe('Consumo de IA (Ajustes y charla)', () => {
     expect(t.some((h) => h.endsWith('__consultar'))).toBe(false)
     expect(t.some((h) => h.endsWith('__buscar'))).toBe(true)
     expect(instrucciones(a)).toContain('modo liviano')
+    expect(a).toContain('--strict-mcp-config')
+    expect(a).not.toContain('--settings')
     expect(Sandbox.valor(a, '--effort')).toBe('low')
     // el esfuerzo del agente le gana al de la app
     await f.patch('/api/agentes/sofia', { esfuerzo: 'high' })
@@ -100,13 +105,14 @@ describe('Consumo de IA (Ajustes y charla)', () => {
 
   test('la charla pisa lo de Ajustes', async () => {
     const f = await fix()
-    await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { skills: false, memoria: 'liviana' } } })
-    await chatear(f, { skills: true, memoria: 'completa' })
+    await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { skills: 'ninguna', memoria: 'liviana' } } })
+    await chatear(f, { skills: 'completas', memoria: 'completa' })
     const a = corridaDe(f, 'sofia')
     expect(herramientas(a).split(',')).toContain('Skill')
+    expect(a).not.toContain('--settings')
     expect(instrucciones(a)).not.toContain('modo liviano')
     expect((await chatear(f, { memoria: 'media' })).status).toBe(400)
-    expect((await chatear(f, { skills: 'no' })).status).toBe(400)
+    expect((await chatear(f, { skills: 'algunas' })).status).toBe(400)
   })
 
   test('valida y guarda en config.json', async () => {
@@ -115,7 +121,7 @@ describe('Consumo de IA (Ajustes y charla)', () => {
     expect((await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { otra: true } } })).status).toBe(400)
     expect((await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { esfuerzo: 'mucho' } } })).status).toBe(400)
     await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { skills: false } } })
-    expect((await f.get('/api/estado')).obj.ia.skills).toBe(false)
+    expect((await f.get('/api/estado')).obj.ia.skills).toBe('ninguna')
   })
 
   test('reunión nueva con memoria liviana: cada turno lo recibe', async () => {
@@ -125,5 +131,20 @@ describe('Consumo de IA (Ajustes y charla)', () => {
     expect(r.obj.memoria).toBe('liviana')
     await esperar(() => f.sb.llamadas.some((a) => Sandbox.valor(a, '--agent') === 'marce'))
     expect(instrucciones(corridaDe(f, 'marce'))).toContain('modo liviano')
+  })
+
+  test('skills de cada agente: solo las elegidas; sin elegidas, sin Skill', async () => {
+    const f = await fix()
+    // el catálogo: lo averigua /api/skills con un claude mínimo
+    expect((await f.get('/api/skills')).obj.skills).toEqual(['docx', 'pdf', 'xlsx'])
+    await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { skills: 'agente' } } })
+    await chatear(f)
+    expect(corridaDe(f, 'sofia')).not.toContain('Skill')
+    expect((await f.patch('/api/agentes/sofia', { skills: ['pdf'] })).status).toBe(200)
+    await chatear(f, { message: 'otra' })
+    const a = corridaDe(f, 'sofia')
+    expect(herramientas(a).split(',')).toContain('Skill')
+    expect(JSON.parse(Sandbox.valor(a, '--settings')!)).toEqual({ skillOverrides: { docx: 'off', xlsx: 'off' } })
+    expect((await f.patch('/api/agentes/sofia', { skills: 'pdf' })).status).toBe(400)
   })
 })

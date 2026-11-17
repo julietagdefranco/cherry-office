@@ -329,6 +329,20 @@ export function rutasChat(d: DepsChat): RutaNucleo {
       r.permisos = [...(d.mcp?.()?.permisos?.pendientes(act.carpeta) ?? []).map(pedidoJSON), ...(d.permisosTareas?.()?.pendientes(act.carpeta) ?? [])]
       return [200, r]
     }
+    if (seccion === 'skills' && n === 2) {
+      if (method !== 'GET') return no405
+      // `GET /api/skills?actualizar=1`: las skills instaladas (las que vio la última corrida); sin datos o con actualizar,
+      // corre un claude mínimo para averiguarlas
+      const act = oficinas.activa()
+      let lista = runner.skills.lista
+      if (lista === undefined || query.actualizar === '1') {
+        try { lista = await runner.sondearSkills(act?.carpeta) } catch (e) {
+          if (e instanceof ClaudeError) return [e.status, { error: e.mensaje }]
+          throw e
+        }
+      }
+      return [200, { skills: lista ?? [] }]
+    }
     if (seccion === 'permisos' && n === 3) return method === 'POST' ? responderPermiso(a2!, body) : no405
     if (seccion === 'avisos' && n === 2) {
       if (method !== 'GET') return no405

@@ -20,6 +20,7 @@ import type { HQLog } from './log.js'
 import type { Store } from './store.js'
 import { CajaCosto, CortadorLineas, parsearEvento, type Observador } from './stream.js'
 import { largo, prefijo } from './validar.js'
+import { CatalogoSkills } from './skills.js'
 
 const esWindows = process.platform === 'win32'
 /** Ruta completa: no depender del PATH que tenga la app (o el entorno de un test). */
@@ -273,6 +274,8 @@ export class ClaudeRunner {
   private esfuerzoO(e?: string): string | undefined { return e ?? (this.config.iaEfectiva.esfuerzo || undefined) }
 
   readonly actividad = new ActividadRegistro()
+  /** Skills instaladas de la persona: se actualiza con el `system/init` de cada corrida. */
+  readonly skills: CatalogoSkills
   /** Reciben el `rate_limit_info` de cada `rate_limit_event` de cualquier corrida (el medidor de uso). */
   readonly alLimite: ((info: Obj) => void)[] = []
   private readonly carriles = new Carriles()
@@ -286,6 +289,16 @@ export class ClaudeRunner {
     this.limite = new Limite(Math.max(1, maxConcurrentes ?? (n >= 1 ? n : ClaudeRunner.maxClaudePorDefecto)))
     this.grace = grace
     this.mensajePorStdin = esWindows || env.HQ_MENSAJE_STDIN === '1'
+    this.skills = new CatalogoSkills(path.join(config.datosDir, 'skills.json'))
+    config.skillsInstaladas = () => this.skills.lista
+  }
+
+  /** Corre un claude mínimo (haiku, esfuerzo bajo, solo Skill) para saber qué skills tiene instaladas la persona. */
+  async sondearSkills(cwd?: string): Promise<string[] | undefined> {
+    this.verificar(cwd)
+    await this.lanzar(['-p', ...ClaudeRunner.formatoSalida, '--tools', 'Skill', ...ClaudeRunner.sinConectores, '--model', 'haiku', '--effort', 'low', '--', 'Respondé solo: ok'],
+      { timeout: 60, cwd })
+    return this.skills.lista
   }
 
   /** Gracia entre terminar y matar (segundos). */
@@ -416,9 +429,11 @@ export class ClaudeRunner {
 
   /** Envuelve el lector de líneas para pasarle los `rate_limit_event` a `alLimite` (si hay alguien escuchando). */
   private conLimites(alLinea?: (l: string) => void): ((l: string) => void) | undefined {
-    if (this.alLimite.length === 0) return alLinea
     return (l) => {
-      if (l.includes('"rate_limit_event"')) {
+      if (l.includes('"subtype":"init"')) {
+        const sk = skillsDe(l)
+        if (sk) this.skills.fijar(sk)
+      } else if (this.alLimite.length > 0 && l.includes('"rate_limit_event"')) {
         const info = limiteDe(l)
         if (info) for (const f of this.alLimite) { try { f(info) } catch {} }
       }
@@ -488,6 +503,16 @@ export class ClaudeRunner {
       }
     })()
     return { cancelar: () => { cancelado = true } }
+  }
+}
+
+/** Los nombres de `skills` de una línea `{"type":"system","subtype":"init", ...}`, o undefined. */
+function skillsDe(l: string): string[] | undefined {
+  try {
+    const o: unknown = JSON.parse(l)
+    return esObjeto(o) && o.type === 'system' && Array.isArray(o.skills) && o.skills.every((x) => typeof x === 'string') ? (o.skills as string[]) : undefined
+  } catch {
+    return undefined
   }
 }
 

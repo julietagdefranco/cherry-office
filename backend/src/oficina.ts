@@ -31,6 +31,8 @@ export type AgenteDef = {
   modelo?: string
   /** Esfuerzo por defecto de sus corridas (`--effort`: low…max). Sin él, el de Claude Code de la persona. */
   esfuerzo?: string
+  /** Skills de Claude Code que usa (modo «Las de cada agente»). */
+  skills?: string[]
   chips?: string[]
   /** Temas sobre los que sabe (para que los colegas sepan a quién preguntarle): `colegas()` y `quien_sabe(tema)`. */
   sabeDe?: string[]
@@ -103,7 +105,7 @@ function decodificarAgente(v: unknown): AgenteDef {
   const o = obj(v)
   return sinUndefined({
     id: str(o.id), nombre: str(o.nombre), rol: str(o.rol), departamento: str(o.departamento),
-    brief: optStr(o.brief), modelo: optStr(o.modelo), esfuerzo: optStr(o.esfuerzo), chips: optStrs(o.chips), sabeDe: optStrs(o.sabeDe),
+    brief: optStr(o.brief), modelo: optStr(o.modelo), esfuerzo: optStr(o.esfuerzo), skills: optStrs(o.skills), chips: optStrs(o.chips), sabeDe: optStrs(o.sabeDe),
     avatar: opt(o.avatar, decodificarAvatar), creado: optStr(o.creado), escritura: optStrs(o.escritura),
     limites: opt(o.limites, (x) => { const l = obj(x); return sinUndefined({ solo: optStrs(l.solo), proponer: optStrs(l.proponer) }) }),
     conectores: opt(o.conectores, (x) => (Array.isArray(x) ? x : falla()).map((c) => {

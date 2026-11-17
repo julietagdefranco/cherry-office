@@ -49,6 +49,8 @@ async function main() {
   fs.appendFileSync(p('cwd.log'), process.cwd() + '\n')
   const tiene = (flag) => args.includes(flag)
   const m = msg.normalize('NFC')
+  // skills instaladas (el system/init del claude real las trae): el sondeo de /api/skills y los mensajes con SKILLS
+  if (m === 'Respondé solo: ok' || m.includes('SKILLS')) salida(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', skills: ['docx', 'pdf', 'xlsx'] }))
 
   let kind = ''
   if (agent === '') {

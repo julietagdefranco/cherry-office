@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { esObjeto } from './json.js'
 import { Validar, esIdValido } from './validar.js'
+import { modoSkillsDe, type ModoSkills } from './skills.js'
 
 export const agentesPorDefecto = ['betty', 'don-armando', 'marce', 'catalina', 'patricia', 'sofia', 'mario', 'nicolas']
 export const herramientasBase = 'Read,Glob,Grep,Skill,WebFetch,WebSearch'
@@ -38,10 +39,11 @@ export const modelosValidos = Validar.modelos
 export type MemoriaIA = 'completa' | 'liviana'
 export const esMemoriaIA = (v: unknown): v is MemoriaIA => v === 'completa' || v === 'liviana'
 /** Consumo de IA por defecto de toda la app (clave `ia` de config.json). Los pisan el agente (esfuerzo) y cada charla o
- *  reunión nueva. `esfuerzo` '' = el de Claude Code; `skills` = la herramienta Skill (lista las skills y plugins de la
- *  persona en cada llamada: miles de tokens); `colegas` = consultar y pedirle cosas a otros agentes. */
-export type PreferenciasIA = { esfuerzo: string; skills: boolean; memoria: MemoriaIA; colegas: boolean }
-export const iaPorDefecto: PreferenciasIA = { esfuerzo: '', skills: true, memoria: 'completa', colegas: true }
+ *  reunión nueva. `esfuerzo` '' = el de Claude Code; `skills` = cómo ven las skills de la persona (skills.ts); `colegas` =
+ *  consultar y pedirle cosas a otros agentes; `mcpLocales` = los servidores MCP del Claude Code de la persona (apagado:
+ *  `--strict-mcp-config`, solo el de la oficina). */
+export type PreferenciasIA = { esfuerzo: string; skills: ModoSkills; memoria: MemoriaIA; colegas: boolean; mcpLocales: boolean }
+export const iaPorDefecto: PreferenciasIA = { esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true }
 
 export class Config {
   proyecto: string
@@ -77,6 +79,8 @@ export class Config {
   /** Solo lo que la persona cambió; lo demás sale de `iaPorDefecto`. */
   ia: Partial<PreferenciasIA> = {}
   get iaEfectiva(): PreferenciasIA { return { ...iaPorDefecto, ...this.ia } }
+  /** Skills instaladas que vio la última corrida (las pone el runner): para apagar las que un agente no eligió. */
+  skillsInstaladas: () => string[] | undefined = () => undefined
 
   /** Modelo elegido para `clave`, o el de por defecto. */
   modelo(clave: ClaveModelo): string { return this.modelos[clave] ?? modelosPorDefecto[clave] }
@@ -166,7 +170,9 @@ export class Config {
     if (esObjeto(o.ia)) {
       const v = o.ia
       if (typeof v.esfuerzo === 'string' && (v.esfuerzo === '' || Validar.esfuerzos.has(v.esfuerzo))) this.ia.esfuerzo = v.esfuerzo
-      if (typeof v.skills === 'boolean') this.ia.skills = v.skills
+      const sk = modoSkillsDe(v.skills)
+      if (sk) this.ia.skills = sk
+      if (typeof v.mcpLocales === 'boolean') this.ia.mcpLocales = v.mcpLocales
       if (esMemoriaIA(v.memoria)) this.ia.memoria = v.memoria
       if (typeof v.colegas === 'boolean') this.ia.colegas = v.colegas
     }

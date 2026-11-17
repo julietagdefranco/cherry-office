@@ -326,13 +326,9 @@ App.Ajustes = (function () {
       alCambiar: function (v) { var antes = App.iaApp().esfuerzo; guardar('esfuerzo', v, esf, antes, 'Esfuerzo: ' + App.tituloEsfuerzo(v)); } });
     hj.cuerpo.appendChild(App.ajuste('Esfuerzo', 'Cuánto piensa antes de responder. Lo que piensa se cobra como texto escrito: para el día a día, Bajo o Medio alcanza.', esf));
     App.OPCIONES_IA.forEach(function (o) {
-      var actual = App.opcionPrendida(o, ia[o.clave]);
-      var el = App.elegir({ forma: 'chips', etiqueta: o.titulo, valor: actual,
-        opciones: [{ valor: true, titulo: o.si }, { valor: false, titulo: o.no }],
-        alCambiar: function (si) {
-          var antes = App.iaApp()[o.clave];
-          guardar(o.clave, App.valorOpcion(o, si), { poner: function (x) { el.poner(App.opcionPrendida(o, x)); } }, antes, o.titulo + ': ' + (si ? o.si : o.no));
-        } });
+      var el = App.elegir({ forma: 'chips', etiqueta: o.titulo, valor: ia[o.clave],
+        opciones: o.opciones.map(function (x) { return { valor: x.valor, titulo: x.titulo, sub: x.sub }; }),
+        alCambiar: function (v) { var antes = App.iaApp()[o.clave]; guardar(o.clave, v, el, antes, o.titulo + ': ' + App.tituloOpcionIA(o, v)); } });
       hj.cuerpo.appendChild(App.ajuste(o.titulo, o.sub, el));
     });
     hj.cuerpo.appendChild(err);

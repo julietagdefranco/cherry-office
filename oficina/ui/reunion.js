@@ -96,9 +96,8 @@
        una reunión larga con mucho esfuerzo gasta bastante */
     var modeloReu = App.elegir({ etiqueta: 'Modelo', forma: 'chips', valor: '',
       opciones: [{ valor: '', titulo: 'El de cada agente' }].concat(App.MODELOS.filter(function (m) { return m.valor !== 'inherit'; }).map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; })) });
-    var memOp = App.OPCIONES_IA.filter(function (o) { return o.clave === 'memoria'; })[0];
     var memoriaReu = App.elegir({ etiqueta: 'Memoria', forma: 'chips', valor: App.iaApp().memoria,
-      opciones: memOp.valores.map(function (x, i) { return { valor: x, titulo: i === 0 ? memOp.si : memOp.no }; }) });
+      opciones: App.opcionIA('memoria').opciones.map(function (x) { return { valor: x.valor, titulo: x.titulo }; }) });
     var esfuerzoReu = App.elegir({ etiqueta: 'Esfuerzo', forma: 'chips', valor: '',
       opciones: [{ valor: '', titulo: 'El de cada agente' }].concat(App.ESFUERZOS.filter(function (m) { return m.valor !== ''; }).map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; })) });
     App.add(hj.cuerpo,

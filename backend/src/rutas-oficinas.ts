@@ -7,6 +7,7 @@ import { ValidarAgenteExtra, agenteJSON, departamentoJSON, oficinaJSON } from '.
 import { avatarValido, perfilJSON, type DepartamentoNuevo, type OficinaActiva, type Oficinas } from './oficinas.js'
 import { no404, no405, type Resp, type RutaNucleo } from './router.js'
 import { Slug, Validar } from './validar.js'
+import { modoSkillsDe } from './skills.js'
 
 /** Lo que /api/estado necesita saber de claude (lo da el runner). */
 export interface InfoClaude {
@@ -47,13 +48,17 @@ function iaPedida(v: unknown): Partial<PreferenciasIA> {
     if (k === 'esfuerzo') {
       if (typeof x !== 'string' || (x !== '' && !Validar.esfuerzos.has(x))) throw new ErrorAPI(400, '«ia.esfuerzo» tiene que ser "", low, medium, high, xhigh o max.')
       r.esfuerzo = x
-    } else if (k === 'skills' || k === 'colegas') {
+    } else if (k === 'colegas' || k === 'mcpLocales') {
       if (typeof x !== 'boolean') throw new ErrorAPI(400, `«ia.${k}» tiene que ser verdadero o falso.`)
       r[k] = x
+    } else if (k === 'skills') {
+      const m = modoSkillsDe(x)
+      if (!m) throw new ErrorAPI(400, '«ia.skills» tiene que ser resumidas, completas, agente o ninguna.')
+      r.skills = m
     } else if (k === 'memoria') {
       if (!esMemoriaIA(x)) throw new ErrorAPI(400, '«ia.memoria» tiene que ser "completa" o "liviana".')
       r.memoria = x
-    } else throw new ErrorAPI(400, `«ia.${k}» no existe (esfuerzo, skills, memoria, colegas).`)
+    } else throw new ErrorAPI(400, `«ia.${k}» no existe (esfuerzo, skills, memoria, colegas, mcpLocales).`)
   }
   return r
 }
