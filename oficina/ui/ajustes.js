@@ -164,7 +164,7 @@ App.Ajustes = (function () {
       var disp = servs.filter(function (s) { return s.disponible; });
       var agentes = (App.E.oficina && App.E.oficina.agentes) || [];
       if (!servs.length) {
-        cont.appendChild(datos.detectando ? null : App.vacio('enchufe', 'No se detectó ningún conector', 'Conectalos en claude.ai y tocá «Actualizar».'));
+        if (!datos.detectando) cont.appendChild(App.vacio('enchufe', 'No se detectó ningún conector', 'Conectalos en claude.ai y tocá «Actualizar».'));
         return;
       }
       if (disp.length && agentes.length) cont.appendChild(eleccionAcceso());
