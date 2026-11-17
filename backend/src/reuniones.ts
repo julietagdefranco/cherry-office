@@ -25,6 +25,7 @@ import { entregasRouterDe } from './rutas-entregas.js'
 import { registrarModulo, type Servicios } from './servicios.js'
 import { num, txt, type Fila, type SQLiteDB, type SQLValor } from './sqlite.js'
 import { CajaCosto } from './stream.js'
+import { deReunion } from './tareas.js'
 import { Slug, Validar, largo, plegar, prefijo, uuidValido } from './validar.js'
 
 // MARK: - modelo
@@ -43,6 +44,8 @@ export type Pendiente = {
   que: string
   /** El responsable no lo puede hacer solo (correr programas, mandar mensajes…): necesita a la persona. */
   usuario: boolean
+  /** Título corto (solo los que salen de un chat; la síntesis de reunión no lo pide). */
+  nombre?: string
   /** Índices (0-based, en la lista de pendientes) de los pendientes que tienen que estar hechos antes de este. */
   dependeDe?: number[]
 }
@@ -466,18 +469,31 @@ export function parsearSintesis(t: string, base: 0 | 1 = 1, descartado?: (motivo
   const cadena = (v: unknown) => (typeof v === 'string' ? recortarEspacios(v) : '')
   const resumen = cadena(o.resumen)
   const decs = (Array.isArray(o.decisiones) ? o.decisiones : []).map(cadena).filter((x) => x !== '')
+  const pend = parsearPendientes(Array.isArray(o.pendientes) ? o.pendientes : [], base, descartado)
+  if (resumen === '' && decs.length === 0 && pend.length === 0) return undefined
+  return { resumen, decisiones: decs, pendientes: pend }
+}
+
+/** La lista `pendientes` tal como la escribe un modelo (secretario de actas o el que ordena un chat) → Pendiente[].
+ *  Cada uno trae `quien`, `que` (o `consigna`), `nombre?`, `necesita_usuario` y `depende_de`. `base`: de dónde cuentan
+ *  los números de `depende_de`. Las dependencias inválidas, propias o en ciclo se descartan (se avisa por `descartado`). */
+export function parsearPendientes(items: unknown[], base: 0 | 1 = 1, descartado?: (motivo: string) => void): Pendiente[] {
+  const cadena = (v: unknown) => (typeof v === 'string' ? recortarEspacios(v) : '')
   const pend: Pendiente[] = []
   const crudas: unknown[][] = []   // depende_de tal como vino, por pendiente que quedó
   const nuevoIndice = new Map<number, number>()   // lugar en la lista original -> lugar entre los que quedaron
   let lugar = -1
-  for (const p of Array.isArray(o.pendientes) ? o.pendientes : []) {
+  for (const p of items) {
     lugar++
     if (esObjeto(p)) {
       const q = cadena(p.quien)
-      const k = cadena(p.que)
+      const k = cadena(p.que) || cadena(p.consigna)
       if (k === '') continue
       nuevoIndice.set(lugar, pend.length)
-      pend.push({ quien: q, que: k, usuario: p.necesita_usuario === true || p.necesita_usuario === 1 })
+      const x: Pendiente = { quien: q, que: k, usuario: p.necesita_usuario === true || p.necesita_usuario === 1 }
+      const nom = cadena(p.nombre)
+      if (nom !== '') x.nombre = nom
+      pend.push(x)
       crudas.push(Array.isArray(p.depende_de) ? p.depende_de : [])
     } else if (typeof p === 'string' && cadena(p) !== '') {
       nuevoIndice.set(lugar, pend.length)
@@ -485,7 +501,6 @@ export function parsearSintesis(t: string, base: 0 | 1 = 1, descartado?: (motivo
       crudas.push([])
     }
   }
-  if (resumen === '' && decs.length === 0 && pend.length === 0) return undefined
 
   // dependencias: enteros (también en texto), dentro de la lista y que no sean el propio pendiente
   pend.forEach((p, i) => {
@@ -515,7 +530,7 @@ export function parsearSintesis(t: string, base: 0 | 1 = 1, descartado?: (motivo
     descartado?.(`pendiente ${i + 1}: forma parte de un ciclo de dependencias`)
     delete pend[i]!.dependeDe
   }
-  return { resumen, decisiones: decs, pendientes: pend }
+  return pend
 }
 
 /** Sin punto(s) final(es) ni espacios: la plantilla agrega el suyo. */
@@ -1363,7 +1378,7 @@ export class ReunionesRouter implements SubRouter {
         if (e) { enc.entrega = e.id; enc.entregaEstado = e.estado }
         o.encargo = enc
       }
-      o.tareas = (a.oficina.tareas ?? []).filter((t) => t.origen?.reunion === f.id && t.origen.pendiente === i).map((t) => ({ id: t.id, nombre: t.nombre }))
+      o.tareas = (a.oficina.tareas ?? []).filter((t) => deReunion(t.origen)?.reunion === f.id && deReunion(t.origen)?.pendiente === i).map((t) => ({ id: t.id, nombre: t.nombre }))
       return o
     })
   }

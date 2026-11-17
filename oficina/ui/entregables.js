@@ -177,6 +177,13 @@ App.Entregables = (function () {
     var est = e.estado === 'sin_revisar' ? h('span.insignia.aviso', 'Sin revisar') : e.estado === 'revisada' ? h('span.insignia.ok', 'Revisada') : h('span.insignia', 'Reemplazada por una versión nueva');
     var meta = h('div.entrega-meta', est, e.padre ? h('span.insignia', 'Versión con cambios') : null, linkOrigen(e));
     App.add(cuerpo, meta, bloqueEspera, bloqueAccion);
+    /* una tarea que salió de una charla: «Salió de un chat con…», que abre esa charla */
+    if (e.origen === 'tarea' && e.ref) api().get('/api/tareas/' + encodeURIComponent(e.ref)).then(function (r) {
+      var t = r.tarea;
+      if (!t || !t.charla || !t.origen || !t.origen.chat || abierta !== e.id) return;
+      meta.appendChild(h('button.btn.chico.fantasma', { title: 'Abrir la charla de la que salió esta tarea', onclick: function () { App.Agente.abrirSesion(t.charla.agente, t.origen.chat); } },
+        App.icono('charla'), 'Salió de un chat con ' + t.charla.nombre));
+    }).catch(function () { /* la tarea ya no está: sin enlace */ });
     if (e.enCambios) {
       App.add(cuerpo, h('div.entrega-meta', h('span.insignia.aviso', h('span.giro'), ' ' + nombre(e.agente) + ' está haciendo los cambios…')));
       vigilarCambios(e.id);

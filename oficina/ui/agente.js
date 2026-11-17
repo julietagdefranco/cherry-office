@@ -83,8 +83,10 @@
           h('button.agente-cara', { title: 'Ver la ficha de ' + a.nombre + ' (perfil, permisos, notas, tareas, archivos)', onclick: function () { irPestana('perfil'); } },
             App.retratoImg(a, 'retrato', 120), h('span.agente-lapiz', App.icono('lapiz'))),
           h('div.der-tit', h('h2', a.nombre), sub),
-          /* con texto: un «+» solo no dice qué agrega. La charla actual no se pierde: queda en la lista de Charlas */
-          h('div.der-acciones', h('button.btn.chico', { title: 'Empezar de cero con ' + a.nombre + '. Esta charla queda guardada en Charlas.', onclick: function () { nueva(a.id); } }, App.icono('mas'), 'Nueva charla')),
+          /* con texto: un ícono solo no dice qué hace. La charla actual no se pierde: queda en la lista de Charlas */
+          h('div.der-acciones',
+            h('button.btn.chico.sacar-tareas', { title: 'Convertir esta charla en tareas (para ' + a.nombre + ' o para otros)', onclick: function () { App.ChatTareas.abrir(a, sesiones[a.id]); } }, App.icono('reloj'), 'Sacar tareas'),
+            h('button.btn.chico', { title: 'Empezar de cero con ' + a.nombre + '. Esta charla queda guardada en Charlas.', onclick: function () { nueva(a.id); } }, App.icono('mas'), 'Nueva charla')),
           cerrarBtn),
         cuerpo, pie);
     } else {
@@ -169,6 +171,9 @@
       }
       cuerpo.scrollTop = cuerpo.scrollHeight;
       enviar.disabled = !!enCurso[a.id];
+      /* «Sacar tareas»: solo con una charla que tenga algo tuyo y sin respuesta en curso */
+      var sacar = App.dom.derecho.querySelector('.sacar-tareas');
+      if (sacar) sacar.disabled = !!enCurso[a.id] || !sesiones[a.id] || !msgs.some(function (m) { return m.r === 'u'; });
     }
 
     function mandar() {
@@ -732,7 +737,12 @@
       guardar.textContent = t ? 'Guardar cambios' : (unaYa ? 'Encargar ahora' : 'Crear tarea');
     }
 
+    /* salió de una charla: con quién, y un botón para volver a ella */
+    var filaCharla = t && t.charla && t.origen && t.origen.chat ? h('div.ct-de-charla', App.icono('charla'),
+      h('span', 'Salió de una charla con ', h('b', t.charla.nombre)),
+      h('button.btn.chico.fantasma', { type: 'button', onclick: function () { hj.cerrar(); App.Agente.abrirSesion(t.charla.agente, t.origen.chat); } }, 'Ver la charla')) : null;
     App.add(hj.cuerpo,
+      filaCharla,
       filaAgente,
       campo('Tipo', ayudaTipo, tipoEl),
       campo('Nombre', null, nombre),

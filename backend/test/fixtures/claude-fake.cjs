@@ -54,6 +54,7 @@ async function main() {
   if (agent === '') {
     if (m.includes('ador de equipos')) kind = 'borrador'
     else if (m.includes('secretario de actas')) kind = 'acta'
+    else if (m.includes('Sos quien ordena el trabajo')) kind = 'tareaschat'
     else if (m.includes('Sos el bibliotecario')) kind = 'ficha'
     else if (m.includes('imagen que est')) kind = 'imagen'
     else if (m.includes('en 3 a 6 palabras')) kind = 'resumen'
@@ -105,6 +106,7 @@ async function main() {
     switch (kind) {
       case 'borrador': salida(String.raw`{"type":"result","result":"Acá va el borrador:\n` + '```' + String.raw`json\n{\"id\":\"valentina\",\"nombre\":\"Valentina\",\"rol\":\"Analista de datos\",\"description\":\"Analista de datos. Usala cuando haga falta medir resultados.\",\"prompt\":\"Sos Valentina, analista de datos.\",\"chips\":[\"¿Cómo vamos?\",\"Armame un informe\",\"¿Qué medimos?\"],\"modelo\":\"sonnet\"}\n` + '```' + '","is_error":false}'); break
       case 'acta': salida(String.raw`{"type":"result","result":"{\"resumen\":\"Se acordó avanzar con el plan.\",\"decisiones\":[\"Lanzar en diciembre\",\"Priorizar los reels\"],\"pendientes\":[{\"quien\":\"Marce\",\"que\":\"Armar el calendario\"}]}","is_error":false}`); break
+      case 'tareaschat': salida(String.raw`{"type":"result","result":"{\"pendientes\":[{\"quien\":\"Marce\",\"nombre\":\"Calendario de diciembre\",\"consigna\":\"Armá el calendario de publicaciones de diciembre con los reels acordados.\",\"depende_de\":[]},{\"quien\":\"\",\"consigna\":\"Aprobar el presupuesto con el cliente\",\"necesita_usuario\":true,\"depende_de\":[1]}]}","is_error":false,"total_cost_usd":0.01}`); break
       case 'ficha': salida(String.raw`{"type":"result","result":"{\"titulo\":\"Ficha de prueba\",\"resumen\":\"Resumen de prueba del documento.\",\"datos_clave\":[\"dato uno\"],\"temas\":[\"pruebas\"],\"util_para\":[\"direccion\"],\"fechas\":[],\"contradicciones\":[]}","is_error":false}`); break
       case 'imagen': salida('{"type":"result","result":"Una imagen de prueba con el texto HOLA MUNDO.","is_error":false}'); break
       case 'resumen': salida('{"type":"result","result":"«Armando el plan de diciembre.»","is_error":false,"total_cost_usd":0.001}'); break

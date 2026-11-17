@@ -11,8 +11,14 @@ import { Slug, largo, uuidValido } from './validar.js'
 
 // MARK: - modelo
 
-/** De qué pendiente de reunión salió una tarea («Convertir en tarea»): id de la reunión y posición del pendiente. */
-export type OrigenTarea = { reunion: string; pendiente: number }
+/** De dónde salió una tarea: de un pendiente de reunión («Convertir en tarea»: id de la reunión y posición del
+ *  pendiente) o de una charla con un agente («Sacar tareas»: id de la sesión). */
+export type OrigenReunion = { reunion: string; pendiente: number }
+export type OrigenChat = { chat: string }
+export type OrigenTarea = OrigenReunion | OrigenChat
+
+export const deReunion = (o: OrigenTarea | undefined): OrigenReunion | undefined => (o !== undefined && 'reunion' in o ? o : undefined)
+export const deChat = (o: OrigenTarea | undefined): OrigenChat | undefined => (o !== undefined && 'chat' in o ? o : undefined)
 
 /** Una consigna que un agente corre solo. Dos tipos:
  *  - repetida: en ciertos días (`dias`) a cierta hora, en la zona de la tarea;
@@ -76,7 +82,8 @@ export function decodificarTarea(v: unknown): TareaProgramada {
   if (desde !== undefined) t.desde = desde
   if (o.origen !== undefined && o.origen !== null) {
     if (!esObjeto(o.origen)) falla()
-    t.origen = { reunion: str((o.origen as Obj).reunion), pendiente: entero((o.origen as Obj).pendiente) }
+    const x = o.origen as Obj
+    t.origen = x.chat !== undefined ? { chat: str(x.chat) } : { reunion: str(x.reunion), pendiente: entero(x.pendiente) }
   }
   if (fecha !== undefined) t.fecha = fecha
   if (hecha !== undefined) t.hecha = hecha
@@ -100,7 +107,7 @@ export function fechaInicio(t: TareaProgramada): Date | undefined {
 export function tareaJSON(t: TareaProgramada, sistema: string = zonaDelSistema()): Obj {
   const o: Obj = { id: t.id, agente: t.agente, nombre: t.nombre, consigna: t.consigna, dias: t.dias, hora: t.hora, zona: t.zona ?? sistema, activa: t.activa }
   if (t.creada !== undefined) o.creada = t.creada
-  if (t.origen !== undefined) o.origen = { reunion: t.origen.reunion, pendiente: t.origen.pendiente }
+  if (t.origen !== undefined) o.origen = 'chat' in t.origen ? { chat: t.origen.chat } : { reunion: t.origen.reunion, pendiente: t.origen.pendiente }
   o.tipo = esUnica(t) ? 'unica' : 'repetida'
   if (t.fecha !== undefined) o.fecha = t.fecha
   if (esUnica(t)) o.hecha = t.hecha ?? null
@@ -111,7 +118,10 @@ export function tareaJSON(t: TareaProgramada, sistema: string = zonaDelSistema()
 // MARK: - validación
 
 export const ValidarTareas = {
+  /** Tope de tareas que todavía pueden correr (repetidas y únicas sin hacer). Las únicas hechas son historial: no cuentan. */
   maxTareas: 50,
+  /** Tope de todo lo guardado en `oficina.json`, hechas incluidas, para que el historial no crezca sin fin. */
+  maxGuardadas: 500,
   maxConsigna: 4000,
   maxNombre: 80,
   maxPendientes: 200,
@@ -130,14 +140,27 @@ export const ValidarTareas = {
   },
 
   origenValido(o: OrigenTarea): boolean {
+    if ('chat' in o) return uuidValido(o.chat) && o.chat === o.chat.toLowerCase()
     return uuidValido(o.reunion) && o.reunion === o.reunion.toLowerCase() && Number.isInteger(o.pendiente) && o.pendiente >= 0 && o.pendiente < ValidarTareas.maxPendientes
   },
 
   /** Reglas de `tareas` dentro de una oficina: id slug único, agente existente (solo exigido a las activas: al despedir a un
    *  agente sus tareas quedan desactivadas y se conservan), días 1…7 sin repetir y no vacíos, hora, zona, consigna y nombre. */
+  /** Cuántas cuentan para `maxTareas`: todas menos las únicas ya hechas. */
+  vivas(ts: TareaProgramada[]): number { return ts.filter((t) => !(esUnica(t) && t.hecha !== undefined)).length },
+
+  /** Lanza 400 si sumar `nuevas` tareas por hacer pasa alguno de los dos topes. */
+  hayLugar(ts: TareaProgramada[], nuevas = 1): void {
+    if (ValidarTareas.vivas(ts) + nuevas > ValidarTareas.maxTareas) throw new ErrorAPI(400, ValidarTareas.mensajeTope)
+    if (ts.length + nuevas > ValidarTareas.maxGuardadas) throw new ErrorAPI(400, ValidarTareas.mensajeGuardadas)
+  },
+
+  get mensajeTope() { return `Máximo ${ValidarTareas.maxTareas} tareas por hacer (las de una sola vez que ya se hicieron no cuentan).` },
+  get mensajeGuardadas() { return `Hay ${ValidarTareas.maxGuardadas} tareas guardadas contando las ya hechas: borrá algunas hechas para hacer lugar.` },
+
   validar(o: Oficina): void {
     const ts = o.tareas ?? []
-    if (ts.length > ValidarTareas.maxTareas) throw new ErrorAPI(400, `Máximo ${ValidarTareas.maxTareas} tareas programadas.`)
+    ValidarTareas.hayLugar(ts, 0)
     const ids = new Set<string>()
     for (const t of ts) {
       if (!Slug.valido(t.id) || ids.has(t.id)) throw new ErrorAPI(400, `Tarea con id inválido o repetido: ${t.id}.`)

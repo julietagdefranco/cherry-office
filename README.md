@@ -23,7 +23,8 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
   en el escritorio donde los agentes apilan lo que te entregan.
 - **Agentes y departamentos:** cada departamento es una sala del edificio. A los agentes los vestís con el editor de
   minifigs (caras, peinados, ropa, sombreros, piel) y les ajustás modelo, permisos y conectores.
-- **Chat y reuniones:** clic en un personaje para hablarle en privado, o «Llamar a reunión» para juntar a varios.
+- **Chat y reuniones:** clic en un personaje para hablarle en privado, o «Llamar a reunión» para juntar a varios. Desde una charla, «Sacar tareas» propone
+  el trabajo que quedó pendiente (para ese agente o para otros) y, después de revisarlo, lo crea como tareas.
 - **Flujos:** procesos de varios pasos que pasan de agente en agente, con aprobaciones tuyas donde haga falta. Ves
   cada corrida en vivo y una pieza viaja por la maqueta.
 - **Tareas programadas, Parte del día y Biblioteca:** tareas repetidas o de una sola vez, un resumen de lo que pasó y

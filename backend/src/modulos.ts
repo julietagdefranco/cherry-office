@@ -15,4 +15,5 @@ import './dependencias.js' // [dependencias]
 import './paquete.js' // [paquete]
 import './migracion.js' // [migracion]
 import './uso-claude.js' // [uso-claude]
+import './chat-tareas.js' // [chat-tareas]
 export {}
