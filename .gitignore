@@ -9,3 +9,6 @@ oficina/config.json
 
 # configuración local de vistas previas (rutas de cada máquina)
 .claude/launch.json
+
+# log del backend que escribe actualizar.sh
+backend.log
