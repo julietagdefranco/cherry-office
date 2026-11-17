@@ -326,6 +326,8 @@ App.Ajustes = (function () {
   /* `ia` (toda la app, PUT /api/preferencias): esfuerzo y opciones de consumo por defecto. Valen para todo lo que usa la IA
      (charlas, reuniones, tareas, flujos, consultas y tareas de fondo); el esfuerzo de un agente (su ficha) le gana, y cada
      charla o reunión nueva puede cambiarlos para sí. Se guarda al elegir. */
+  /* opciones de consumo con más de dos valores: su orden en el deslizador, de menos a más tokens */
+  var ESCALAS_IA = { skills: ['ninguna', 'agente', 'resumidas', 'completas'] };
   function consumo(crear) {
     var hj = crear({ titulo: 'Consumo de IA' });
     var err = h('div.error-txt');
@@ -341,13 +343,16 @@ App.Ajustes = (function () {
       }).catch(function (e) { err.textContent = e.message; el.poner(antes); });
     }
     var ia = App.iaApp();
-    var esf = App.elegir({ forma: 'chips', etiqueta: 'Esfuerzo', valor: ia.esfuerzo,
-      opciones: App.ESFUERZOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; }),
+    /* Esfuerzo y skills van en escala (deslizador), de lo que menos gasta a lo que más; las de sí o no, en interruptor */
+    var esf = App.elegir({ forma: 'deslizador', etiqueta: 'Esfuerzo', valor: ia.esfuerzo,
+      opciones: App.ESFUERZOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub, aparte: m.valor === '' }; }),
       alCambiar: function (v) { var antes = App.iaApp().esfuerzo; guardar('esfuerzo', v, esf, antes, 'Esfuerzo: ' + App.tituloEsfuerzo(v)); } });
     hj.cuerpo.appendChild(App.ajuste('Esfuerzo', 'Cuánto piensa antes de responder. Lo que piensa se cobra como texto escrito: para el día a día, Bajo o Medio alcanza.', esf));
     App.OPCIONES_IA.forEach(function (o) {
-      var el = App.elegir({ forma: 'chips', etiqueta: o.titulo, valor: ia[o.clave],
-        opciones: o.opciones.map(function (x) { return { valor: x.valor, titulo: x.titulo, sub: x.sub }; }),
+      var escala = ESCALAS_IA[o.clave];
+      var opciones = escala ? escala.map(function (v) { return o.opciones.filter(function (x) { return x.valor === v; })[0]; }) : o.opciones;
+      var el = App.elegir({ forma: escala ? 'deslizador' : o.opciones.length === 2 ? 'interruptor' : 'chips', etiqueta: o.titulo, valor: ia[o.clave],
+        opciones: opciones.map(function (x) { return { valor: x.valor, titulo: x.titulo, sub: x.sub }; }),
         alCambiar: function (v) { var antes = App.iaApp()[o.clave]; guardar(o.clave, v, el, antes, o.titulo + ': ' + App.tituloOpcionIA(o, v)); } });
       hj.cuerpo.appendChild(App.ajuste(o.titulo, o.sub, el));
     });

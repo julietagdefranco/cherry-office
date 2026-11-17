@@ -257,8 +257,14 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
 
   /* Opciones a la vista (en vez de <select> o de una hoja para elegir).
      op: {opciones: [{valor, titulo, sub?, icono?, retrato?: agente, color?}], valor, alCambiar(valor), forma: 'chips'|'lista',
-          multiple?: bool (valor = array), etiqueta?: texto para lectores}. Devuelve el elemento con .valor() y .poner(v). */
+          multiple?: bool (valor = array), etiqueta?: texto para lectores}. Devuelve el elemento con .valor() y .poner(v).
+     forma 'deslizador': las opciones van en orden (de menos a más) sobre una barra; las marcadas `aparte: true` (p. ej.
+     «El de Claude Code») no son un punto de la escala y van como chip al lado.
+     forma 'interruptor': para dos opciones, una pastilla que se prende o apaga (como en el celular). La primera opción es
+     «prendido» y la segunda «apagado»; al lado se lee el nombre de la elegida. */
   App.elegir = function (op) {
+    if (op.forma === 'deslizador') return deslizador(op);
+    if (op.forma === 'interruptor') return interruptor(op);
     var forma = op.forma || (op.opciones.some(function (o) { return o.sub; }) ? 'lista' : 'chips');
     var valor = op.multiple ? (op.valor || []).slice() : op.valor;
     var es = function (v) { return op.multiple ? valor.indexOf(v) >= 0 : valor === v; };
@@ -284,6 +290,81 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     el.poner = function (v) { valor = op.multiple ? (v || []).slice() : v; pintar(); };
     return el;
   };
+  function interruptor(op) {
+    var si = op.opciones[0], no = op.opciones[1];
+    var valor = op.valor;
+    var boton = h('button.interruptor', { type: 'button', role: 'switch', 'aria-label': op.etiqueta || '' }, h('span.interruptor-bola'));
+    var texto = h('span.interruptor-txt');
+    function pintar() {
+      var prendido = valor === si.valor, o = prendido ? si : no;
+      boton.setAttribute('aria-checked', prendido ? 'true' : 'false');
+      boton.title = o.sub || '';
+      texto.textContent = o.titulo;
+    }
+    function cambiar() {
+      valor = valor === si.valor ? no.valor : si.valor;
+      pintar();
+      if (op.alCambiar) op.alCambiar(valor);
+    }
+    boton.addEventListener('click', cambiar);
+    texto.addEventListener('click', cambiar);   // tocar el texto también lo cambia, como una etiqueta
+    var el = h('div.elegir.elegir-interruptor', boton, texto);
+    pintar();
+    el.valor = function () { return valor; };
+    el.poner = function (v) { valor = v; pintar(); };
+    return el;
+  }
+  /* Escala con barra: mientras se arrastra solo cambia el texto; alCambiar se llama al soltar (o al tocar un nombre). */
+  function deslizador(op) {
+    var escala = op.opciones.filter(function (o) { return !o.aparte; });
+    var apartes = op.opciones.filter(function (o) { return o.aparte; });
+    var valor = op.valor;
+    var pos = function (v) { for (var i = 0; i < escala.length; i++) if (escala[i].valor === v) return i; return -1; };
+    var ultimo = Math.max(0, pos(valor));   // dónde queda la barra si se elige una opción aparte
+    var barra = h('input.desliz-barra', { type: 'range', min: 0, max: escala.length - 1, step: 1, 'aria-label': op.etiqueta || '' });
+    var nombres = escala.map(function (o, i) {
+      return h('button.desliz-nombre', { type: 'button', title: o.sub || '', onclick: function () { elegir(o.valor); } }, o.titulo);
+    });
+    var chips = apartes.map(function (o) {
+      return h('button.chip', { type: 'button', title: o.sub || '', onclick: function () { elegir(o.valor); } }, o.titulo);
+    });
+    var sub = h('div.desliz-sub');
+    /* lo que hace la opción elegida, pegado a la escala (no suelto debajo de toda la fila) */
+    var escalaEl = h('div.desliz-escala', barra, h('div.desliz-nombres', nombres), sub);
+    escalaEl.style.setProperty('--n', String(escala.length));
+    function opcion(v) { return op.opciones.filter(function (o) { return o.valor === v; })[0]; }
+    function mostrar(i) {   // i: punto de la escala que se ve elegido (−1 = una opción aparte)
+      var o = i >= 0 ? escala[i] : opcion(valor);
+      barra.style.setProperty('--lleno', (escala.length > 1 ? Math.max(i, 0) / (escala.length - 1) * 100 : 0) + '%');
+      el.classList.toggle('aparte', i < 0);
+      nombres.forEach(function (b, j) { b.classList.toggle('sel', j === i); });
+      chips.forEach(function (b, j) { var si = apartes[j].valor === valor; b.classList.toggle('sel', si); b.setAttribute('aria-pressed', si ? 'true' : 'false'); });
+      barra.setAttribute('aria-valuetext', o ? o.titulo : '');
+      App.vaciar(sub);
+      if (o && o.sub) App.add(sub, h('b', o.titulo), ' · ', o.sub);
+      sub.hidden = !(o && o.sub);
+    }
+    function pintar() {
+      var i = pos(valor);
+      if (i >= 0) ultimo = i;
+      barra.value = String(ultimo);
+      mostrar(i);
+    }
+    function elegir(v) {
+      if (v === valor) { pintar(); return; }
+      valor = v; pintar();
+      if (op.alCambiar) op.alCambiar(valor);
+    }
+    barra.addEventListener('input', function () { el.classList.remove('aparte'); mostrar(Number(barra.value)); });
+    barra.addEventListener('change', function () { elegir(escala[Number(barra.value)].valor); });
+    var el = h('div.elegir.elegir-desliz', { role: 'group', 'aria-label': op.etiqueta || '' },
+      h('div.desliz-fila', escalaEl,
+        chips.length ? h('div.desliz-apartes', chips) : null));
+    pintar();
+    el.valor = function () { return valor; };
+    el.poner = function (v) { valor = v; pintar(); };
+    return el;
+  }
 
   /* Fila de algo que espera una decisión: marca (agente, icono o nodo) · título · bajada · estado · UN botón principal · «⋯».
      op: {marca, titulo, sub?, estado?: nodo, principal?: nodo, mas?: [ítems de App.menu], alTocar?, clase?} */
