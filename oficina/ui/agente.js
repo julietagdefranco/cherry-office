@@ -7,6 +7,16 @@
   var sesiones = {};      // id -> session uuid
   var chats = {};         // id -> [{r, t, e}]  (cache en memoria)
   var enCurso = {};       // id -> true mientras espera respuesta
+  /* modelo y esfuerzo elegidos en cada charla (por sesión; se recuerdan en este navegador). Sin elegir: los del agente */
+  var CLAVE_ELECCION = 'oficina.charla.eleccion';
+  function elecciones() { try { return JSON.parse(localStorage.getItem(CLAVE_ELECCION) || '{}') || {}; } catch (e) { return {}; } }
+  function eleccionDe(clave) { return elecciones()[clave] || {}; }
+  function guardarEleccion(clave, v) {
+    var todas = elecciones();
+    if (v && Object.keys(v).length) todas[clave] = v; else delete todas[clave];
+    var ks = Object.keys(todas); if (ks.length > 200) ks.slice(0, ks.length - 200).forEach(function (k) { delete todas[k]; });
+    try { localStorage.setItem(CLAVE_ELECCION, JSON.stringify(todas)); } catch (e) { /* no se recuerda */ }
+  }
   var borradores = {};    // id -> texto a medio escribir en el chat (sobrevive al cambiar de pestaña o de agente)
   var vivos = {};         // id -> pasos de la respuesta que se está escribiendo (/api/chat/vivo)
   var refrescarVivo = null;   // {id, fn}: repinta la burbuja en vivo del chat abierto
@@ -129,8 +139,11 @@
     function ajustarAlto() { txt.style.height = 'auto'; txt.style.height = Math.min(160, txt.scrollHeight + 2) + 'px'; }
     txt.addEventListener('input', function () { borradores[a.id] = txt.value; ajustarAlto(); });
     if (borradores[a.id]) { txt.value = borradores[a.id]; setTimeout(ajustarAlto, 0); }
+    var claveEleccion = function () { return sesiones[a.id] || 'nueva:' + a.id; };
+    var selector = App.SelectorCharla({ modelo: a.modelo, esfuerzo: a.esfuerzo, valor: eleccionDe(claveEleccion()),
+      alCambiar: function (v) { guardarEleccion(claveEleccion(), v); } });
     App.add(pie, adj.lista, adj.error, adj.input, h('div.redactar', adj.boton, txt, enviar),
-      h('div.ayuda', { style: { marginTop: '6px' } }, 'Enter para enviar · Mayús+Enter para otra línea · arrastrá o pegá archivos'));
+      h('div.pie-charla', selector, h('div.ayuda', 'Enter para enviar · Mayús+Enter para otra línea · arrastrá o pegá archivos')));
 
     function render() {
       App.vaciar(lista); App.vaciar(sug);
@@ -179,8 +192,11 @@
     function mandar() {
       var t = txt.value.trim();
       if ((!t && !adj.hay()) || enCurso[a.id]) return;
-      if (!sesiones[a.id]) sesiones[a.id] = App.uuid();
-      var id = a.id, nombres = adj.nombres(), leidos = [];
+      if (!sesiones[a.id]) {
+        sesiones[a.id] = App.uuid();
+        guardarEleccion(sesiones[a.id], eleccionDe('nueva:' + a.id)); guardarEleccion('nueva:' + a.id, null);
+      }
+      var id = a.id, nombres = adj.nombres(), leidos = [], eleccion = selector.valor();
       ocupado(id, true);
       delete vivos[id];
       seguirVivo(id);
@@ -192,7 +208,7 @@
         adj.vaciar();
         if (actual === id && pestana === 'chat') render();
         if (App.Actividad) setTimeout(App.Actividad.ya, 300);
-        var cuerpo = { agent: id, message: t, session: sesiones[id] };
+        var cuerpo = Object.assign({ agent: id, message: t, session: sesiones[id] }, eleccion);
         if (archivos.length) cuerpo.archivos = archivos;
         return api.post('/api/chat', cuerpo);
       }).then(function (r) {

@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { esObjeto } from './json.js'
 import { Validar, esIdValido } from './validar.js'
+import { modoSkillsDe, type ModoSkills } from './skills.js'
 
 export const agentesPorDefecto = ['betty', 'don-armando', 'marce', 'catalina', 'patricia', 'sofia', 'mario', 'nicolas']
 export const herramientasBase = 'Read,Glob,Grep,Skill,WebFetch,WebSearch'
@@ -27,11 +28,22 @@ export const esConectoresAgentes = (v: unknown): v is ConectoresAgentes => v ===
 
 /** Modelos de los procesos que no son un agente de la oficina (clave `modelos` de config.json, toda la app).
  *  `creador`: el Creador de la recepción; `internos`: borradores de agente, fichas e imágenes de la biblioteca y síntesis
- *  de reuniones; `resumenes`: el cartel corto de lo que está haciendo un agente. `inherit` = el de Claude Code. */
-export type ClaveModelo = 'creador' | 'internos' | 'resumenes'
-export const modelosPorDefecto: Record<ClaveModelo, string> = { creador: 'sonnet', internos: 'sonnet', resumenes: 'haiku' }
+ *  de reuniones. `inherit` = el de Claude Code. (Hasta la 1.4 había `resumenes`, para los carteles: ya no usan IA.) */
+export type ClaveModelo = 'creador' | 'internos'
+export const modelosPorDefecto: Record<ClaveModelo, string> = { creador: 'sonnet', internos: 'sonnet' }
 export const clavesModelo = Object.keys(modelosPorDefecto) as ClaveModelo[]
 export const modelosValidos = Validar.modelos
+
+/** Cómo usan la memoria de la oficina los agentes: `completa` = la leen al empezar cada charla, tarea o consulta
+ *  (oficina.md, decisiones.md, archivos.md: crecen con el uso); `liviana` = solo si lo que les piden lo necesita. */
+export type MemoriaIA = 'completa' | 'liviana'
+export const esMemoriaIA = (v: unknown): v is MemoriaIA => v === 'completa' || v === 'liviana'
+/** Consumo de IA por defecto de toda la app (clave `ia` de config.json). Los pisan el agente (esfuerzo) y cada charla o
+ *  reunión nueva. `esfuerzo` '' = el de Claude Code; `skills` = cómo ven las skills de la persona (skills.ts); `colegas` =
+ *  consultar y pedirle cosas a otros agentes; `mcpLocales` = los servidores MCP del Claude Code de la persona (apagado:
+ *  `--strict-mcp-config`, solo el de la oficina). */
+export type PreferenciasIA = { esfuerzo: string; skills: ModoSkills; memoria: MemoriaIA; colegas: boolean; mcpLocales: boolean }
+export const iaPorDefecto: PreferenciasIA = { esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true }
 
 export class Config {
   proyecto: string
@@ -64,6 +76,11 @@ export class Config {
   conectoresAgentes?: ConectoresAgentes
   /** Solo lo que la persona cambió; lo demás sale de `modelosPorDefecto` (ver `modelo()`). */
   modelos: Partial<Record<ClaveModelo, string>> = {}
+  /** Solo lo que la persona cambió; lo demás sale de `iaPorDefecto`. */
+  ia: Partial<PreferenciasIA> = {}
+  get iaEfectiva(): PreferenciasIA { return { ...iaPorDefecto, ...this.ia } }
+  /** Skills instaladas que vio la última corrida (las pone el runner): para apagar las que un agente no eligió. */
+  skillsInstaladas: () => string[] | undefined = () => undefined
 
   /** Modelo elegido para `clave`, o el de por defecto. */
   modelo(clave: ClaveModelo): string { return this.modelos[clave] ?? modelosPorDefecto[clave] }
@@ -149,6 +166,15 @@ export class Config {
         const v = o.modelos[k]
         if (typeof v === 'string' && modelosValidos.has(v)) this.modelos[k] = v
       }
+    }
+    if (esObjeto(o.ia)) {
+      const v = o.ia
+      if (typeof v.esfuerzo === 'string' && (v.esfuerzo === '' || Validar.esfuerzos.has(v.esfuerzo))) this.ia.esfuerzo = v.esfuerzo
+      const sk = modoSkillsDe(v.skills)
+      if (sk) this.ia.skills = sk
+      if (typeof v.mcpLocales === 'boolean') this.ia.mcpLocales = v.mcpLocales
+      if (esMemoriaIA(v.memoria)) this.ia.memoria = v.memoria
+      if (typeof v.colegas === 'boolean') this.ia.colegas = v.colegas
     }
     if (lista(o.legacy_dirs)) this.legacyDirs = [...o.legacy_dirs.map((d) => Config.ruta(d, home)), ...this.legacyDirs]
   }

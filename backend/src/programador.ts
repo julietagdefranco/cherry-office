@@ -25,9 +25,17 @@ import { CajaArchivos, CajaCosto } from './stream.js'
 import {
   Programacion, ValidarTareas, esUnica, fechaInicio, mensajeTarea, tareaJSON, zonaDelSistema, type OrigenTarea, type TareaProgramada,
 } from './tareas.js'
-import { Slug, Validar, prefijo } from './validar.js'
+import { Slug, Validar, largo, prefijo } from './validar.js'
 
 // MARK: - ejecución (una corrida de una tarea)
+
+/** Lo que entregó la ejecución anterior de una tarea repetida, recortado, para el pedido de la siguiente. */
+export const maxVezAnterior = 1500
+export function vezAnterior(e: Ejecucion): string {
+  const cuando = new Date((e.fin ?? e.inicio) * 1000).toISOString().slice(0, 16).replace('T', ' ')
+  const r = e.resultado.trim()
+  return `\n\n---\nLa vez anterior (${cuando} UTC) respondiste esto${largo(r) > maxVezAnterior ? ' (recortado)' : ''}. Usalo para seguir desde ahí y no repetir; no hace falta rehacer lo que ya estaba:\n${prefijo(r, maxVezAnterior)}`
+}
 
 export type Ejecucion = {
   id: number
@@ -574,7 +582,10 @@ export class Programador implements ProgramadorEntregas {
   /** Lo mismo que el chat: carril del agente, permisos de la oficina, actividad (origen «tarea») y costo (origen «tarea»,
    *  ref = id de la tarea), en una sesión nueva donde quedan el pedido y la respuesta como un chat más. */
   private async correr(ej: Ejecucion, act: OficinaActiva, t: TareaProgramada, def: AgenteDef, actuar: string[]) {
-    await this.vuelta(ej, act, t, def, actuar, { mensaje: mensajeTarea(t), activa: false, reglasExtra: [] })
+    // una tarea repetida corre cada horas o días: retomar su conversación saldría más caro (la caché de claude ya venció
+    // y habría que reescribir toda la historia). Arranca de cero, con lo que entregó la vez anterior para seguir desde ahí.
+    const previa = esUnica(t) ? undefined : this.ejecuciones.lista(act.carpeta, t.id, 5).find((x) => x.id !== ej.id && x.estado === 'ok' && x.resultado.trim() !== '')
+    await this.vuelta(ej, act, t, def, actuar, { mensaje: mensajeTarea(t) + (previa ? vezAnterior(previa) : ''), activa: false, reglasExtra: [] })
   }
 
   /** Una vuelta de una corrida: la primera (la consigna, en una sesión nueva) o la que retoma la conversación después de

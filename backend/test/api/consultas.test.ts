@@ -231,6 +231,18 @@ describe('Consultas entre agentes (MCP)', () => {
     // interno (unit test del port): mcp.tokens.activos == 0; runner.actividad.vista(oficina).isEmpty (el .md de B no se tocó y B quedó sin actividad)
   })
 
+  test('la segunda consulta al mismo colega retoma su conversación (no relee todo)', async () => {
+    const f = await fix()
+    expect((await chat(f.b, { agent: 'marce', message: 'CONSULTAR:nico', session: U.a })).status).toBe(200)
+    expect((await chat(f.b, { agent: 'marce', message: 'CONSULTAR:nico', session: U.a })).status).toBe(200)
+    const ls = f.sb.llamadasConPrompt('consulta de un colega')
+    expect(ls.length).toBe(2)
+    const sid = Sandbox.valor(ls[0]!, '--session-id')!
+    expect(ls[0]!.includes('--resume')).toBe(false)
+    expect(Sandbox.valor(ls[1]!, '--resume')).toBe(sid)
+    expect(ls[1]!.includes('--session-id')).toBe(false)
+  })
+
   test('tope: 3 consultas por mensaje; la cuarta es un error de herramienta y no llega a claude', async () => {
     const f = await fix()
     const r = await chat(f.b, { agent: 'marce', message: 'CONSULTAR:nico x4', session: U.a })

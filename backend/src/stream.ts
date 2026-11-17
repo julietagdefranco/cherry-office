@@ -14,7 +14,7 @@ export type EventoClaude =
   | { tipo: 'archivo'; ruta: string }
   /** Un bloque de texto de la respuesta. `contenido` solo lo lee el chat en vivo; nunca va a /api/actividad. */
   | { tipo: 'texto'; contenido?: string }
-  | { tipo: 'resultado'; costo?: number; error: boolean }
+  | { tipo: 'resultado'; costo?: number; error: boolean; tokens?: Tokens }
 
 /** Recibe los eventos de una corrida, en orden. */
 export type Observador = (e: EventoClaude) => void
@@ -49,7 +49,7 @@ export function parsearEvento(linea: string): EventoClaude[] {
       })
     }
     case 'result':
-      return [{ tipo: 'resultado', costo: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : undefined, error: o.is_error === true }]
+      return [{ tipo: 'resultado', costo: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : undefined, error: o.is_error === true, tokens: tokensDe(o.usage) }]
     default:
       return []
   }
@@ -98,14 +98,37 @@ export class CortadorLineas {
 }
 
 /** Junta el costo de una o varias corridas. */
+/** Tokens de una corrida (`usage` del `result`): entrada sin caché, leída de la caché, escrita en la caché y salida. */
+export type Tokens = { entrada: number; cacheLeida: number; cacheEscrita: number; salida: number }
+
+function tokensDe(u: unknown): Tokens | undefined {
+  if (!esObjeto(u)) return undefined
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  return { entrada: n(u.input_tokens), cacheLeida: n(u.cache_read_input_tokens), cacheEscrita: n(u.cache_creation_input_tokens), salida: n(u.output_tokens) }
+}
+
 export class CajaCosto {
   private total?: number
+  private tok?: Tokens
   sumar(c?: number) { if (c !== undefined) this.total = (this.total ?? 0) + c }
   get valor() { return this.total }
+  get tokens() { return this.tok }
+  /** ` tokens=entrada/cache_leida/cache_escrita/salida` para el log (vacío si claude no los informó). Sirve para ver de
+   *  dónde sale el consumo de una charla: una caché leída enorme es una charla larga; una salida enorme, mucho pensar. */
+  tokensLog(): string {
+    const t = this.tok
+    return t ? ` tokens=${t.entrada}/${t.cacheLeida}/${t.cacheEscrita}/${t.salida}` : ''
+  }
   /** Observador que suma el costo del `resultado` y reenvía todo a `siguiente`. */
   observador(siguiente?: Observador): Observador {
     return (e) => {
-      if (e.tipo === 'resultado') this.sumar(e.costo)
+      if (e.tipo === 'resultado') {
+        this.sumar(e.costo)
+        if (e.tokens) {
+          const a = this.tok ?? { entrada: 0, cacheLeida: 0, cacheEscrita: 0, salida: 0 }
+          this.tok = { entrada: a.entrada + e.tokens.entrada, cacheLeida: a.cacheLeida + e.tokens.cacheLeida, cacheEscrita: a.cacheEscrita + e.tokens.cacheEscrita, salida: a.salida + e.tokens.salida }
+        }
+      }
       siguiente?.(e)
     }
   }

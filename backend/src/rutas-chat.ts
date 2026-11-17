@@ -12,6 +12,7 @@ import type { Oficinas } from './oficinas.js'
 import type { PermisosVivos } from './permisos-vivos.js'
 import { pedidoJSON, decisionesPermiso, type DecisionPermiso } from './permisos-vivos.js'
 import { argumentos, contexto, entorno, variableTokenMCP, type FuenteCatalogo } from './permisos.js'
+import { aplicarEleccion, eleccionCharla, type EleccionCharla } from './agentes.js'
 import { no405, type Resp, type RutaNucleo } from './router.js'
 import type { InfoClaude } from './rutas-oficinas.js'
 import type { Store } from './store.js'
@@ -165,6 +166,14 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const def = act.oficina.agentes.find((a) => a.id === agente)
     if (!def || msg === '' || largo(msg) > maxMensaje || !uuidValido(b.session)) return invalido
     const sid = b.session.toLowerCase()
+    // modelo y esfuerzo elegidos en la charla (pisan los del agente solo en este mensaje)
+    let eleccion: EleccionCharla
+    try {
+      eleccion = eleccionCharla(b)
+    } catch (e) {
+      if (e instanceof ErrorAPI) return [e.status, { error: e.mensaje }]
+      throw e
+    }
 
     try {
       runner.verificar(act.carpeta)
@@ -200,6 +209,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
     // la persona está en el chat: lo que el agente no tiene permitido se le pregunta (tarjeta en la oficina)
     ctx.preguntar = true
+    aplicarEleccion(ctx, eleccion)
 
     let resultado: Resp
     try {
@@ -211,18 +221,9 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           store.asegurarSesion(sid, agente, carpeta)
           store.agregar(sid, 'u', mensaje)
           const activa = store.estaActiva(sid)
-          const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: msg, extra: caja.observador(escritos.observador(enVivo.observador())) },
-            async (obs, token) => {
-              const resumen = runner.resumirTarea(msg, { oficina: carpeta, agente, token, store })
-              try {
-                return await runner.ejecutarChat({
-                  agente, mensaje, sid, activa, carpeta, obs, envExtra,
-                  armar: (p) => argumentos(config, ctx, p),
-                })
-              } finally {
-                resumen?.cancelar()
-              }
-            })
+          // el cartel: fijo arriba («Respondiéndote») y abajo lo que va haciendo en vivo (sin IA)
+          const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: 'Respondiéndote', extra: caja.observador(escritos.observador(enVivo.observador())) },
+            (obs) => runner.ejecutarChat({ agente, mensaje, sid, activa, carpeta, obs, envExtra, armar: (p) => argumentos(config, ctx, p) }))
           store.marcarActiva(sid)
           const guardado = texto === '' ? '(sin respuesta)' : texto
           store.agregar(sid, 'a', guardado)
@@ -264,7 +265,8 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     } finally {
       store.registrarCosto({ oficina: carpeta, agente, origen: 'chat', ref: sid, costo: caja.valor })
     }
-    log.info(`chat agente=${agente} sid=${sid.slice(0, 8)} estado=${resultado[0]} seg=${((Date.now() - t0) / 1000).toFixed(1)}`)
+    log.info(`chat agente=${agente} sid=${sid.slice(0, 8)} estado=${resultado[0]} seg=${((Date.now() - t0) / 1000).toFixed(1)}`
+      + (ctx.modelo !== undefined ? ` modelo=${ctx.modelo}` : '') + (ctx.esfuerzo !== undefined ? ` esfuerzo=${ctx.esfuerzo}` : '') + caja.tokensLog())
     return resultado
   }
 
@@ -317,6 +319,20 @@ export function rutasChat(d: DepsChat): RutaNucleo {
       r.creadorVersion = d.creadorVersion?.(act.carpeta) ?? 0
       r.permisos = [...(d.mcp?.()?.permisos?.pendientes(act.carpeta) ?? []).map(pedidoJSON), ...(d.permisosTareas?.()?.pendientes(act.carpeta) ?? [])]
       return [200, r]
+    }
+    if (seccion === 'skills' && n === 2) {
+      if (method !== 'GET') return no405
+      // `GET /api/skills?actualizar=1`: las skills instaladas (las que vio la última corrida); sin datos o con actualizar,
+      // corre un claude mínimo para averiguarlas
+      const act = oficinas.activa()
+      let lista = runner.skills.lista
+      if (lista === undefined || query.actualizar === '1') {
+        try { lista = await runner.sondearSkills(act?.carpeta) } catch (e) {
+          if (e instanceof ClaudeError) return [e.status, { error: e.mensaje }]
+          throw e
+        }
+      }
+      return [200, { skills: lista ?? [] }]
     }
     if (seccion === 'permisos' && n === 3) return method === 'POST' ? responderPermiso(a2!, body) : no405
     if (seccion === 'avisos' && n === 2) {

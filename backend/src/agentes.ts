@@ -1,4 +1,6 @@
 // Agentes de la oficina: contratar, borrador, editar, despedir y notas (Agentes.swift + rutas de /api/agentes).
+import { esMemoriaIA, type MemoriaIA } from './config.js'
+import { modoSkillsDe, type ModoSkills } from './skills.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ErrorAPI } from './errores.js'
@@ -19,7 +21,7 @@ import { Slug, Validar, largo, plegar, prefijo } from './validar.js'
 
 export type NuevoAgente = {
   id?: string; nombre: string; rol: string; description: string; prompt: string; departamento: string
-  chips: string[]; modelo: string; brief?: string; avatar?: Avatar; escritura?: string[]
+  chips: string[]; modelo: string; esfuerzo?: string; skills?: string[]; brief?: string; avatar?: Avatar; escritura?: string[]
   limites?: LimitesAgente; conectores?: ConectorAsignado[]; permisos?: string[]; sabeDe?: string[]
 }
 
@@ -92,6 +94,53 @@ export function modeloValido(v: unknown): string {
   return s
 }
 
+/** Esfuerzo de un agente o de una charla: '' (o null) = el de Claude Code; si no, uno de `Validar.esfuerzos`. */
+export function esfuerzoValido(v: unknown): string {
+  if (v === undefined || v === null) return ''
+  const s = typeof v === 'string' ? v.trim().toLowerCase() : undefined
+  if (s === undefined || (s !== '' && !Validar.esfuerzos.has(s))) throw new ErrorAPI(400, 'Esfuerzo inválido (low, medium, high, xhigh o max).')
+  return s
+}
+
+/** `modelo` y `esfuerzo` opcionales de una charla (chat, reunión, Creador): pisan los del agente solo en esa corrida. */
+export type EleccionCharla = { modelo?: string; esfuerzo?: string; skills?: ModoSkills; memoria?: MemoriaIA; colegas?: boolean; mcpLocales?: boolean }
+export function eleccionCharla(d: Obj): EleccionCharla {
+  const r: EleccionCharla = {}
+  if (d.modelo !== undefined && d.modelo !== null && d.modelo !== '') r.modelo = modeloValido(d.modelo)
+  const e = esfuerzoValido(d.esfuerzo)
+  if (e !== '') r.esfuerzo = e
+  for (const k of ['colegas', 'mcpLocales'] as const) {
+    const v = d[k]
+    if (v === undefined || v === null) continue
+    if (typeof v !== 'boolean') throw new ErrorAPI(400, `«${k}» tiene que ser verdadero o falso.`)
+    r[k] = v
+  }
+  if (d.skills !== undefined && d.skills !== null) {
+    const m = modoSkillsDe(d.skills)
+    if (!m) throw new ErrorAPI(400, '«skills» tiene que ser resumidas, completas, agente o ninguna.')
+    r.skills = m
+  }
+  if (d.memoria !== undefined && d.memoria !== null) {
+    if (!esMemoriaIA(d.memoria)) throw new ErrorAPI(400, '«memoria» tiene que ser "completa" o "liviana".')
+    r.memoria = d.memoria
+  }
+  return r
+}
+
+/** Vuelca una elección de charla sobre el contexto de la corrida. */
+export function aplicarEleccion(ctx: { modelo?: string; esfuerzo?: string; skills?: ModoSkills; memoria?: MemoriaIA; colegas?: boolean; mcpLocales?: boolean }, e: EleccionCharla) {
+  for (const k of ['modelo', 'esfuerzo', 'skills', 'memoria', 'colegas', 'mcpLocales'] as const) if (e[k] !== undefined) (ctx as Record<string, unknown>)[k] = e[k]
+}
+
+/** Skills elegidas de un agente: nombres de skills (los que informa Claude Code), sin repetir, hasta 60. */
+export function skillsValidas(v: unknown): string[] {
+  if (v === undefined || v === null) return []
+  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new ErrorAPI(400, '«skills» tiene que ser una lista de nombres.')
+  const out = [...new Set((v as string[]).map((x) => x.trim()).filter((x) => x !== ''))]
+  if (out.length > 60 || out.some((x) => x.length > 200 || /[\s"]/.test(x))) throw new ErrorAPI(400, '«skills»: hasta 60 nombres de skills.')
+  return out
+}
+
 export function chipsValidos(v: unknown): string[] {
   if (v === undefined || v === null) return []
   if (!Array.isArray(v)) throw new ErrorAPI(400, '«chips» tiene que ser una lista de textos.')
@@ -119,6 +168,10 @@ export function nuevoAgenteDesde(d: Obj): NuevoAgente {
   const modelo = modeloValido(d.modelo)
   const brief = Validar.texto(d.brief, 'brief', 4000, false)
   const n: NuevoAgente = { nombre, rol, description, prompt, departamento, chips: chipsValidos(d.chips), modelo }
+  const esfuerzo = esfuerzoValido(d.esfuerzo)
+  if (esfuerzo !== '') n.esfuerzo = esfuerzo
+  const sk = skillsValidas(d.skills)
+  if (sk.length > 0) n.skills = sk
   if (id !== undefined) n.id = id
   if (brief !== undefined) n.brief = brief
   n.avatar = avatarValido(d.avatar)
@@ -132,6 +185,9 @@ export function nuevoAgenteDesde(d: Obj): NuevoAgente {
 export type CambiosAgente = {
   nombre?: string; rol?: string; departamento?: string; avatar?: Avatar
   prompt?: string; description?: string; chips?: string[]; modelo?: string; brief?: string
+  /** '' = volver al de Claude Code. */
+  esfuerzo?: string
+  skills?: string[]
   limites?: LimitesAgente; conectores?: ConectorAsignado[]; permisos?: string[]; sabeDe?: string[]
   /** Permisos guardados con «Siempre» (solo se pueden quitar o reemplazar: los agrega `agregarReglas`). */
   reglas?: string[]
@@ -146,6 +202,8 @@ export function cambiosAgenteDesde(d: Obj): CambiosAgente {
   c.description = Validar.texto(d.description, 'description', 1000, false)
   c.brief = Validar.texto(d.brief, 'brief', 4000, false)
   if (d.modelo !== undefined && d.modelo !== null) c.modelo = modeloValido(d.modelo)
+  if (d.esfuerzo !== undefined) c.esfuerzo = esfuerzoValido(d.esfuerzo)
+  if (d.skills !== undefined) c.skills = skillsValidas(d.skills)
   if (d.chips !== undefined && d.chips !== null) c.chips = chipsValidos(d.chips)
   c.avatar = avatarValido(d.avatar)
   c.limites = limitesValidos(d.limites)
@@ -303,6 +361,8 @@ export function contratar(oficinas: Oficinas, n: NuevoAgente, log?: { info(m: st
   const def: AgenteDef = { id, nombre: n.nombre, rol: n.rol, departamento: n.departamento }
   if (n.brief !== undefined) def.brief = n.brief
   def.modelo = n.modelo
+  if (n.esfuerzo !== undefined) def.esfuerzo = n.esfuerzo
+  if (n.skills !== undefined) def.skills = n.skills
   if (n.chips.length > 0) def.chips = n.chips
   def.avatar = avatar
   def.creado = ahoraISO()
@@ -343,6 +403,8 @@ export function editarAgente(oficinas: Oficinas, id: string, c: CambiosAgente): 
     if (c.brief !== undefined) ag.brief = c.brief
     if (c.chips !== undefined) { if (c.chips.length === 0) delete ag.chips; else ag.chips = c.chips }
     if (c.modelo !== undefined) ag.modelo = c.modelo
+    if (c.esfuerzo !== undefined) { if (c.esfuerzo === '') delete ag.esfuerzo; else ag.esfuerzo = c.esfuerzo }
+    if (c.skills !== undefined) { if (c.skills.length === 0) delete ag.skills; else ag.skills = c.skills }
     if (c.limites !== undefined) { if (vacio(c.limites)) delete ag.limites; else ag.limites = c.limites }
     if (c.conectores !== undefined) { if (c.conectores.length === 0) delete ag.conectores; else ag.conectores = c.conectores }
     if (c.permisos !== undefined) { if (c.permisos.length === 0) delete ag.permisos; else ag.permisos = c.permisos }

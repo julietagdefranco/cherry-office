@@ -309,6 +309,21 @@ describe('Tareas programadas (API y programador)', () => {
     expect(Sandbox.reglas(f.sb.llamadas.at(-1)!)).not.toContain('Bash(make build:*)')
   })
 
+  test('tarea repetida: la corrida siguiente arranca de cero pero con lo que entregó la vez anterior', async () => {
+    const f = await fix()
+    await nueva(f, { consigna: 'Armá el informe' })
+    expect((await f.post('/api/tareas/informe-diario/correr')).status).toBe(202)
+    await terminada(f, 'informe-diario')
+    const primera = f.sb.llamadas.at(-1)!
+    expect(primera.at(-1)).toBe('Armá el informe')
+    expect((await f.post('/api/tareas/informe-diario/correr')).status).toBe(202)
+    await esperar(() => f.sb.llamadas.length > 1 && f.sb.llamadas.at(-1)!.at(-1)!.includes('La vez anterior'))
+    const segunda = f.sb.llamadas.at(-1)!
+    expect(segunda.at(-1)!.startsWith('Armá el informe\n\n---\nLa vez anterior (')).toBe(true)
+    expect(segunda.at(-1)!.endsWith(':\nhola marce')).toBe(true)
+    expect(segunda.includes('--session-id') && !segunda.includes('--resume')).toBe(true)
+  })
+
   test('probar ahora: la actividad muestra origen «tarea» con el nombre; no se puede lanzar ni borrar mientras corre (409)', async () => {
     const f = await fix()
     await nueva(f, { consigna: 'STREAM PAUSA informe' })

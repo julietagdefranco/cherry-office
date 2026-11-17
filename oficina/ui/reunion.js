@@ -92,12 +92,23 @@
     }
     tema.addEventListener('input', function () { if (!editoSalida) salida.value = salidaSugerida(tema.value); });
     var docsAviso = h('div.ayuda.oculto');
+    /* modelo y esfuerzo de toda la reunión: por defecto, los de cada agente. Cada turno lee lo dicho hasta ahí, así que
+       una reunión larga con mucho esfuerzo gasta bastante */
+    var modeloReu = App.elegir({ etiqueta: 'Modelo', forma: 'chips', valor: '',
+      opciones: [{ valor: '', titulo: 'El de cada agente' }].concat(App.MODELOS.filter(function (m) { return m.valor !== 'inherit'; }).map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; })) });
+    var memoriaReu = App.elegir({ etiqueta: 'Memoria', forma: 'chips', valor: App.iaApp().memoria,
+      opciones: App.opcionIA('memoria').opciones.map(function (x) { return { valor: x.valor, titulo: x.titulo }; }) });
+    var esfuerzoReu = App.elegir({ etiqueta: 'Esfuerzo', forma: 'chips', valor: '',
+      opciones: [{ valor: '', titulo: 'El de cada agente' }].concat(App.ESFUERZOS.filter(function (m) { return m.valor !== ''; }).map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; })) });
     App.add(hj.cuerpo,
       h('div.fila-campo', h('label.etiqueta-campo', 'Tema'), tema),
       h('div.fila-campo', h('label.etiqueta-campo', 'Quiénes participan'), h('div.ayuda', 'Entre 2 y 10.'), grilla),
       h('div.fila-campo', h('label.etiqueta-campo', 'Tipo de reunión'), patron),
       liderFila, bandosFila,
       h('div.fila-campo', h('label.etiqueta-campo', 'Rondas'), h('div.ayuda', 'En cada ronda habla cada uno una vez. Después podés pedir otra.'), rondas),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Modelo'), modeloReu),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Esfuerzo'), h('div.ayuda', 'Cuánto piensa cada uno antes de hablar. Más esfuerzo, más tokens.'), esfuerzoReu),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Memoria de la oficina'), h('div.ayuda', 'Si cada uno lee el contexto y las decisiones antes de hablar. «Solo si hace falta» gasta menos.'), memoriaReu),
       h('div.fila-campo', h('label.etiqueta-campo', 'Documentos de la biblioteca (opcional)'), h('div.ayuda', 'Los participantes los leen antes de opinar.'), docs, docsAviso),
       h('div.fila-campo', h('label.etiqueta-campo', 'Dónde queda el acta'),
         h('div.ayuda', 'Al cerrar se guarda un resumen en Entregables › Reuniones.'),
@@ -134,6 +145,9 @@
         }
         if (pat === 'revision' && !docsSel.length) { err.textContent = 'El panel de revisión necesita al menos un documento.'; return; }
         if (editoSalida && salida.value.trim()) cuerpo.salida = salida.value.trim();
+        if (modeloReu.valor()) cuerpo.modelo = modeloReu.valor();
+        if (esfuerzoReu.valor()) cuerpo.esfuerzo = esfuerzoReu.valor();
+        if (memoriaReu.valor() !== App.iaApp().memoria) cuerpo.memoria = memoriaReu.valor();
         ir.disabled = true;
         api.post('/api/reuniones', cuerpo)
           .then(function (r) { E.reunion = r; sincronizar(); panel(r.id); vigilar(r.id); })

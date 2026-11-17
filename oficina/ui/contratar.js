@@ -10,6 +10,97 @@
     { valor: 'haiku', titulo: 'Haiku', sub: 'Rápido y barato, para cosas simples.' },
     { valor: 'inherit', titulo: 'El de Claude Code', sub: 'El que tengas elegido en tu Claude Code.' },
   ];
+  /* Cuánto piensa antes de responder (`--effort`). Lo que piensa se cobra como texto escrito: más esfuerzo, más tokens.
+     '' = el que tengas en tu Claude Code. Una sola lista: la ficha del agente, el selector de cada charla y las reuniones. */
+  App.ESFUERZOS = [
+    { valor: '', titulo: 'El de Claude Code', sub: 'El que tengas elegido en tu Claude Code.' },
+    { valor: 'low', titulo: 'Bajo', sub: 'Responde rápido y gasta poco. Para charlas y pedidos simples.' },
+    { valor: 'medium', titulo: 'Medio', sub: 'Piensa un poco. Buen equilibrio para el día a día.' },
+    { valor: 'high', titulo: 'Alto', sub: 'Piensa más antes de responder. Gasta más.' },
+    { valor: 'xhigh', titulo: 'Muy alto', sub: 'Para problemas difíciles. Gasta bastante más.' },
+    { valor: 'max', titulo: 'Máximo', sub: 'Todo lo que pueda pensar. El que más gasta.' },
+  ];
+  App.tituloModelo = function (v) { var m = App.MODELOS.filter(function (x) { return x.valor === v; })[0]; return m ? m.titulo : 'Sonnet'; };
+  App.tituloEsfuerzo = function (v) { var m = App.ESFUERZOS.filter(function (x) { return x.valor === (v || ''); })[0]; return m ? m.titulo : ''; };
+
+  /* Opciones de consumo que se pueden prender o apagar (Ajustes › Consumo de IA, cada charla y cada reunión nueva).
+     Una sola lista, con lo que cuesta cada una, para que se entienda qué se gana al apagarla. */
+  App.OPCIONES_IA = [
+    { clave: 'skills', titulo: 'Skills de tu Claude Code', completo: 'completas',
+      sub: 'Las skills y plugins que tenés instalados. En cada paso el agente recibe la lista: completa pesa varios miles de tokens.',
+      opciones: [
+        { valor: 'resumidas', titulo: 'Todas, resumidas', sub: 'Puede usar cualquiera; la lista va con descripciones cortas. Menos de la mitad.' },
+        { valor: 'completas', titulo: 'Todas, completas', sub: 'La lista entera, como Claude Code. La que más gasta.' },
+        { valor: 'agente', titulo: 'Las de cada agente', sub: 'Solo las elegidas en la ficha de cada agente. Sin elegidas, ninguna.' },
+        { valor: 'ninguna', titulo: 'Ninguna', sub: 'No usa skills.' }] },
+    { clave: 'memoria', titulo: 'Memoria de la oficina', completo: 'completa',
+      sub: 'Al empezar lee el contexto del negocio, las decisiones y el catálogo de documentos. Crecen con el uso: liviana ahorra, pero puede no tener presente alguna decisión.',
+      opciones: [{ valor: 'completa', titulo: 'Leer al empezar' }, { valor: 'liviana', titulo: 'Solo si hace falta' }] },
+    { clave: 'colegas', titulo: 'Consultar a colegas', completo: true,
+      sub: 'Cada consulta es otro agente trabajando (hasta 3 por mensaje). Apagado, responde solo con lo suyo.',
+      opciones: [{ valor: true, titulo: 'Puede' }, { valor: false, titulo: 'No puede' }] },
+    { clave: 'mcpLocales', titulo: 'Servidores MCP de tu Claude Code', completo: true,
+      sub: 'Los MCP que instalaste en Claude Code (no los conectores de claude.ai, que se asignan por agente). Cada uno suma sus herramientas en cada paso.',
+      opciones: [{ valor: true, titulo: 'Usarlos' }, { valor: false, titulo: 'Solo los de la oficina' }] },
+  ];
+  /* lo de Ajustes › Consumo de IA, con los valores de siempre si todavía no llegó el estado */
+  App.iaApp = function () { return Object.assign({ esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true }, (App.E.estado && App.E.estado.ia) || {}); };
+  App.opcionIA = function (clave) { return App.OPCIONES_IA.filter(function (o) { return o.clave === clave; })[0]; };
+  App.tituloOpcionIA = function (o, v) { var x = o.opciones.filter(function (y) { return y.valor === v; })[0]; return x ? x.titulo : String(v); };
+
+  /* Selector de una charla (como en Claude): un botón chico que abre un menú con modelo, esfuerzo y las opciones de
+     consumo. Pisa lo del agente y lo de Ajustes solo en esa charla.
+     op: {modelo, esfuerzo (los del agente), valor (lo elegido antes), soloModelo (sin opciones: el Creador), alCambiar(v)}.
+     .valor() devuelve solo lo que difiere de lo de por defecto. */
+  App.SelectorCharla = function (op) {
+    var v = Object.assign({}, op.valor || {});
+    var b = h('button.btn.chico.fantasma.selector-charla', { type: 'button', title: 'Modelo, esfuerzo y consumo de esta charla' });
+    function defecto() {
+      var ia = App.iaApp();
+      return { modelo: op.modelo || 'sonnet', esfuerzo: op.esfuerzo || ia.esfuerzo || '', skills: ia.skills, memoria: ia.memoria, colegas: ia.colegas, mcpLocales: ia.mcpLocales };
+    }
+    function efectivo() { return Object.assign(defecto(), v); }
+    function ahorros() {
+      if (op.soloModelo) return 0;
+      var e = efectivo();
+      return App.OPCIONES_IA.filter(function (o) { return !o.soloAjustes && e[o.clave] !== o.completo; }).length;
+    }
+    function pintar() {
+      var e = efectivo(), n = ahorros();
+      App.vaciar(b);
+      App.add(b, App.icono('deslizadores'), h('span', App.tituloModelo(e.modelo) + (e.esfuerzo ? ' · ' + App.tituloEsfuerzo(e.esfuerzo) : '') + (n ? ' · ' + n + (n === 1 ? ' ahorro' : ' ahorros') : '')));
+      b.classList.toggle('cambiado', Object.keys(v).length > 0);
+    }
+    function cambiar(clave, valor) {
+      var d = defecto();
+      if (valor === d[clave]) delete v[clave]; else v[clave] = valor;
+      pintar();
+      if (op.alCambiar) op.alCambiar(b.valor());
+    }
+    b.addEventListener('click', function () {
+      var e = efectivo(), d = defecto();
+      var marca = function (si) { return si ? 'ok' : null; };
+      var items = [{ titulo: 'Modelo' }].concat(App.MODELOS.map(function (m) {
+        return { texto: m.titulo + (m.valor === d.modelo ? ' (por defecto)' : ''), nota: m.sub, icono: marca(e.modelo === m.valor), accion: function () { cambiar('modelo', m.valor); } };
+      }), ['-', { titulo: 'Esfuerzo' }], App.ESFUERZOS.map(function (x) {
+        return { texto: x.titulo + (x.valor === d.esfuerzo && d.esfuerzo ? ' (por defecto)' : ''), nota: x.sub, icono: marca(e.esfuerzo === x.valor), accion: function () { cambiar('esfuerzo', x.valor); } };
+      }));
+      if (!op.soloModelo) {
+        App.OPCIONES_IA.forEach(function (o) {
+          if (o.soloAjustes) return;
+          items.push('-', { titulo: o.titulo });
+          o.opciones.forEach(function (x) {
+            items.push({ texto: x.titulo + (x.valor === d[o.clave] ? ' (por defecto)' : ''), nota: x.sub, icono: marca(e[o.clave] === x.valor),
+              accion: function () { cambiar(o.clave, x.valor); } });
+          });
+        });
+      }
+      App.menu(b, items);
+    });
+    b.valor = function () { return Object.assign({}, v); };
+    pintar();
+    return b;
+  };
 
   /* ---------------- editor de minifig (agentes y tu perfil) ----------------
      avatar: objeto inicial; semilla(): de dónde salen los valores que falten. Devuelve {el, valor(), retratar()}. */
@@ -122,6 +213,21 @@
       opciones: deptos.map(function (x) { return { valor: x.id, titulo: x.nombre, color: x.color }; }) });
     var modelo = App.elegir({ etiqueta: 'Modelo', forma: 'lista', valor: d.modelo || 'sonnet',
       opciones: App.MODELOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; }) });
+    var esfuerzo = App.elegir({ etiqueta: 'Esfuerzo', forma: 'lista', valor: d.esfuerzo || '',
+      opciones: App.ESFUERZOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; }) });
+    /* skills que usa (cuentan con «Las de cada agente» en Ajustes › Consumo de IA): la lista sale de tu Claude Code */
+    var skillsSel = (d.skills || []).slice();
+    var skillsCaja = h('div', h('span.ayuda', 'Buscando tus skills…'));
+    function pintarSkills(lista) {
+      App.vaciar(skillsCaja);
+      skillsSel.forEach(function (s) { if (lista.indexOf(s) < 0) lista.push(s); });   // las elegidas que ya no están, igual se ven
+      if (!lista.length) { skillsCaja.appendChild(h('span.ayuda', 'No encontré skills instaladas en tu Claude Code.')); return; }
+      skillsCaja.appendChild(App.elegir({ etiqueta: 'Skills', forma: 'chips', multiple: true, valor: skillsSel,
+        opciones: lista.map(function (s) { return { valor: s, titulo: s.replace(/^[^:]+:/, '') , sub: s }; }),
+        alCambiar: function (v) { skillsSel = v; } }));
+    }
+    App.api.get('/api/skills').then(function (r) { pintarSkills(r.skills || []); })
+      .catch(function () { App.vaciar(skillsCaja).appendChild(h('span.ayuda', 'No pude traer la lista de skills.')); });
     var desc = h('input.campo', { value: d.description || '', maxlength: 1000, placeholder: 'En una línea, para qué sirve' });
     var prompt = h('textarea.campo', { rows: 9, maxlength: 20000 }); prompt.value = d.prompt || '';
     var sabeItems = temas((d.sabeDe || []).join(', '));
@@ -147,6 +253,8 @@
         grupo('Cómo trabaja', [
           campo('Instrucciones', prompt, 'Cómo trabaja, qué entrega y cómo habla. Es el texto que recibe Claude.'),
           campo('Modelo', modelo, 'Cambia cuánto gasta y qué tan bien resuelve. Vale desde la próxima vez que trabaje.'),
+          campo('Esfuerzo', esfuerzo, 'Cuánto piensa antes de responder. Pensar también gasta tokens: para charlar, Bajo o Medio alcanza. En cada charla lo podés cambiar.'),
+          campo('Skills que usa', skillsCaja, 'Solo cuentan si en Ajustes › Consumo de IA elegiste «Las de cada agente»: así no recibe la lista de todas.'),
           campo('Sabe de', sabe, 'Hasta 12 temas. Sus colegas los usan para saber a quién preguntarle.'),
           campo('Pedidos sugeridos', pedidos, 'Hasta 3 frases que aparecen como botones al abrir su charla.')]),
         idFila));
@@ -155,7 +263,7 @@
       el: el,
       valor: function () {
         return {
-          id: id.value.trim() || d.id || '', nombre: nombre.value.trim(), rol: rol.value.trim(), departamento: dep.valor() || '', modelo: modelo.valor(),
+          id: id.value.trim() || d.id || '', nombre: nombre.value.trim(), rol: rol.value.trim(), departamento: dep.valor() || '', modelo: modelo.valor(), esfuerzo: esfuerzo.valor() || '', skills: skillsSel.slice(),
           description: desc.value.trim() || rol.value.trim(), prompt: prompt.value.trim(),
           chips: chipsItems.map(function (c) { return c.trim(); }).filter(Boolean), avatar: ava.valor(), brief: d.brief || undefined,
           sabeDe: sabeItems.slice()

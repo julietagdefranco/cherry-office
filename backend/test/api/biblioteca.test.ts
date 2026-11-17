@@ -670,7 +670,7 @@ describe('Biblioteca', () => {
     expect(Sandbox.valor(l, '--tools')).toBe('Read,Glob,Grep,Skill,WebFetch,WebSearch,Edit,Write')
     // permiso de escritura: SOLO su archivo de notas (ni entregables ni nada más)
     const notas = ruta(f.carpeta, 'conocimiento/agentes/marce.md')
-    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', 'WebFetch', 'WebSearch', regla('Edit', notas), regla('Write', notas), '--disallowedTools', 'mcp__claude_ai_*'])
+    expect(Sandbox.reglas(l)).toEqual(['Read', 'Glob', 'Grep', 'Skill', 'WebFetch', 'WebSearch', regla('Edit', notas), regla('Write', notas), '--disallowedTools', 'mcp__claude_ai_*', '--settings', '{"skillListingMaxDescChars":150}'])
     expect(l).not.toContain('--add-dir')
     expect(sinPrivate(cwdDe(f, l))).toBe(sinPrivate(f.carpeta))
     const p = l.at(-1)!

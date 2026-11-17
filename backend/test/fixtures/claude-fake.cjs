@@ -49,6 +49,8 @@ async function main() {
   fs.appendFileSync(p('cwd.log'), process.cwd() + '\n')
   const tiene = (flag) => args.includes(flag)
   const m = msg.normalize('NFC')
+  // skills instaladas (el system/init del claude real las trae): el sondeo de /api/skills y los mensajes con SKILLS
+  if (m.includes('SKILLS') || (m === 'Respondé solo: ok' && args[args.indexOf('--tools') + 1] === 'Skill')) salida(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', skills: ['docx', 'pdf', 'xlsx'] }))
 
   let kind = ''
   if (agent === '') {
@@ -57,9 +59,8 @@ async function main() {
     else if (m.includes('Sos quien ordena el trabajo')) kind = 'tareaschat'
     else if (m.includes('Sos el bibliotecario')) kind = 'ficha'
     else if (m.includes('imagen que est')) kind = 'imagen'
-    else if (m.includes('en 3 a 6 palabras')) kind = 'resumen'
   } else {
-    if (m.includes('en una reuni')) kind = 'turno'
+    if (m.includes('en una reuni') || m.startsWith('Sigue la reuni')) kind = 'turno'
     else if (m.includes('documento a la biblioteca')) kind = 'lectura'
     else if (m.includes('consulta de un colega')) kind = 'consulta'
   }
@@ -109,7 +110,6 @@ async function main() {
       case 'tareaschat': salida(String.raw`{"type":"result","result":"{\"pendientes\":[{\"quien\":\"Marce\",\"nombre\":\"Calendario de diciembre\",\"consigna\":\"Armá el calendario de publicaciones de diciembre con los reels acordados.\",\"depende_de\":[]},{\"quien\":\"\",\"consigna\":\"Aprobar el presupuesto con el cliente\",\"necesita_usuario\":true,\"depende_de\":[1]}]}","is_error":false,"total_cost_usd":0.01}`); break
       case 'ficha': salida(String.raw`{"type":"result","result":"{\"titulo\":\"Ficha de prueba\",\"resumen\":\"Resumen de prueba del documento.\",\"datos_clave\":[\"dato uno\"],\"temas\":[\"pruebas\"],\"util_para\":[\"direccion\"],\"fechas\":[],\"contradicciones\":[]}","is_error":false}`); break
       case 'imagen': salida('{"type":"result","result":"Una imagen de prueba con el texto HOLA MUNDO.","is_error":false}'); break
-      case 'resumen': salida('{"type":"result","result":"«Armando el plan de diciembre.»","is_error":false,"total_cost_usd":0.001}'); break
       case 'turno': salida(JSON.stringify({ type: 'result', result: `Opinión de ${agent} sobre el tema.`, is_error: false, total_cost_usd: 0.02 })); break
       case 'lectura':
         fs.mkdirSync('conocimiento/agentes', { recursive: true })

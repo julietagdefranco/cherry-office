@@ -14,9 +14,11 @@ import { ErrorAPI } from './errores.js'
 import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
 import { escribirAtomico, OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
-import { dirsVinculos, Instrucciones, turnoConPermiso } from './permisos.js'
+import { conMemoria, dirsVinculos, esfuerzoDe, Instrucciones, turnoConPermiso } from './permisos.js'
+import { esMemoriaIA } from './config.js'
 import type { TurnoConPermiso } from './claude-runner.js'
 import { anexarDecisiones } from './plantillas.js'
+import { eleccionCharla } from './agentes.js'
 import { dependenciasDe } from './dependencias.js'
 import { flujoDesde, flujoJSON } from './modelo-flujos.js'
 import { Programador, programadorDe } from './programador.js'
@@ -26,7 +28,7 @@ import { registrarModulo, type Servicios } from './servicios.js'
 import { num, txt, type Fila, type SQLiteDB, type SQLValor } from './sqlite.js'
 import { CajaCosto } from './stream.js'
 import { deReunion } from './tareas.js'
-import { Slug, Validar, largo, plegar, prefijo, uuidValido } from './validar.js'
+import { Slug, Validar, largo, plegar, prefijo, uuidDe, uuidValido } from './validar.js'
 
 // MARK: - modelo
 
@@ -84,6 +86,10 @@ export type ReunionFila = {
   salida?: string
   /** JSON del último resumen pedido sin cerrar (`resumenParcialJSON`). */
   resumenParcial?: string
+  /** Modelo y esfuerzo elegidos para toda la reunión (pisan los de cada agente). */
+  modelo?: string
+  esfuerzo?: string
+  memoria?: string
 }
 
 /** Resumen de lo dicho hasta ahora, sin cerrar: no deja acta ni toca decisiones ni pendientes. */
@@ -107,7 +113,7 @@ export type PasoTurno = { agente: string; fase: FaseTurno }
 
 // MARK: - SQLite (tablas `reuniones` y `turnos`, con clave de oficina)
 
-const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida,resumen_parcial'
+const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida,resumen_parcial,modelo,esfuerzo,memoria'
 
 const opt = (v: SQLValor | undefined) => (v === null || v === undefined ? undefined : txt(v))
 
@@ -136,6 +142,7 @@ function filaReunion(r: Fila): ReunionFila {
   if (r.cerrada !== null && r.cerrada !== undefined) f.cerrada = num(r.cerrada)
   f.sintesis = opt(r.sintesis); f.errorSintesis = opt(r.error_sintesis); f.acta = opt(r.acta); f.error = opt(r.error)
   f.lider = opt(r.lider); f.bandos = bandos; f.salida = opt(r.salida); f.resumenParcial = opt(r.resumen_parcial)
+  f.modelo = opt(r.modelo); f.esfuerzo = opt(r.esfuerzo); f.memoria = opt(r.memoria)
   for (const k of Object.keys(f) as (keyof ReunionFila)[]) if (f[k] === undefined) delete f[k]
   return f
 }
@@ -175,7 +182,7 @@ export class ReunionesDB {
     `)
     const cols = this.db.query('PRAGMA table_info(reuniones)').map((f) => txt(f.name))
     if (!cols.includes('documentos')) this.db.exec('ALTER TABLE reuniones ADD COLUMN documentos TEXT')
-    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT'], ['resumen_parcial', 'TEXT']]) {
+    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT'], ['resumen_parcial', 'TEXT'], ['modelo', 'TEXT'], ['esfuerzo', 'TEXT'], ['memoria', 'TEXT']]) {
       if (!cols.includes(c!)) this.db.exec(`ALTER TABLE reuniones ADD COLUMN ${c} ${tipo}`)
     }
     this.prepararVista()
@@ -189,11 +196,12 @@ export class ReunionesDB {
     if (cols.length > 0 && !cols.includes('vista')) this.db.exec('ALTER TABLE reuniones ADD COLUMN vista INTEGER')
   }
 
-  crear(p: { id: string; oficina: string; tema: string; agentes: string[]; documentos?: string[]; patron?: string; lider?: string; bandos?: Record<string, string[]>; salida?: string }) {
+  crear(p: { id: string; oficina: string; tema: string; agentes: string[]; documentos?: string[]; patron?: string; lider?: string; bandos?: Record<string, string[]>; salida?: string; modelo?: string; esfuerzo?: string; memoria?: string }) {
     const docs = p.documentos ?? []
-    this.db.run('INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos,patron,lider,bandos,salida) VALUES(?,?,?,?,?,?,?,?,?,?,?)', [
+    this.db.run('INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos,patron,lider,bandos,salida,modelo,esfuerzo,memoria) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
       p.id, p.oficina, p.tema, JSON.stringify(p.agentes), 'esperando', Date.now() / 1000, docs.length === 0 ? null : JSON.stringify(docs),
       p.patron ?? 'debate', p.lider ?? null, p.bandos ? JSON.stringify({ a: p.bandos.a, b: p.bandos.b }) : null, p.salida ?? null,
+      p.modelo ?? null, p.esfuerzo ?? null, p.memoria ?? null,
     ])
   }
 
@@ -387,6 +395,20 @@ ${decisiones(p.carpeta)}${docs}
 
 Lo que se dijo hasta ahora (estamos en la ronda ${p.ronda}):
 ${dicho === '' ? '(todavía no habló nadie)' : dicho}
+${sinResponder(p.turnos, p.quien.id, p.oficina, p.leidos)}
+${ReunionPatron.consigna(patron, p.fase ?? 'libre', p.quien, p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
+}
+
+/** El prompt de un turno que retoma la sesión del agente en la reunión: solo lo que se dijo desde lo que ya vio (`nuevos`),
+ *  lo que escribió la persona y la consigna de esta fase. El tema, la memoria y los documentos ya están en su sesión. */
+export function promptTurnoSeguido(p: {
+  oficina: Oficina; tema: string; quien: AgenteDef; turnos: TurnoReunion[]; nuevos: TurnoReunion[]; ronda: number
+  patron?: PatronReunion; fase?: FaseTurno; lider?: AgenteDef; bandoA?: AgenteDef[]; bandoB?: AgenteDef[]; leidos?: number
+}): string {
+  const patron = p.patron ?? 'debate'
+  const dicho = transcripcion(p.nuevos, p.oficina, maxTranscripcionTurno)
+  return `Sigue la reunión «${prefijo(p.tema, 200)}» (ronda ${p.ronda}).
+${dicho === '' ? 'Desde tu último turno no habló nadie más.' : `Lo que se dijo desde tu último turno:\n${dicho}`}
 ${sinResponder(p.turnos, p.quien.id, p.oficina, p.leidos)}
 ${ReunionPatron.consigna(patron, p.fase ?? 'libre', p.quien, p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
 }
@@ -831,6 +853,8 @@ export class ReunionesRouter implements SubRouter {
   private readonly restantes = new Map<string, number>()
   /** `reunion:agente` → cuántos turnos había al armar su último prompt (para saber qué mensajes del usuario no vio). */
   private readonly leidos = new Map<string, number>()
+  /** `reunion:agente` → índices de los turnos que ya se le mostraron en su sesión de claude (en memoria). */
+  private readonly vistos = new Map<string, Set<number>>()
   private readonly cerrando = new Set<string>()
   private readonly resumiendo = new Set<string>()
 
@@ -911,6 +935,9 @@ export class ReunionesRouter implements SubRouter {
     if (f.lider !== undefined) o.lider = f.lider
     if (f.bandos) o.bandos = f.bandos
     if (f.salida !== undefined) o.salida = f.salida
+    if (f.modelo !== undefined) o.modelo = f.modelo
+    if (f.esfuerzo !== undefined) o.esfuerzo = f.esfuerzo
+    if (f.memoria !== undefined) o.memoria = f.memoria
     if (resumen) { o.turnos = turnos.length; return o }
     o.hablando = vivo ? habla ?? null : null
     o.rondas = turnos.reduce((m, t) => Math.max(m, t.ronda), 0)
@@ -1011,10 +1038,11 @@ export class ReunionesRouter implements SubRouter {
       }
       salida = t
     }
+    const eleccion = eleccionCharla(d)
     const id = randomUUID().toLowerCase()
     const ordenados = ordenar(ids.map((x) => agenteDe(a.oficina, x)!), a.oficina, tema).map((x) => x.id)
     try {
-      this.db.crear({ id, oficina: a.carpeta, tema, agentes: ordenados, documentos, patron, lider, bandos, salida })
+      this.db.crear({ id, oficina: a.carpeta, tema, agentes: ordenados, documentos, patron, lider, bandos, salida, modelo: eleccion.modelo, esfuerzo: eleccion.esfuerzo, memoria: eleccion.memoria })
     } catch {
       throw new ErrorAPI(500, 'No pude guardar la reunión.')
     }
@@ -1290,10 +1318,25 @@ export class ReunionesRouter implements SubRouter {
     const { lider, bandoA, bandoB } = rolesDe(f, of)
     const turnos = this.db.turnosDe(id)
     const clave = `${id}:${ag.id}`
-    const prompt = promptTurno({
+    const leidos = this.leidos.get(clave)
+    // una conversación de claude por agente y reunión: el primer turno lleva todo (tema, memoria, documentos, lo dicho);
+    // los siguientes retoman esa sesión y llevan solo lo que se dijo desde su último turno. Sin lo ya mostrado en memoria
+    // (la app se reinició) vuelve a mandar todo, una vez.
+    const completo = () => promptTurno({
       oficina: of, carpeta, tema: f.tema, participantes, quien: ag, turnos, ronda, fichas: fichas(carpeta, f.documentos),
-      patron, fase: paso.fase, lider, bandoA, bandoB, leidos: this.leidos.get(clave),
+      patron, fase: paso.fase, lider, bandoA, bandoB, leidos,
     })
+    const visibles = ReunionPatron.visibles(patron, turnos, ronda)
+    const indice = (t: TurnoReunion) => turnos.indexOf(t)
+    const yaHablo = turnos.some((t) => t.agente === ag.id)
+    const vistos = this.vistos.get(clave)
+    const sesion = { sid: uuidDe(`reunion:${id}:${ag.id}`), retomar: yaHablo }
+    let prompt: string
+    if (vistos && yaHablo) {
+      const nuevos = visibles.filter((t) => !vistos.has(indice(t)) && t.agente !== ag.id)
+      prompt = promptTurnoSeguido({ oficina: of, tema: f.tema, quien: ag, turnos, nuevos, ronda, patron, fase: paso.fase, lider, bandoA, bandoB, leidos })
+    } else prompt = completo()
+    this.vistos.set(clave, new Set([...(vistos ?? []), ...visibles.map(indice)]))
     this.leidos.set(clave, turnos.length)
     let texto: string
     let fallo = false
@@ -1316,7 +1359,18 @@ export class ReunionesRouter implements SubRouter {
       const dirs = dirsVinculos(of, ag)
       texto = await runner.conCarrilDe(carpeta, ag.id, () => runner.actividad.seguir(
         { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.tema, extra: caja.observador() },
-        (obs) => runner.turnoSoloLectura({ agente: ag.id, prompt, cwd: carpeta, timeout, dirsExtra: dirs, obs, instrucciones: Instrucciones.para(of, ag), preguntar })))
+        async (obs) => {
+          const turno = (pr: string, ses: { sid: string; retomar: boolean }) => runner.turnoSoloLectura({ agente: ag.id, prompt: pr, cwd: carpeta, timeout, dirsExtra: dirs, obs,
+            instrucciones: conMemoria(Instrucciones.para(of, ag), esMemoriaIA(f.memoria) ? f.memoria : this.s.config.iaEfectiva.memoria), preguntar,
+            modelo: f.modelo, esfuerzo: f.esfuerzo ?? esfuerzoDe(ag), sesion: ses })
+          try {
+            return await turno(prompt, sesion)
+          } catch (e) {
+            // la sesión no estaba (su primer turno falló antes de crearla): todo de nuevo, en una sesión nueva con esa clave
+            if (sesion.retomar && e instanceof ClaudeError && e.sinSesion) return turno(completo(), { sid: sesion.sid, retomar: false })
+            throw e
+          }
+        }))
       texto = recortarEspacios(texto)
       if (texto === '') { texto = '(sin respuesta)'; fallo = true }
     } catch (e) {

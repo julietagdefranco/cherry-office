@@ -33,7 +33,7 @@ describe('Actividad en vivo (API)', () => {
     expect(m.herramienta).toBe('Read')
     expect(m.objetivo).toBe('oficina.md')
     expect(m.origen).toBe('chat')
-    expect(str(m.tarea).startsWith('STREAM PAUSA armame')).toBe(true)
+    expect(str(m.tarea)).toBe('Respondiéndote')            // fijo: el pedido no va al cartel
     const crudo = JSON.stringify(a.obj)
     expect(crudo.includes('secreto'), 'la actividad no debe exponer contenido de herramientas').toBe(false)
     f.sb.abrirPuerta()
@@ -73,27 +73,19 @@ describe('Actividad en vivo (API)', () => {
     expect((await f.get('/api/chat/vivo', { agent: 'nadie' })).status).toBe(400)
   })
 
-  test('cartel: un pedido largo se resume con haiku y el resumen reemplaza al mensaje recortado; uno corto no se resume', async () => {
+  test('cartel: fijo («Respondiéndote») y en vivo lo que hace; sin llamadas a la IA para resumirlo', async () => {
     const f = await Fix.crear({ agentes: [{ id: 'marce', depto: 'direccion' }] })
     const r = chat(f.b, { agent: 'marce', message: 'STREAM PAUSA necesito que me armes el plan completo de reels para diciembre', session: U.c })
-    const ok = await esperar(async () => str(dict(dict((await f.get('/api/actividad')).obj.agentes).marce).tarea) === 'Armando el plan de diciembre')
-    const diag = await f.get('/api/actividad')
-    expect(ok, `actividad: ${JSON.stringify(diag.obj)} llamadas: ${JSON.stringify(f.sb.llamadas.map((l) => l.slice(0, 6)))}`).toBe(true)
+    const ok = await esperar(async () => {
+      const a = dict(dict((await f.get('/api/actividad')).obj.agentes).marce)
+      return str(a.tarea) === 'Respondiéndote' && str(a.estado) === 'leyendo' && str(a.objetivo) === 'oficina.md'
+    })
+    expect(ok, JSON.stringify((await f.get('/api/actividad')).obj)).toBe(true)
     f.sb.abrirPuerta()
     await r
-    const haiku = f.sb.llamadas.filter((l) => Sb.valor(l, '--model') === 'haiku')
-    expect(haiku.length).toBe(1)
-    expect(Sb.valor(haiku[0]!, '--tools')).toBe('')
-    expect(haiku[0]!.includes('--agent'), JSON.stringify(haiku[0]!.map((s) => s.slice(0, 30)))).toBe(false)
-    const c = await esperar(async () => ((dict((await f.get('/api/costos')).obj.origenes).resumen as number | undefined) ?? 0) > 0)
-    expect(c).toBe(true)
-    const antes = f.sb.llamadas.length
-    await chat(f.b, { agent: 'marce', message: 'hola', session: U.d })
-    expect(f.sb.llamadas.length, 'un mensaje corto no lanza el resumen').toBe(antes + 1)
+    expect(f.sb.llamadas.length, 'solo el chat: ningún resumen aparte').toBe(1)
+    expect(dict((await f.get('/api/costos')).obj.origenes).resumen).toBeUndefined()
   })
-
-  // interno (unit test del port): ResumenTarea.limpiar (primera línea, sin comillas ni punto, recortado a 48) y ResumenTarea.hace(falta:)
-  test.skip('limpiar resumen: primera línea, sin comillas ni punto, recortado', () => {})
 
   test('todas las corridas usan stream-json --verbose', async () => {
     const f = await Fix.crear({ agentes: [{ id: 'marce', depto: 'direccion' }] })

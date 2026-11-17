@@ -4,8 +4,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { ClaudeRunner, type TurnoConPermiso } from './claude-runner.js'
-import { Config } from './config.js'
+import { Config, type MemoriaIA } from './config.js'
 import { jsonCompacto } from './json-swift.js'
+import { settingsSkills, type ModoSkills } from './skills.js'
 import type { AgenteDef, AlcanceVinculo, Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
 import { Validar, largo, prefijo } from './validar.js'
@@ -38,6 +39,53 @@ export type ContextoOficina = {
   anotarRechazos?: boolean
   /** Modo «todos los conectores» (preferencia de la app): el hijo espera a que se conecten aunque todavía no haya catálogo. */
   todosConectores?: boolean
+  /** Modelo de esta corrida (`--model`): pisa el del `.md` del agente. undefined = el del `.md`. */
+  modelo?: string
+  /** Esfuerzo de esta corrida (`--effort`). undefined = el de la app (Ajustes › Consumo de IA) o el de Claude Code. */
+  esfuerzo?: string
+  /** Lo elegido en la charla o reunión; undefined = lo de Ajustes › Consumo de IA (`Config.ia`). */
+  skills?: ModoSkills
+  memoria?: MemoriaIA
+  colegas?: boolean
+  mcpLocales?: boolean
+  /** Skills elegidas en la ficha del agente (modo `agente`). */
+  skillsAgente?: string[]
+}
+
+/** Herramientas MCP para hablar con colegas (consultar, pedir, esperar): se sacan con «Consultar a colegas» apagado. */
+export const herramientasColegas = ['consultar', 'colegas', 'quien_sabe', 'pedir', 'quedo_esperando', 'cancelar_espera'].map((n) => 'mcp__hq__' + n)
+
+/** Se suma a las instrucciones con la memoria en modo liviano: la plantilla del agente le pide leer la memoria al empezar
+ *  (verificado con el claude real: esto lo pisa y el mensaje sale en un solo viaje). */
+export const textoMemoriaLiviana = '## Memoria (modo liviano)\nEn esta corrida NO leas al empezar conocimiento/oficina.md, conocimiento/decisiones.md ni conocimiento/archivos.md. Respondé con lo que ya sabés; buscá (buscar) o leé un archivo puntual solo si lo que te piden no se puede resolver sin eso.'
+
+/** Instrucciones + el aviso de memoria liviana si corresponde. */
+export function conMemoria(instrucciones: string | undefined, memoria: MemoriaIA): string | undefined {
+  if (memoria !== 'liviana') return instrucciones
+  return instrucciones ? instrucciones + '\n\n' + textoMemoriaLiviana : textoMemoriaLiviana
+}
+
+/** Lo que vale en esta corrida: lo del contexto (charla, reunión o agente) o, si no, lo de la app. */
+export function opcionesEfectivas(cfg: Config, ctx: ContextoOficina): { esfuerzo?: string; skills: ModoSkills; memoria: MemoriaIA; colegas: boolean; mcpLocales: boolean } {
+  const g = cfg.iaEfectiva
+  const esfuerzo = ctx.esfuerzo ?? (g.esfuerzo !== '' ? g.esfuerzo : undefined)
+  return { ...(esfuerzo !== undefined ? { esfuerzo } : {}), skills: ctx.skills ?? g.skills, memoria: ctx.memoria ?? g.memoria, colegas: ctx.colegas ?? g.colegas,
+    mcpLocales: ctx.mcpLocales ?? g.mcpLocales }
+}
+
+/** ¿La corrida lleva la herramienta Skill? No con `ninguna`, ni con `agente` si el agente no eligió ninguna. */
+function conSkill(cfg: Config, ctx: ContextoOficina): boolean {
+  const m = opcionesEfectivas(cfg, ctx).skills
+  return m !== 'ninguna' && !(m === 'agente' && (ctx.skillsAgente ?? []).length === 0)
+}
+
+/** ¿Usa conectores de claude.ai? (`--strict-mcp-config` los dejaría afuera: con ellos no se aplica). */
+const usaConectores = (ctx: ContextoOficina) => !!ctx.todosConectores || ctx.permitidas.some((p) => p.startsWith('mcp__claude_ai_'))
+
+/** Herramientas MCP de la corrida (sin las de colegas si están apagadas). */
+function mcpDe(cfg: Config, ctx: ContextoOficina): string[] {
+  const l = ctx.herramientasMCP ?? herramientasMCP
+  return opcionesEfectivas(cfg, ctx).colegas ? l : l.filter((h) => !herramientasColegas.includes(h))
 }
 
 /** Un servidor MCP de la cuenta (catálogo de conectores de claude.ai). */
@@ -239,7 +287,14 @@ export function contexto(a: OficinaActiva, def: AgenteDef, { dirsExtra = [], act
     instrucciones: Instrucciones.para(a.oficina, agente, { conMCP: true, todos }), permitidas, vedadas,
     herramientasMCP: HerramientasMCPAgente.lista(a.oficina, agente), perfilMCP: Coordinador.perfil(a.oficina, agente),
     reglas: agente.reglas ?? [], preguntar: false, ...(todos ? { todosConectores: true } : {}),
+    ...(esfuerzoDe(agente) !== undefined ? { esfuerzo: esfuerzoDe(agente) } : {}),
+    ...(agente.skills && agente.skills.length > 0 ? { skillsAgente: agente.skills } : {}),
   }
+}
+
+/** El esfuerzo guardado de un agente si es válido (oficina.json se puede editar a mano); undefined = el de Claude Code. */
+export function esfuerzoDe(a: AgenteDef): string | undefined {
+  return a.esfuerzo !== undefined && Validar.esfuerzos.has(a.esfuerzo) ? a.esfuerzo : undefined
 }
 
 /** Patrón de escritura de `archivos/entregables/<id>/` (crea la carpeta del agente). undefined si la oficina no tiene
@@ -279,8 +334,9 @@ export function dirsVinculos(o: Oficina, agente: AgenteDef): string[] {
 
 /** Herramientas base: las del contexto, o las del agente en la config, o las generales. */
 function baseOficina(cfg: Config, ctx: ContextoOficina, agente: string): string {
-  if (ctx.herramientasBase) return ctx.herramientasBase
-  return cfg.herramientasAgente[agente] || cfg.herramientas
+  const b = ctx.herramientasBase ? ctx.herramientasBase : cfg.herramientasAgente[agente] || cfg.herramientas
+  if (conSkill(cfg, ctx)) return b
+  return b.split(',').map((x) => x.trim()).filter((x) => x !== '' && x !== 'Skill').join(',')
 }
 
 /** Pide permiso en vivo solo un chat con la persona presente y con el servidor MCP andando. */
@@ -306,7 +362,7 @@ export function herramientasOficina(cfg: Config, ctx: ContextoOficina, agente: s
   if (ctx.escritura.length > 0) { h += ',Edit,Write'; lista.push('Edit', 'Write') }
   for (const r of ctx.reglas ?? []) { const i = r.indexOf('('); if (i >= 0) sumar(r.slice(0, i)) }
   if (puedePreguntar(ctx) || ctx.anotarRechazos || modoAuto(cfg)) for (const n of herramientasPreguntables) sumar(n)
-  if (ctx.mcpUrl !== undefined) h += ',' + (ctx.herramientasMCP ?? herramientasMCP).join(',')
+  if (ctx.mcpUrl !== undefined) h += ',' + mcpDe(cfg, ctx).join(',')
   return h
 }
 
@@ -324,11 +380,19 @@ export function argumentos(cfg: Config, ctx: ContextoOficina, p: { agente: strin
   for (const h of baseOficina(cfg, ctx, p.agente).split(',').map((x) => x.trim())) if (h !== '') a.push(h)
   for (const r of ctx.escritura) for (const h of ['Edit', 'Write']) a.push(regla(h, r))
   a.push(...(ctx.reglas ?? []))
-  if (ctx.mcpUrl !== undefined) a.push(...(ctx.herramientasMCP ?? herramientasMCP))
+  if (ctx.mcpUrl !== undefined) a.push(...mcpDe(cfg, ctx))
   if (puedePreguntar(ctx)) a.push(herramientaPermiso)
   a.push(...ctx.permitidas)
   if (ctx.vedadas.length > 0) a.push('--disallowedTools', ...ctx.vedadas)
-  if (ctx.instrucciones) a.push('--append-system-prompt', ctx.instrucciones)
+  const op = opcionesEfectivas(cfg, ctx)
+  // MCP del Claude Code de la persona apagados: solo el servidor de la oficina (salvo que use conectores de claude.ai)
+  if (!op.mcpLocales && !usaConectores(ctx)) a.push('--strict-mcp-config')
+  const ajustes = conSkill(cfg, ctx) ? settingsSkills(op.skills, ctx.skillsAgente ?? [], cfg.skillsInstaladas()) : undefined
+  if (ajustes) a.push('--settings', jsonCompacto(ajustes))
+  const instrucciones = conMemoria(ctx.instrucciones, op.memoria)
+  if (instrucciones) a.push('--append-system-prompt', instrucciones)
+  if (ctx.modelo !== undefined) a.push(...ClaudeRunner.argsModelo(ctx.modelo))
+  a.push(...ClaudeRunner.argsEsfuerzo(op.esfuerzo))
   return [...a, '--', p.mensaje]
 }
 
