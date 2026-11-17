@@ -55,7 +55,7 @@ Para compartir una oficina o pasarla a otra compu. Código: `backend/src/paquete
 | POST | `/api/oficinas/importar` | `{archivo}` (ruta absoluta a un .zip) | `{carpeta, oficina, documentos, reprocesar, avisos}`; queda activa en `<oficinasDir>/<Nombre>` (`Nombre 2` si existe) |
 
 - **Qué viaja:** la carpeta de la oficina (agentes, `conocimiento/`, actas, archivos subidos, fichas, texto extraído y entregables) más `.oficina-paquete.json`, con las filas de la biblioteca (ficha incluida). Al importar, los documentos con ficha y texto quedan `listo` e indexados sin llamar al bibliotecario; los demás quedan `pendiente` y se vuelven a fichar.
-- **Qué no viaja:** lo de `hq.db` (chats, estado de reuniones, entregas, avisos, costos, esperas y pedidos entre agentes), `archivos/.papelera/`, las carpetas vinculadas (se quitan de `oficina.json` con sus fichas), enlaces simbólicos y `.DS_Store`.
+- **Qué no viaja:** las carpetas de trabajo (`carpetasTrabajo`), lo de `hq.db` (chats, estado de reuniones, entregas, avisos, costos, esperas y pedidos entre agentes), `archivos/.papelera/`, las carpetas vinculadas (se quitan de `oficina.json` con sus fichas), enlaces simbólicos y `.DS_Store`.
 - **Rutas:** la ruta absoluta de la oficina en los `.md/.txt/.json` de `.claude/`, `conocimiento/` y `reuniones/` viaja como `{{OFICINA}}` y se reemplaza por la carpeta nueva al importar. Las otras rutas `/Users/…` de los `.md` de agente se informan en `avisos` (al exportar, todas; al importar, las que no existen en esta compu). Al importar también se quitan los vínculos cuya carpeta no existe.
 - **Seguridad al importar:** antes de extraer se revisa el directorio central del zip: sin rutas absolutas ni `..`, sin enlaces simbólicos, hasta 50 000 entradas, 2 GB de zip y 4 GB descomprimido. Se extrae (`backend/src/zip.ts`, sin programas del sistema) en una carpeta temporal y recién después se mueve a la carpeta de oficinas; si algo falla no queda nada a medias. Un .zip hecho a mano con la carpeta de una oficina también se importa (sin índice de la biblioteca, con aviso).
 - **Elegir el .zip:** en la app, `{accion:'elegirArchivo', titulo}` al handler `hq` abre el diálogo del sistema solo de .zip (`desktop/src/main.ts`); en el navegador, el explorador propio con `GET /api/fs/carpetas?archivos=zip`. «Mostrar en Finder» del resultado usa `revelar`, que acepta un `.oficina.zip` aunque esté fuera de la oficina (solo lo muestra, nunca lo abre).
@@ -204,6 +204,22 @@ Archivos y conocimiento de la oficina activa: se suben o se vinculan carpetas ex
 **Abrir el original en la app.** El router devuelve JSON, así que `original` entrega el archivo en base64 (hasta 8 MB) y el front arma un Blob y lo abre; por eso la ficha siempre muestra también la ubicación, para abrirlo con `abrir` desde la app.
 
 **Variables de entorno:** `HQ_BIBLIOTECA_MAX_MB`, `HQ_BIBLIOTECA_MAX_ARCHIVOS`, `HQ_BIBLIOTECA_MAX_TOTAL_MB`, `HQ_BIBLIOTECA_TIMEOUT` (ficha, 180 s), `HQ_BIBLIOTECA_IMAGEN_TIMEOUT` (120 s), `HQ_BIBLIOTECA_SIN_FTS=1` (fuerza la búsqueda con LIKE).
+
+## Carpetas de trabajo
+
+Carpetas de la compu (un repo, por ejemplo) donde los agentes del alcance **leen y escriben** como en la carpeta de la oficina, y desde donde la app **muestra** archivos. No son conocimiento: no pasan por la Biblioteca ni se fichan. Código: `backend/src/trabajo.ts` (`TrabajoRouter`, `enCarpetaTrabajo`); pantalla en Ajustes › Carpetas de trabajo (`oficina/ui/ajustes.js`, `App.agregarCarpetaTrabajo`).
+
+| Método | Ruta | Cuerpo | Respuesta |
+|---|---|---|---|
+| GET | `/api/carpetas-trabajo` | | `{carpetas:[{id, ruta, alcance, existe}]}` |
+| POST | `/api/carpetas-trabajo` | `{ruta, alcance?="oficina", id?}` | `{carpeta}`. `alcance`: `"oficina"`, `{agentes:[ids]}` o `{departamentos:[ids]}`. 400 si no es absoluta, es `/` o `~` entero, ya es parte de la oficina o la contiene, o el alcance nombra a alguien que no existe; 404 si no existe; 409 si se pisa con otra carpeta de trabajo |
+| PATCH | `/api/carpetas-trabajo/:id` | `{alcance}` | `{carpeta}` |
+| DELETE | `/api/carpetas-trabajo/:id` | | `{ok}` (la carpeta no se toca) |
+
+- **Guardado:** `oficina.json` → `carpetasTrabajo:[{id, ruta, alcance}]`. No viaja al exportar la oficina.
+- **Agentes:** `Permisos.contexto` suma `--add-dir <ruta>` y `Edit`/`Write` sobre `<ruta>/**` a cada agente del alcance (`dirsTrabajo`), y sus instrucciones nombran esas carpetas. En reuniones y consultas entre agentes reciben solo el `--add-dir` (lectura).
+- **La app:** `/api/oficina/archivo`, `/api/oficina/vista` y `/api/oficina/archivos` aceptan en `ruta` una ruta **absoluta** dentro de una carpeta de trabajo (se resuelven los enlaces; nada oculto como `.git` o `.env`; 403 si cae afuera). Las respuestas nombran esos archivos con su ruta absoluta en `rel`. Una página se empaqueta con los recursos de esa carpeta. En los pasos del chat, un archivo escrito ahí va con `rel` absoluto; uno escrito fuera de la oficina y de sus carpetas de trabajo va sin `rel` y con su `ruta`, y el chat ofrece «Agregar carpeta de trabajo».
+- **App de escritorio:** «Abrir con otra app» y «Mostrar en el Finder» aceptan también rutas de las carpetas de trabajo.
 
 ## Revisar entregas: vista previa, notas y retoques
 Para ver un entregable tal cual queda, marcarle encima qué cambiar y retocar un texto chico sin el agente. Código:

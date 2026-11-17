@@ -6,6 +6,7 @@
 //   GET  /api/oficina/archivos?ruta=<rel>     lista de la carpeta de la oficina activa
 //   GET  /api/oficina/archivo?ruta=<rel>      vista previa: {texto} (512 KB) o {base64, mime} (imágenes, 2 MB)
 //   GET  /api/oficina/vista?ruta=<rel>        lista para mostrar (Vista.leer): una página trae adentro su CSS, JS e imágenes
+//   En las tres de la oficina, `ruta` también puede ser absoluta dentro de una carpeta de trabajo (trabajo.ts).
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Config } from './config.js'
@@ -13,6 +14,7 @@ import { ErrorAPI } from './errores.js'
 import { esObjeto, type Obj } from './json.js'
 import type { HQLog } from './log.js'
 import type { Oficinas } from './oficinas.js'
+import { enCarpetaTrabajo } from './trabajo.js'
 import { Vista } from './vista.js'
 import { atrapar, no405, type Query, type RespuestaAPI, type SubRouter } from './router.js'
 
@@ -183,23 +185,32 @@ export class ExploradorRouter implements SubRouter {
 
   // MARK: carpeta de la oficina activa (solo lectura)
 
-  private resolverEnOficina(relCruda: string): { base: string; real: string; partes: string[] } {
+  /** Una ruta relativa a la oficina activa o, si es absoluta, dentro de una de sus carpetas de trabajo (trabajo.ts).
+   *  `rel(partes)` da cómo se nombra una ruta de ahí para el front: relativa a la oficina, o absoluta en una carpeta de
+   *  trabajo (así el front la vuelve a pedir igual). */
+  private resolverEnOficina(relCruda: string): { base: string; real: string; partes: string[]; trabajo: boolean; rel: (p: string[]) => string } {
     const act = this.oficinas.requerirActiva()
-    const base = realAunqueFalte(act.carpeta)
     const recortada = relCruda.trim()
-    const rel = recortada.replace(/^\/+/, '').replace(/\/+$/, '')
     const prohibido = new ErrorAPI(403, 'Esa ruta no está permitida.')
+    if (path.isAbsolute(recortada)) {
+      const t = enCarpetaTrabajo(act.oficina, recortada)
+      if (!t) throw prohibido
+      if (!fs.existsSync(t.real)) throw new ErrorAPI(404, 'No encontré eso en la carpeta de trabajo.')
+      return { base: t.base, real: t.real, partes: t.partes, trabajo: true, rel: (p) => path.join(t.base, ...p).split(path.sep).join('/') }
+    }
+    const base = realAunqueFalte(act.carpeta)
+    const rel = recortada.replace(/^\/+/, '').replace(/\/+$/, '')
     if (rel.includes('\0') || rel.includes('\\') || recortada.startsWith('/')) throw prohibido
     const partes = rel.split('/').filter((x) => x !== '' && x !== '.')
     partes.forEach((p, i) => { if (p === '..' || !parteOcultaPermitida(i, p)) throw prohibido })
     const r = partes.length === 0 ? base : realAunqueFalte(path.join(base, ...partes))
     if (!dentro(base, r)) throw prohibido
     if (!fs.existsSync(r)) throw new ErrorAPI(404, 'No encontré eso en la oficina.')
-    return { base, real: r, partes }
+    return { base, real: r, partes, trabajo: false, rel: (p) => p.join('/') }
   }
 
   private archivos(q: Query): Obj {
-    const { base, real: r, partes } = this.resolverEnOficina(q.ruta ?? '')
+    const { base, real: r, partes, trabajo, rel } = this.resolverEnOficina(q.ruta ?? '')
     if (!esDirectorio(r)) throw new ErrorAPI(400, 'Eso no es una carpeta.')
     let nombres: string[]
     try {
@@ -210,19 +221,19 @@ export class ExploradorRouter implements SubRouter {
     type Fila = { nombre: string; rel: string; dir: boolean; tam: number; mod: number }
     let filas: Fila[] = []
     for (const n of nombres) {
-      if (!parteOcultaPermitida(partes.length, n)) continue
-      if (partes.length === 1 && partes[0] === '.claude' && n !== 'agents') continue
+      if (trabajo ? n.startsWith('.') : !parteOcultaPermitida(partes.length, n)) continue
+      if (!trabajo && partes.length === 1 && partes[0] === '.claude' && n !== 'agents') continue
       const rr = realAunqueFalte(path.join(r, n))
       const s = stat(rr)
       if (!dentro(base, rr) || !s) continue // enlace que sale de la oficina
       const dir = s.isDirectory()
-      filas.push({ nombre: n, rel: [...partes, n].join('/'), dir, tam: dir ? 0 : s.size, mod: Math.floor(s.mtimeMs / 1000) })
+      filas.push({ nombre: n, rel: rel([...partes, n]), dir, tam: dir ? 0 : s.size, mod: Math.floor(s.mtimeMs / 1000) })
     }
     filas.sort((a, b) => (a.dir !== b.dir ? (a.dir ? -1 : 1) : ordenar(a.nombre, b.nombre)))
     const truncado = filas.length > maxEntradas
     if (truncado) filas = filas.slice(0, maxEntradas)
     return {
-      carpeta: base, ruta: partes.join('/'), truncado,
+      carpeta: base, ruta: rel(partes), truncado,
       archivos: filas.map((f) => ({ rel: f.rel, nombre: f.nombre, esCarpeta: f.dir, tam: f.tam, mod: f.mod })),
     }
   }
@@ -230,21 +241,22 @@ export class ExploradorRouter implements SubRouter {
   /** Como `archivo`, pero lista para mostrar: una página HTML viene empaquetada (vista.ts), así el visor aislado del
    *  chat la ve con sus estilos e imágenes. Mismas reglas de ruta que el resto de la oficina. */
   private vista(q: Query): Obj {
-    const { partes, real: r } = this.resolverEnOficina(q.ruta ?? '')
+    const { base, partes, real: r, trabajo } = this.resolverEnOficina(q.ruta ?? '')
     if (partes.length === 0) throw new ErrorAPI(400, 'Falta la ruta del archivo.')
     if (!esArchivoRegular(r)) throw new ErrorAPI(400, 'Eso no es un archivo.')
-    return { vista: Vista.leer(this.oficinas.requerirActiva().carpeta, partes.join('/')) }
+    // en una carpeta de trabajo, la página toma sus recursos de esa carpeta (y nada de afuera)
+    return { vista: Vista.leer(trabajo ? base : this.oficinas.requerirActiva().carpeta, partes.join('/')) }
   }
 
   private archivo(q: Query): Obj {
-    const { base, real: r, partes } = this.resolverEnOficina(q.ruta ?? '')
+    const { base, real: r, partes, rel } = this.resolverEnOficina(q.ruta ?? '')
     if (partes.length === 0) throw new ErrorAPI(400, 'Falta la ruta del archivo.')
     if (!esArchivoRegular(r)) throw new ErrorAPI(400, 'Eso no es un archivo.')
     const nombre = partes[partes.length - 1]!
     const ext = nombre.includes('.') ? nombre.split('.').pop()!.toLowerCase() : ''
     const s = stat(r)
     const tam = s?.size ?? 0
-    const out: Obj = { rel: partes.join('/'), nombre, tam, mod: Math.floor((s?.mtimeMs ?? 0) / 1000), ruta: path.join(base, ...partes) }
+    const out: Obj = { rel: rel(partes), nombre, tam, mod: Math.floor((s?.mtimeMs ?? 0) / 1000), ruta: path.join(base, ...partes) }
     let fd: number
     try {
       fd = fs.openSync(r, 'r')

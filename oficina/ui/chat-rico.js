@@ -7,20 +7,50 @@
 
   /* ---------------- rutas de la oficina ---------------- */
   function normal(p) { return String(p || '').replace(/\\/g, '/'); }
-  /* ruta relativa a la oficina activa, o null si cae afuera (o no se puede saber) */
-  function relOficina(ruta) {
+  function absoluta(ruta) {
     var p = normal(ruta).replace(/^file:\/\//i, '');
     try { p = decodeURI(p); } catch (e) {}
-    var esAbs = p.charAt(0) === '/' || /^[a-z]:\//i.test(p);
-    if (!esAbs) {
-      p = p.replace(/^(\.\/)+/, '');
-      return p && p.split('/').indexOf('..') < 0 ? p : null;
-    }
-    var base = normal(App.E.carpeta).replace(/\/+$/, '');
+    return p;
+  }
+  function esAbsoluta(p) { return p.charAt(0) === '/' || /^[a-z]:\//i.test(p); }
+  function bajo(base, p) {
+    base = normal(base).replace(/\/+$/, '');
     if (!base) return null;
     var win = /^[a-z]:\//i.test(base);
     var a = win ? p.toLowerCase() : p, b = win ? base.toLowerCase() : base;
     return a.indexOf(b + '/') === 0 ? p.slice(base.length + 1) : null;
+  }
+  /* ruta para pedirle al backend: relativa a la oficina activa, absoluta si cae en una de sus carpetas de trabajo (nada
+     oculto, como .git o .env), o null si cae afuera (o no se puede saber) */
+  function relOficina(ruta) {
+    var p = absoluta(ruta);
+    if (!esAbsoluta(p)) {
+      p = p.replace(/^(\.\/)+/, '');
+      return p && p.split('/').indexOf('..') < 0 ? p : null;
+    }
+    var rel = bajo(App.E.carpeta, p);
+    if (rel !== null) return rel;
+    var cs = (App.E.oficina && App.E.oficina.carpetasTrabajo) || [];
+    for (var i = 0; i < cs.length; i++) {
+      var r = bajo(cs[i].ruta, p);
+      if (r !== null) return r.split('/').some(function (x) { return x === '..' || x.charAt(0) === '.'; }) ? null : p;
+    }
+    return null;
+  }
+  /* botón para sumar como carpeta de trabajo la carpeta de un archivo que quedó afuera; `listo(rel)` al agregarla */
+  function botonTrabajo(ruta, listo) {
+    var p = absoluta(ruta);
+    if (!esAbsoluta(p) || !App.agregarCarpetaTrabajo) return null;
+    var dir = p.split('/').slice(0, -1).join('/') || '/';
+    return h('button.md-trabajo', { type: 'button', title: 'Que los agentes trabajen en esa carpeta y la app pueda mostrar lo que hay ahí',
+      onclick: function (e) {
+        e.stopPropagation();
+        App.agregarCarpetaTrabajo(dir).then(function (c) {
+          if (!c) return;
+          var rel = relOficina(p);
+          if (rel !== null) listo(rel); else App.aviso('Esa carpeta no incluye este archivo: elegí una carpeta que lo contenga.', true);
+        });
+      } }, App.icono('carpeta'), 'Agregar carpeta de trabajo');
   }
   function ext(nombre) { var m = /\.([a-z0-9]+)$/i.exec(nombre || ''); return m ? m[1].toLowerCase() : ''; }
   var EXT_IMAGEN = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1 };
@@ -186,13 +216,20 @@
     if (!ruta) return;
     var rel = relOficina(ruta);
     var nombre = normal(ruta).split('/').pop();
-    function sinVista(msg) {
-      var span = h('span.md-img-falta', App.icono('clip'), titulo || nombre, msg ? ' (' + msg + ')' : '');
+    var span = null;
+    function sinVista(msg, extra) {
+      span = h('span.md-img-falta', App.icono('clip'), titulo || nombre, msg ? ' (' + msg + ')' : '', extra || null);
       if (img.parentNode) img.parentNode.replaceChild(span, img);
     }
-    if (rel === null) { sinVista('fuera de la oficina'); return; }
-    img.classList.add('cargando');
-    cargarImagen(rel).then(function (src) { img.src = src; img.classList.remove('cargando'); }, function () { sinVista('no se pudo mostrar'); });
+    function cargar(r) {
+      img.classList.add('cargando');
+      cargarImagen(r).then(function (src) {
+        img.src = src; img.classList.remove('cargando');
+        if (span && span.parentNode) { span.parentNode.replaceChild(img, span); span = null; }
+      }, function () { sinVista('no se pudo mostrar'); });
+    }
+    if (rel === null) { sinVista('fuera de la oficina', botonTrabajo(ruta, cargar)); return; }
+    cargar(rel);
   }
 
   /* `archivos/ventas/x.md` en el texto: si parece un archivo de la oficina, se abre con un clic (si no existe, avisa) */
@@ -291,11 +328,17 @@
       if (dentro && EXT_IMAGEN[e]) {
         cargarImagen(p.rel).then(function (src) { App.vaciar(mini).appendChild(h('img', { src: src, alt: '' })); }, function () {});
       }
-      return h('button.archivo-chat' + (dentro ? '' : '.fuera'), {
-        type: 'button', title: dentro ? p.rel : 'Fuera de la oficina',
-        onclick: dentro ? function () { abrirArchivo(p.rel); } : null
+      // afuera (con su ruta): se puede sumar su carpeta como de trabajo y queda abrible
+      var rel = p.rel || (p.ruta ? relOficina(p.ruta) : null);
+      dentro = rel !== null && rel !== undefined;
+      var tarjeta = h('div.archivo-chat' + (dentro ? '' : '.fuera'), {
+        role: dentro ? 'button' : null, tabindex: dentro ? '0' : null, title: dentro ? rel : 'Fuera de la oficina',
+        onclick: dentro ? function () { abrirArchivo(rel); } : null,
+        onkeydown: dentro ? function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); abrirArchivo(rel); } } : null
       }, mini, h('div.archivo-chat-txt', h('div.archivo-chat-nom', p.nombre),
-        h('div.archivo-chat-sub', !dentro ? 'fuera de la oficina' : EXT_ARTEFACTO[e] ? 'Clic para ver' : EXT_IMAGEN[e] ? 'Imagen' : (p.rel.split('/').slice(0, -1).pop() ? 'En ' + p.rel.split('/').slice(0, -1).pop() : 'En la carpeta de la oficina'))));
+        h('div.archivo-chat-sub', !dentro ? 'fuera de la oficina' : EXT_ARTEFACTO[e] ? 'Clic para ver' : EXT_IMAGEN[e] ? 'Imagen' : (rel.split('/').slice(0, -1).pop() ? 'En ' + rel.split('/').slice(0, -1).pop() : 'En la carpeta de la oficina'))),
+        !dentro && p.ruta ? botonTrabajo(p.ruta, function (r) { p.rel = r; var n = tarjetasArchivos([p]); if (n && tarjeta.parentNode) tarjeta.parentNode.replaceChild(n.firstChild, tarjeta); }) : null);
+      return tarjeta;
     }));
   }
 

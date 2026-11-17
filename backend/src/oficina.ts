@@ -56,6 +56,9 @@ export type AgenteDef = {
 /** Quién puede leer una carpeta vinculada: "oficina", {departamentos: [...]} o {agentes: [...]}. */
 export type AlcanceVinculo = 'oficina' | { departamentos: string[] } | { agentes: string[] }
 export type Vinculo = { id: string; ruta: string; alcance: AlcanceVinculo }
+/** Carpeta de trabajo (trabajo.ts): una carpeta de la compu donde los agentes del alcance leen y escriben (un repo, por
+ *  ejemplo) y desde donde la app muestra archivos. No pasa por la Biblioteca. Misma forma que un vínculo. */
+export type CarpetaTrabajo = Vinculo
 export type BibliotecaCfg = { lecturaAutomatica?: boolean; maxMB?: number; maxArchivos?: number; maxTotalMB?: number }
 
 export type Oficina = {
@@ -66,6 +69,7 @@ export type Oficina = {
   departamentos: Departamento[]
   agentes: AgenteDef[]
   vinculos?: Vinculo[]
+  carpetasTrabajo?: CarpetaTrabajo[]
   biblioteca?: BibliotecaCfg
   tareas?: TareaProgramada[]
   flujos?: FlujoDef[]
@@ -143,6 +147,7 @@ function decodificarOficina(v: unknown): Oficina {
     departamentos: (lista(o.departamentos) ?? []).map(decodificarDepartamento),
     agentes: (lista(o.agentes) ?? []).map(decodificarAgente),
     vinculos: lista(o.vinculos)?.map((x) => { const d = obj(x); return { id: str(d.id), ruta: str(d.ruta), alcance: decodificarAlcance(d.alcance) } }),
+    carpetasTrabajo: lista(o.carpetasTrabajo)?.map((x) => { const d = obj(x); return { id: str(d.id), ruta: str(d.ruta), alcance: decodificarAlcance(d.alcance) } }),
     biblioteca: opt(o.biblioteca, (x) => {
       const b = obj(x)
       return sinUndefined({ lecturaAutomatica: optBool(b.lecturaAutomatica), maxMB: optInt(b.maxMB), maxArchivos: optInt(b.maxArchivos), maxTotalMB: optInt(b.maxTotalMB) })
@@ -289,6 +294,12 @@ export function validarOficina(o: Oficina) {
     if (!Slug.valido(v.id) || vins.has(v.id)) throw new ErrorAPI(400, `Carpeta vinculada con id inválido o repetido: ${v.id}.`)
     vins.add(v.id)
     if (!path.isAbsolute(v.ruta)) throw new ErrorAPI(400, `La carpeta vinculada ${v.id} tiene que tener una ruta absoluta.`)
+  }
+  const cts = new Set<string>()
+  for (const c of o.carpetasTrabajo ?? []) {
+    if (!Slug.valido(c.id) || cts.has(c.id)) throw new ErrorAPI(400, `Carpeta de trabajo con id inválido o repetido: ${c.id}.`)
+    cts.add(c.id)
+    if (!path.isAbsolute(c.ruta)) throw new ErrorAPI(400, `La carpeta de trabajo ${c.id} tiene que tener una ruta absoluta.`)
   }
   for (const f of validacionesExtra) f(o)
 }

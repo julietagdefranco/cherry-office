@@ -8,6 +8,7 @@ import { ClaudeRunner } from './claude-runner.js'
 import { Config } from './config.js'
 import { Entregas } from './entregas.js'
 import { ExploradorRouter } from './explorador.js'
+import { TrabajoRouter } from './trabajo.js'
 import { HQLog } from './log.js'
 import './modulos.js'
 import { validacionesExtra } from './oficina.js'
@@ -60,6 +61,7 @@ export function createBackend({ config, claudePath, env = process.env }: Opcione
   ;(s as { router: Router }).router = router
 
   router.explorador = new ExploradorRouter(config, oficinas, log)
+  router.registrarExtra(new TrabajoRouter(oficinas, log))
   router.nucleo.push(rutasOficinas({ config, oficinas, claude: infoClaude(runner), alAbrir: s.alAbrir, ocupada: (c) => runner.actividad.vista(c).size > 0 }))
   router.nucleo.push(rutasChat({
     config, store, runner, oficinas, avisos, entregas, log,

@@ -4,11 +4,12 @@
   'use strict';
   var h = App.h, api = App.api;
 
-  /* op: {oficinas: true} marca y prioriza carpetas de oficina; {crear: true} permite crear carpetas */
+  /* op: {oficinas: true} marca y prioriza carpetas de oficina; {crear: true} permite crear carpetas; {inicio: ruta}
+     dónde arranca */
   App.elegirCarpeta = function (titulo, op) {
     op = op || {};
     if (App.nativo.hay) {
-      return App.nativo.elegirCarpeta(titulo, null, !!op.crear).then(function (r) { return r === undefined ? explorador(titulo, op) : r; });
+      return App.nativo.elegirCarpeta(titulo, op.inicio || null, !!op.crear).then(function (r) { return r === undefined ? explorador(titulo, op) : r; });
     }
     return explorador(titulo, op);
   };
@@ -69,7 +70,7 @@
           api.post('/api/fs/carpetas', { padre: actual, nombre: n }).then(function (r) { ir(r.ruta || actual); }).catch(App.fallo);
         });
       }
-      ir('');
+      ir(op.inicio || '');
     });
   }
 

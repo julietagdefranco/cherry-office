@@ -261,6 +261,8 @@ App.Ajustes = (function () {
     { id: 'reglas', grupo: 'oficina', texto: 'Reglas', icono: 'regla', pintar: function (c) { reglas(c); } },
     { id: 'conectores', grupo: 'oficina', texto: 'Conectores', icono: 'enchufe', pintar: function (c) { conectores(c); } },
     { id: 'habilitados', grupo: 'oficina', texto: 'Skills y MCP', icono: 'chispa', pintar: habilitados },
+    { id: 'trabajo', grupo: 'oficina', texto: 'Carpetas de trabajo', icono: 'carpeta', pintar: carpetasTrabajo,
+      nota: function () { var n = ((App.E.oficina && App.E.oficina.carpetasTrabajo) || []).length; return n ? String(n) : ''; } },
     { id: 'avanzado', grupo: 'oficina', texto: 'Avanzado', icono: 'deslizadores', pintar: avanzado },
     /* la elige la persona la primera vez que abre la app (permisos.js); acá se ve y se cambia */
     { id: 'permisos', grupo: 'app', texto: 'Permisos de los agentes', icono: 'escudo', nota: modoPermisos,
@@ -460,6 +462,87 @@ App.Ajustes = (function () {
           'Todavía no vi servidores MCP de tu Claude Code. Aparecen después de la primera charla con un agente.'),
         fila('conectores', cx, rs[1].detectando ? 'Mirando tus conectores de claude.ai…' : 'No hay conectores detectados. Actualizá la lista en Ajustes › Conectores.'));
     });
+  }
+
+  /* ---------- carpetas de trabajo: donde los agentes trabajan (un repo, por ejemplo) y desde donde la app muestra ----------
+     No es conocimiento: eso es la Biblioteca. Acá el agente lee y escribe, y el chat dibuja lo que deja ahí. */
+  var TODA = '*oficina*';
+  function quienesDe(c) {
+    var al = c.alcance;
+    if (!al || al === 'oficina') return 'Todos los agentes';
+    var ags = (App.E.oficina && App.E.oficina.agentes) || [];
+    var nom = function (id) { var a = ags.find(function (x) { return x.id === id; }); return a ? a.nombre : id; };
+    if (al.agentes) return al.agentes.map(nom).join(', ');
+    if (al.departamentos) {
+      var ds = (App.E.oficina && App.E.oficina.departamentos) || [];
+      return al.departamentos.map(function (id) { var d = ds.find(function (x) { return x.id === id; }); return d ? d.nombre : id; }).join(', ');
+    }
+    return '';
+  }
+  /* agrega una carpeta de trabajo (elige la persona, arrancando en `inicio`); devuelve la carpeta o null */
+  App.agregarCarpetaTrabajo = function (inicio, alcance) {
+    return App.elegirCarpeta('Carpeta de trabajo', { inicio: inicio, crear: true }).then(function (ruta) {
+      if (!ruta) return null;
+      return api().post('/api/carpetas-trabajo', { ruta: ruta, alcance: alcance || 'oficina' }).then(function (r) {
+        return App.recargarOficina().then(function () {
+          App.guardado('Los agentes ya pueden trabajar en ' + App.humano.carpeta(r.carpeta.ruta) + '.');
+          return r.carpeta;
+        });
+      });
+    }).catch(function (e) { App.fallo(e); return null; });
+  };
+  function carpetasTrabajo(crear) {
+    var hj = crear({ titulo: 'Carpetas de trabajo' });
+    var lista = h('div'), err = h('div.error-txt');
+    App.add(hj.cuerpo,
+      h('div.ayuda', { style: { marginTop: 0, marginBottom: '12px' } },
+        'Carpetas de tu compu donde los agentes trabajan (un proyecto de código, por ejemplo) y desde donde la app te muestra lo que hacen: imágenes, páginas y archivos. No se suman a la Biblioteca.'),
+      lista, err,
+      h('div', { style: { marginTop: '12px' } }, h('button.btn', { onclick: function () { App.agregarCarpetaTrabajo().then(function (c) { if (c) pintar(); }); } }, App.icono('mas'), 'Agregar carpeta…')));
+    function cambiar(c, valor) {
+      var alcance = !valor.length || valor.indexOf(TODA) >= 0 ? 'oficina' : { agentes: valor };
+      err.textContent = '';
+      return api().patch('/api/carpetas-trabajo/' + encodeURIComponent(c.id), { alcance: alcance })
+        .then(function () { return App.recargarOficina(); }).then(pintar)
+        .catch(function (e) { err.textContent = e.message; pintar(); });
+    }
+    function quitar(c) {
+      App.confirmar('¿Dejar de trabajar en esta carpeta?', 'Los agentes ya no van a poder leer ni escribir en ' + App.humano.carpeta(c.ruta) + '. La carpeta y sus archivos no se tocan.', 'Quitar', true).then(function (ok) {
+        if (!ok) return;
+        api().del('/api/carpetas-trabajo/' + encodeURIComponent(c.id)).then(function () { return App.recargarOficina(); }).then(pintar).catch(App.fallo);
+      });
+    }
+    function fila(c) {
+      var al = c.alcance, actual = al && al.agentes ? al.agentes.slice() : [TODA];
+      var ags = (App.E.oficina && App.E.oficina.agentes) || [];
+      var quien = App.elegir({ etiqueta: 'Quién trabaja ahí', forma: 'chips', multiple: true, valor: actual,
+        opciones: [{ valor: TODA, titulo: 'Todos' }].concat(ags.map(function (a) { return { valor: a.id, titulo: a.nombre, retrato: a }; })),
+        alCambiar: function (v) {
+          // «Todos» y los agentes sueltos se excluyen: lo último que se tocó manda
+          var nuevo = v.indexOf(TODA) >= 0 && actual.indexOf(TODA) < 0 ? [TODA] : v.filter(function (x) { return x !== TODA; });
+          actual = nuevo.length ? nuevo : [TODA];
+          quien.poner(actual);
+          cambiar(c, actual);
+        } });
+      var falta = c.existe === false ? h('span', { style: { color: 'var(--peligro)' } }, ' · no se encuentra') : null;
+      return h('div.ajuste', { style: { display: 'block' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          App.icono('carpeta'), h('div.ajuste-tit', { style: { flex: 1 }, title: c.ruta }, App.humano.carpeta(c.ruta), falta),
+          App.nativo.hay ? h('button.btn.chico.fantasma', { title: 'Mostrar en el Finder', onclick: function () { App.nativo.revelar(c.ruta); } }, App.icono('abrir')) : null,
+          h('button.btn.chico.fantasma', { onclick: function () { quitar(c); } }, 'Quitar')),
+        h('div.ajuste-ayuda', { style: { margin: '6px 0' } }, al && al.departamentos ? 'Quién trabaja ahí: ' + quienesDe(c) : 'Quién trabaja ahí'),
+        quien);
+    }
+    function pintar() {
+      var cs = (App.E.oficina && App.E.oficina.carpetasTrabajo) || [];
+      App.vaciar(lista);
+      if (!cs.length) { lista.appendChild(h('div.vacio', 'Todavía no hay carpetas de trabajo. Los agentes trabajan solo dentro de la carpeta de la oficina.')); return; }
+      api().get('/api/carpetas-trabajo').then(function (r) {
+        App.vaciar(lista);
+        (r.carpetas || []).forEach(function (c) { lista.appendChild(fila(c)); });
+      }).catch(function (e) { err.textContent = e.message; });
+    }
+    pintar();
   }
 
   function avanzado(crear) {

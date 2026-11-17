@@ -14,7 +14,7 @@ import { ErrorAPI } from './errores.js'
 import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
 import { escribirAtomico, OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
-import { conMemoria, dirsVinculos, esfuerzoDe, Instrucciones, turnoConPermiso } from './permisos.js'
+import { conMemoria, dirsTrabajo, dirsVinculos, esfuerzoDe, Instrucciones, turnoConPermiso } from './permisos.js'
 import { esMemoriaIA } from './config.js'
 import type { TurnoConPermiso } from './claude-runner.js'
 import { anexarDecisiones } from './plantillas.js'
@@ -1356,7 +1356,7 @@ export class ReunionesRouter implements SubRouter {
       }
     } catch {}
     try {
-      const dirs = dirsVinculos(of, ag)
+      const dirs = [...dirsVinculos(of, ag), ...dirsTrabajo(of, ag)]
       texto = await runner.conCarrilDe(carpeta, ag.id, () => runner.actividad.seguir(
         { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.tema, extra: caja.observador() },
         async (obs) => {

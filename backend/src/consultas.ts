@@ -12,7 +12,7 @@ import {
   HerramientasCompuestas, HerramientasVacias, MCPResultados, MCPTokens, type IdentidadMCP, type MCPHerramientas, type MCPResultado,
 } from './mcp-protocolo.js'
 import { OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
-import { Instrucciones, conMemoria, dirsVinculos, esfuerzoDe } from './permisos.js'
+import { Instrucciones, conMemoria, dirsTrabajo, dirsVinculos, esfuerzoDe } from './permisos.js'
 import { PermisosVivos } from './permisos-vivos.js'
 import type { ClaudeRunner } from './claude-runner.js'
 import { no405, type Resp } from './router.js'
@@ -209,7 +209,7 @@ export class ConsultasMCP {
     let respuesta: string | undefined
     let fallo: string | undefined
     try {
-      const dirs = dirsVinculos(o, b)
+      const dirs = [...dirsVinculos(o, b), ...dirsTrabajo(o, b)]
       let prep: { extra: string; contexto?: unknown } = { extra: '' }
       try { if (this.memoria) prep = this.memoria.preparar({ oficina: ident.oficina, de: yo.id, colega: b.id, pregunta }) } catch {}
       const prompt = promptConsulta(yo, pregunta) + prep.extra

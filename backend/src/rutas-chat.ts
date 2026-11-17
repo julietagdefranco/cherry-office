@@ -18,6 +18,8 @@ import type { InfoClaude } from './rutas-oficinas.js'
 import type { Store } from './store.js'
 import path from 'node:path'
 import { CajaArchivos, CajaCosto, CajaVivo, type PasoVivo } from './stream.js'
+import { enCarpetaTrabajo } from './trabajo.js'
+import type { Oficina } from './oficina.js'
 import { largo, uuidValido } from './validar.js'
 
 export const maxMensaje = 100_000
@@ -80,11 +82,17 @@ export function infoClaude(runner: ClaudeRunner): InfoClaude {
   return { claudePath: () => runner.claudePath, auth: () => cache.valor() }
 }
 
-/** Un paso en vivo para el front: los archivos van relativos a la oficina (`rel`) o, si caen afuera, solo con su nombre. */
-export function pasoJSON(p: PasoVivo, carpeta: string): Obj {
+/** Un paso en vivo para el front: los archivos van relativos a la oficina (`rel`), absolutos si caen en una carpeta de
+ *  trabajo (trabajo.ts; el front los pide igual) o, si caen afuera, con su nombre y su `ruta` absoluta (sin `rel`). */
+export function pasoJSON(p: PasoVivo, carpeta: string, oficina?: Oficina): Obj {
   if (p.t !== 'archivo') return { ...p }
   const rel = ArchivosEntrega.relativos([p.ruta], carpeta)[0]
-  return rel !== undefined ? { t: 'archivo', rel, nombre: path.posix.basename(rel) } : { t: 'archivo', nombre: path.basename(p.ruta.replace(/\\/g, '/')) }
+  if (rel !== undefined) return { t: 'archivo', rel, nombre: path.posix.basename(rel) }
+  const t = path.isAbsolute(p.ruta) ? enCarpetaTrabajo(oficina, p.ruta) : undefined
+  if (t && t.partes.length > 0) return { t: 'archivo', rel: path.join(t.base, ...t.partes).split(path.sep).join('/'), nombre: t.partes[t.partes.length - 1]! }
+  // afuera: va su ruta absoluta para que el front ofrezca sumar su carpeta como de trabajo
+  const abs = path.isAbsolute(p.ruta) ? { ruta: p.ruta.replace(/\\/g, '/') } : {}
+  return { t: 'archivo', nombre: path.basename(p.ruta.replace(/\\/g, '/')), ...abs }
 }
 
 export function rutasChat(d: DepsChat): RutaNucleo {
@@ -101,7 +109,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (agente === undefined || !act.oficina.agentes.some((a) => a.id === agente)) return invalido
     const v = vivos.get(claveVivo(act.carpeta, agente))
     if (!v) return [200, { activo: false }]
-    return [200, { activo: true, session: v.sid, version: v.caja.version, pasos: v.caja.valor.map((p) => pasoJSON(p, act.carpeta)) }]
+    return [200, { activo: true, session: v.sid, version: v.caja.version, pasos: v.caja.valor.map((p) => pasoJSON(p, act.carpeta, act.oficina)) }]
   }
 
   function historial(q: Record<string, string>): Resp {
@@ -237,7 +245,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           const todos = enVivo.valor
           let fin = todos.length
           while (fin > 0 && todos[fin - 1]!.t === 'texto') fin--
-          const pasos = todos.slice(0, fin).map((p) => pasoJSON(p, carpeta))
+          const pasos = todos.slice(0, fin).map((p) => pasoJSON(p, carpeta, act.oficina))
           if (pasos.length > 0) r.pasos = pasos
           if (archivos.length > 0) {
             const e = entregas.registrar({ oficina: carpeta, agente, nombre: def.nombre, origen: 'chat', ref: sid, titulo: TextoEntrega.titulo(msg),

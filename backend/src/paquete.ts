@@ -359,6 +359,8 @@ export class PaqueteRouter implements SubRouter {
       const of = structuredClone(act.oficina)
       const vinculos = of.vinculos?.length ?? 0
       delete of.vinculos
+      // las carpetas de trabajo son rutas de esta compu (un repo, por ejemplo): tampoco viajan
+      delete of.carpetasTrabajo
       OficinaStore.escribir(of, raiz)
       escribirTexto(catalogoMD(subidos, of), path.join(raiz, 'conocimiento', 'archivos.md'))
 

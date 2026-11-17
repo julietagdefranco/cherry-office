@@ -491,6 +491,19 @@ App.Nav = (function () {
     if (sesiones) pintarCharlas_(); else cargarSesiones().then(pintarCharlas_);
     caja.appendChild(seccion_('Charlas', charlasN, botonMas('Nueva charla', 'Empezar de cero con ' + a.nombre + '. Esta charla queda guardada en la lista.', function () { App.Agente.nueva(id); }), charlas, charlasVer));
 
+    /* carpetas de trabajo: dónde trabaja además de la oficina (solo si tiene alguna); llevan a Ajustes */
+    var trabajo = ((App.E.oficina && App.E.oficina.carpetasTrabajo) || []).filter(function (c) {
+      var al = c.alcance;
+      return !al || al === 'oficina' || (al.agentes && al.agentes.indexOf(id) >= 0) || (al.departamentos && al.departamentos.indexOf(a.departamento) >= 0);
+    });
+    if (trabajo.length) {
+      var aAjustes = function () { App.Ajustes.abrir('trabajo'); };
+      caja.appendChild(seccion_('Trabaja en', cuenta(trabajo.length), null, h('div', trabajo.map(function (c) {
+        return h('button.lat-fila', { title: c.ruta + ' · cambiar en Ajustes', onclick: aAjustes }, App.icono('carpeta'),
+          h('span', h('b', App.humano.carpeta(c.ruta)), h('small', 'lee y escribe ahí')));
+      }))));
+    }
+
     /* tareas programadas */
     var tareas = h('div', h('div.lat-vacio', '…')), tareasN = cuenta(null), tareasVer = h('div');
     caja.appendChild(seccion_('Tareas', tareasN, botonMas('Nueva tarea', 'Nueva tarea para ' + a.nombre, function () { App.Agente.nuevaTarea(id, {}); }), tareas, tareasVer));

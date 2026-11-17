@@ -261,6 +261,11 @@ export const Instrucciones = {
       secciones.push('## Si te falta algo de un colega\n'
         + 'Consultalo (consultar); si no lo tiene, pedíselo con pedir. Entregá lo que puedas marcando lo que falta y llamá a quedo_esperando: cuando tu colega entregue, la oficina te vuelve a encargar la versión completa.')
     }
+    const trabajo = (o.carpetasTrabajo ?? []).filter((c) => alcanceIncluye(c.alcance, a)).map((c) => c.ruta)
+    if (trabajo.length > 0) {
+      secciones.push('## Carpetas de trabajo\n'
+        + 'Además de la carpeta de la oficina, trabajás en: ' + trabajo.join(', ') + '. Ahí leés, editás y creás archivos (código, por ejemplo) como en la oficina, y la app muestra lo que escribas ahí (imágenes, páginas y tarjetas de archivos, con su ruta absoluta).')
+    }
     // lo que la app dibuja (chat-rico.js): si no se le dice, el agente levanta un servidor o pasa un enlace en vez de mostrarlo
     if (enApp) secciones.push(Instrucciones.vistaEnApp)
     if (secciones.length === 0) return undefined
@@ -309,10 +314,13 @@ export function contexto(a: OficinaActiva, def: AgenteDef, { dirsExtra = [], act
   for (const r of agente.escritura ?? []) if (Validar.rutaEscrituraValida(r)) rutas.push(a.ruta(r))
   const e = entregables(a, agente.id)
   if (e) rutas.push(e)
+  // carpetas de trabajo de su alcance: lee y escribe ahí como en la oficina
+  const trabajo = dirsTrabajo(a.oficina, agente)
+  for (const d of trabajo) rutas.push(d + '/**')
   // modo «todos» sin catálogo todavía (no se detectó): no se veda nada; lo que no está permitido se pregunta o se rechaza
   const { permitidas, vedadas } = todos && !catalogo ? { permitidas: [], vedadas: [] } : ConectoresAgente.herramientas(a.oficina, agente, catalogo, actuar)
   return {
-    carpeta: a.carpeta, escritura: rutas, dirsExtra: [...dirsExtra, ...dirsVinculos(a.oficina, agente)],
+    carpeta: a.carpeta, escritura: rutas, dirsExtra: [...dirsExtra, ...dirsVinculos(a.oficina, agente), ...trabajo],
     instrucciones: Instrucciones.para(a.oficina, agente, { conMCP: true, todos }), permitidas, vedadas,
     herramientasMCP: HerramientasMCPAgente.lista(a.oficina, agente), perfilMCP: Coordinador.perfil(a.oficina, agente),
     reglas: agente.reglas ?? [], preguntar: false, ...(todos ? { todosConectores: true } : {}),
@@ -358,6 +366,20 @@ export function dirsVinculos(o: Oficina, agente: AgenteDef): string[] {
       dir = fs.statSync(v.ruta).isDirectory()
     } catch {}
     if (dir && !out.includes(v.ruta)) out.push(v.ruta)
+  }
+  return out
+}
+
+/** Carpetas de trabajo a las que `agente` tiene acceso (lectura y escritura, `--add-dir`). Solo las que existen. */
+export function dirsTrabajo(o: Oficina, agente: AgenteDef): string[] {
+  const out: string[] = []
+  for (const c of o.carpetasTrabajo ?? []) {
+    if (!alcanceIncluye(c.alcance, agente)) continue
+    let dir = false
+    try {
+      dir = fs.statSync(c.ruta).isDirectory()
+    } catch {}
+    if (dir && !out.includes(c.ruta)) out.push(c.ruta)
   }
   return out
 }

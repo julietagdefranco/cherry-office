@@ -58,6 +58,9 @@ async function oficinaConTodo(): Promise<Fix> {
   expect((await f.post('/api/vinculos', { ruta: ext, id: 'externa' })).status).toBe(200)
   await f.post('/api/vinculos/externa/escanear', {})
   await esperar(async () => (await f.get('/api/biblioteca/estado')).obj.pendientes === 0, 15)
+  // una carpeta de trabajo (un repo de esta compu)
+  fs.mkdirSync(f.sb.root + '/repo', { recursive: true })
+  expect((await f.post('/api/carpetas-trabajo', { ruta: f.sb.root + '/repo' })).status).toBe(200)
   // notas que mencionan la ruta de la oficina
   escribir(`Notas de Betty. Ver ${f.carpeta}/conocimiento/oficina.md\n`, f.ruta('conocimiento/agentes/betty.md'))
   escribir('Acta de prueba.\n', f.ruta('reuniones/2026-11-01-arranque.md'))
@@ -126,6 +129,7 @@ describe('Exportar e importar oficinas', () => {
     expect(of.nombre).toBe('Taller')
     expect(lista(of.agentes).map((a) => str(a.id))).toEqual(['betty', 'marce'])
     expect(of.vinculos).toBeUndefined()
+    expect(of.carpetasTrabajo).toBeUndefined()
 
     // queda abierta
     const est = await llamar(b2, 'GET', '/api/estado')

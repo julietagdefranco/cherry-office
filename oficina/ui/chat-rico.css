@@ -89,3 +89,10 @@ details.pasos .pasos-lista { margin: 6px 0 2px 8px; padding-left: 10px; border-l
   border: 1px solid var(--linea); border-radius: 8px; background: var(--panel-2); color: var(--suave); font-size: 13px; }
 .ct-de-charla b { color: var(--texto); }
 .ct-de-charla .btn { margin-left: auto; }
+/* archivo fuera de la oficina: botón para sumar su carpeta como carpeta de trabajo (y poder verlo) */
+.md-trabajo { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 2px 8px; border: 1px solid var(--linea); border-radius: 999px; background: var(--panel); color: var(--texto); font: inherit; font-size: 12px; cursor: pointer; }
+.md-trabajo:hover { border-color: var(--linea-fuerte); background: var(--panel-2); }
+.md-trabajo svg { width: 13px; height: 13px; }
+.archivo-chat.fuera { flex-wrap: wrap; max-width: 320px; }
+.archivo-chat.fuera .md-trabajo { margin-left: 42px; opacity: 1; }
+.archivo-chat.fuera:hover { border-color: var(--linea); background: var(--panel); }
