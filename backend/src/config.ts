@@ -33,6 +33,16 @@ export const modelosPorDefecto: Record<ClaveModelo, string> = { creador: 'sonnet
 export const clavesModelo = Object.keys(modelosPorDefecto) as ClaveModelo[]
 export const modelosValidos = Validar.modelos
 
+/** Cómo usan la memoria de la oficina los agentes: `completa` = la leen al empezar cada charla, tarea o consulta
+ *  (oficina.md, decisiones.md, archivos.md: crecen con el uso); `liviana` = solo si lo que les piden lo necesita. */
+export type MemoriaIA = 'completa' | 'liviana'
+export const esMemoriaIA = (v: unknown): v is MemoriaIA => v === 'completa' || v === 'liviana'
+/** Consumo de IA por defecto de toda la app (clave `ia` de config.json). Los pisan el agente (esfuerzo) y cada charla o
+ *  reunión nueva. `esfuerzo` '' = el de Claude Code; `skills` = la herramienta Skill (lista las skills y plugins de la
+ *  persona en cada llamada: miles de tokens); `colegas` = consultar y pedirle cosas a otros agentes. */
+export type PreferenciasIA = { esfuerzo: string; skills: boolean; memoria: MemoriaIA; colegas: boolean }
+export const iaPorDefecto: PreferenciasIA = { esfuerzo: '', skills: true, memoria: 'completa', colegas: true }
+
 export class Config {
   proyecto: string
   dirsExtra: string[]
@@ -64,6 +74,9 @@ export class Config {
   conectoresAgentes?: ConectoresAgentes
   /** Solo lo que la persona cambió; lo demás sale de `modelosPorDefecto` (ver `modelo()`). */
   modelos: Partial<Record<ClaveModelo, string>> = {}
+  /** Solo lo que la persona cambió; lo demás sale de `iaPorDefecto`. */
+  ia: Partial<PreferenciasIA> = {}
+  get iaEfectiva(): PreferenciasIA { return { ...iaPorDefecto, ...this.ia } }
 
   /** Modelo elegido para `clave`, o el de por defecto. */
   modelo(clave: ClaveModelo): string { return this.modelos[clave] ?? modelosPorDefecto[clave] }
@@ -149,6 +162,13 @@ export class Config {
         const v = o.modelos[k]
         if (typeof v === 'string' && modelosValidos.has(v)) this.modelos[k] = v
       }
+    }
+    if (esObjeto(o.ia)) {
+      const v = o.ia
+      if (typeof v.esfuerzo === 'string' && (v.esfuerzo === '' || Validar.esfuerzos.has(v.esfuerzo))) this.ia.esfuerzo = v.esfuerzo
+      if (typeof v.skills === 'boolean') this.ia.skills = v.skills
+      if (esMemoriaIA(v.memoria)) this.ia.memoria = v.memoria
+      if (typeof v.colegas === 'boolean') this.ia.colegas = v.colegas
     }
     if (lista(o.legacy_dirs)) this.legacyDirs = [...o.legacy_dirs.map((d) => Config.ruta(d, home)), ...this.legacyDirs]
   }

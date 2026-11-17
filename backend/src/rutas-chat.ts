@@ -12,7 +12,7 @@ import type { Oficinas } from './oficinas.js'
 import type { PermisosVivos } from './permisos-vivos.js'
 import { pedidoJSON, decisionesPermiso, type DecisionPermiso } from './permisos-vivos.js'
 import { argumentos, contexto, entorno, variableTokenMCP, type FuenteCatalogo } from './permisos.js'
-import { eleccionCharla } from './agentes.js'
+import { aplicarEleccion, eleccionCharla, type EleccionCharla } from './agentes.js'
 import { no405, type Resp, type RutaNucleo } from './router.js'
 import type { InfoClaude } from './rutas-oficinas.js'
 import type { Store } from './store.js'
@@ -167,7 +167,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (!def || msg === '' || largo(msg) > maxMensaje || !uuidValido(b.session)) return invalido
     const sid = b.session.toLowerCase()
     // modelo y esfuerzo elegidos en la charla (pisan los del agente solo en este mensaje)
-    let eleccion: { modelo?: string; esfuerzo?: string }
+    let eleccion: EleccionCharla
     try {
       eleccion = eleccionCharla(b)
     } catch (e) {
@@ -209,8 +209,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
     // la persona está en el chat: lo que el agente no tiene permitido se le pregunta (tarjeta en la oficina)
     ctx.preguntar = true
-    if (eleccion.modelo !== undefined) ctx.modelo = eleccion.modelo
-    if (eleccion.esfuerzo !== undefined) ctx.esfuerzo = eleccion.esfuerzo
+    aplicarEleccion(ctx, eleccion)
 
     let resultado: Resp
     try {

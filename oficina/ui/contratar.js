@@ -23,39 +23,70 @@
   App.tituloModelo = function (v) { var m = App.MODELOS.filter(function (x) { return x.valor === v; })[0]; return m ? m.titulo : 'Sonnet'; };
   App.tituloEsfuerzo = function (v) { var m = App.ESFUERZOS.filter(function (x) { return x.valor === (v || ''); })[0]; return m ? m.titulo : ''; };
 
-  /* Selector de modelo y esfuerzo de una charla (como en Claude): un botón chico que abre un menú. Pisa los del agente
-     solo en esa charla. op: {modelo, esfuerzo (los de por defecto, del agente), valor: {modelo?, esfuerzo?}, alCambiar(v)}.
-     Devuelve el botón con .valor() -> {modelo?, esfuerzo?} (solo lo que difiere del de por defecto) y .poner(v). */
+  /* Opciones de consumo que se pueden prender o apagar (Ajustes › Consumo de IA, cada charla y cada reunión nueva).
+     Una sola lista, con lo que cuesta cada una, para que se entienda qué se gana al apagarla. */
+  App.OPCIONES_IA = [
+    { clave: 'skills', titulo: 'Skills de tu Claude Code', si: 'Prendidas', no: 'Apagadas',
+      sub: 'Le muestra al agente todas tus skills y plugins en cada paso: suma varios miles de tokens aunque no use ninguna.' },
+    { clave: 'memoria', titulo: 'Memoria de la oficina', si: 'Leer al empezar', no: 'Solo si hace falta', valores: ['completa', 'liviana'],
+      sub: 'Al empezar lee el contexto del negocio, las decisiones y el catálogo de documentos. Crecen con el uso: liviana ahorra, pero puede no tener presente alguna decisión.' },
+    { clave: 'colegas', titulo: 'Consultar a colegas', si: 'Puede', no: 'No puede',
+      sub: 'Cada consulta es otro agente trabajando (hasta 3 por mensaje). Apagado, responde solo con lo suyo.' },
+  ];
+  /* lo de Ajustes › Consumo de IA, con los valores de siempre si todavía no llegó el estado */
+  App.iaApp = function () { return Object.assign({ esfuerzo: '', skills: true, memoria: 'completa', colegas: true }, (App.E.estado && App.E.estado.ia) || {}); };
+  /* valor de una opción → prendida (true) o apagada */
+  App.opcionPrendida = function (o, v) { return o.valores ? v === o.valores[0] : !!v; };
+  App.valorOpcion = function (o, prendida) { return o.valores ? o.valores[prendida ? 0 : 1] : prendida; };
+
+  /* Selector de una charla (como en Claude): un botón chico que abre un menú con modelo, esfuerzo y las opciones de
+     consumo. Pisa lo del agente y lo de Ajustes solo en esa charla.
+     op: {modelo, esfuerzo (los del agente), valor (lo elegido antes), soloModelo (sin opciones: el Creador), alCambiar(v)}.
+     .valor() devuelve solo lo que difiere de lo de por defecto. */
   App.SelectorCharla = function (op) {
     var v = Object.assign({}, op.valor || {});
-    var b = h('button.btn.chico.fantasma.selector-charla', { type: 'button', title: 'Modelo y esfuerzo de esta charla' });
-    function efectivo() { return { modelo: v.modelo || op.modelo || 'sonnet', esfuerzo: v.esfuerzo !== undefined ? v.esfuerzo : (op.esfuerzo || '') }; }
-    function pintar() {
-      var e = efectivo();
-      App.vaciar(b);
-      App.add(b, App.icono('bombilla'), h('span', App.tituloModelo(e.modelo) + (e.esfuerzo ? ' · ' + App.tituloEsfuerzo(e.esfuerzo) : '')));
-      b.classList.toggle('cambiado', !!(v.modelo || v.esfuerzo !== undefined));
+    var b = h('button.btn.chico.fantasma.selector-charla', { type: 'button', title: 'Modelo, esfuerzo y consumo de esta charla' });
+    function defecto() {
+      var ia = App.iaApp();
+      return { modelo: op.modelo || 'sonnet', esfuerzo: op.esfuerzo || ia.esfuerzo || '', skills: ia.skills, memoria: ia.memoria, colegas: ia.colegas };
     }
-    function poner(nv) {
-      v = {};
-      if (nv.modelo && nv.modelo !== (op.modelo || 'sonnet')) v.modelo = nv.modelo;
-      if (nv.esfuerzo !== undefined && nv.esfuerzo !== (op.esfuerzo || '')) v.esfuerzo = nv.esfuerzo;
+    function efectivo() { return Object.assign(defecto(), v); }
+    function ahorros() {
+      if (op.soloModelo) return 0;
+      var e = efectivo();
+      return App.OPCIONES_IA.filter(function (o) { return !App.opcionPrendida(o, e[o.clave]); }).length;
+    }
+    function pintar() {
+      var e = efectivo(), n = ahorros();
+      App.vaciar(b);
+      App.add(b, App.icono('deslizadores'), h('span', App.tituloModelo(e.modelo) + (e.esfuerzo ? ' · ' + App.tituloEsfuerzo(e.esfuerzo) : '') + (n ? ' · ' + n + (n === 1 ? ' ahorro' : ' ahorros') : '')));
+      b.classList.toggle('cambiado', Object.keys(v).length > 0);
+    }
+    function cambiar(clave, valor) {
+      var d = defecto();
+      if (valor === d[clave]) delete v[clave]; else v[clave] = valor;
       pintar();
+      if (op.alCambiar) op.alCambiar(b.valor());
     }
     b.addEventListener('click', function () {
-      var e = efectivo();
+      var e = efectivo(), d = defecto();
       var marca = function (si) { return si ? 'ok' : null; };
       var items = [{ titulo: 'Modelo' }].concat(App.MODELOS.map(function (m) {
-        return { texto: m.titulo + (m.valor === (op.modelo || 'sonnet') ? ' (el del agente)' : ''), nota: m.sub, icono: marca(e.modelo === m.valor),
-          accion: function () { poner({ modelo: m.valor, esfuerzo: e.esfuerzo }); if (op.alCambiar) op.alCambiar(b.valor()); } };
+        return { texto: m.titulo + (m.valor === d.modelo ? ' (por defecto)' : ''), nota: m.sub, icono: marca(e.modelo === m.valor), accion: function () { cambiar('modelo', m.valor); } };
       }), ['-', { titulo: 'Esfuerzo' }], App.ESFUERZOS.map(function (x) {
-        return { texto: x.titulo + (x.valor === (op.esfuerzo || '') && op.esfuerzo ? ' (el del agente)' : ''), nota: x.sub, icono: marca(e.esfuerzo === x.valor),
-          accion: function () { poner({ modelo: e.modelo, esfuerzo: x.valor }); if (op.alCambiar) op.alCambiar(b.valor()); } };
+        return { texto: x.titulo + (x.valor === d.esfuerzo && d.esfuerzo ? ' (por defecto)' : ''), nota: x.sub, icono: marca(e.esfuerzo === x.valor), accion: function () { cambiar('esfuerzo', x.valor); } };
       }));
+      if (!op.soloModelo) {
+        items.push('-', { titulo: 'Consumo' });
+        App.OPCIONES_IA.forEach(function (o) {
+          var si = App.opcionPrendida(o, e[o.clave]);
+          items.push({ texto: o.titulo + ': ' + (si ? o.si : o.no), nota: 'Tocá para ' + (si ? '«' + o.no + '»' : '«' + o.si + '»'), icono: si ? 'ok' : null,
+            accion: function () { cambiar(o.clave, App.valorOpcion(o, !si)); } });
+        });
+      }
       App.menu(b, items);
     });
-    b.valor = function () { var r = {}; if (v.modelo) r.modelo = v.modelo; if (v.esfuerzo !== undefined) r.esfuerzo = v.esfuerzo; return r; };
-    b.poner = function (nv) { v = {}; poner(Object.assign(efectivo(), nv || {})); };
+    b.valor = function () { return Object.assign({}, v); };
     pintar();
     return b;
   };

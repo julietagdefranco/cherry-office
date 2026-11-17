@@ -1,4 +1,5 @@
 // Agentes de la oficina: contratar, borrador, editar, despedir y notas (Agentes.swift + rutas de /api/agentes).
+import { esMemoriaIA, type MemoriaIA } from './config.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ErrorAPI } from './errores.js'
@@ -101,12 +102,28 @@ export function esfuerzoValido(v: unknown): string {
 }
 
 /** `modelo` y `esfuerzo` opcionales de una charla (chat, reunión, Creador): pisan los del agente solo en esa corrida. */
-export function eleccionCharla(d: Obj): { modelo?: string; esfuerzo?: string } {
-  const r: { modelo?: string; esfuerzo?: string } = {}
+export type EleccionCharla = { modelo?: string; esfuerzo?: string; skills?: boolean; memoria?: MemoriaIA; colegas?: boolean }
+export function eleccionCharla(d: Obj): EleccionCharla {
+  const r: EleccionCharla = {}
   if (d.modelo !== undefined && d.modelo !== null && d.modelo !== '') r.modelo = modeloValido(d.modelo)
   const e = esfuerzoValido(d.esfuerzo)
   if (e !== '') r.esfuerzo = e
+  for (const k of ['skills', 'colegas'] as const) {
+    const v = d[k]
+    if (v === undefined || v === null) continue
+    if (typeof v !== 'boolean') throw new ErrorAPI(400, `«${k}» tiene que ser verdadero o falso.`)
+    r[k] = v
+  }
+  if (d.memoria !== undefined && d.memoria !== null) {
+    if (!esMemoriaIA(d.memoria)) throw new ErrorAPI(400, '«memoria» tiene que ser "completa" o "liviana".')
+    r.memoria = d.memoria
+  }
   return r
+}
+
+/** Vuelca una elección de charla sobre el contexto de la corrida. */
+export function aplicarEleccion(ctx: { modelo?: string; esfuerzo?: string; skills?: boolean; memoria?: MemoriaIA; colegas?: boolean }, e: EleccionCharla) {
+  for (const k of ['modelo', 'esfuerzo', 'skills', 'memoria', 'colegas'] as const) if (e[k] !== undefined) (ctx as Record<string, unknown>)[k] = e[k]
 }
 
 export function chipsValidos(v: unknown): string[] {

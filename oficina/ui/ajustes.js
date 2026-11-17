@@ -265,6 +265,7 @@ App.Ajustes = (function () {
     { id: 'permisos', grupo: 'app', texto: 'Permisos de los agentes', icono: 'escudo', nota: modoPermisos,
       visible: function () { return !!(App.Permisos && (App.Permisos.pintarModo || App.Permisos.abrirModo)); }, pintar: permisos },
     { id: 'modelos', grupo: 'app', texto: 'Modelos', icono: 'bombilla', pintar: modelos },
+    { id: 'consumo', grupo: 'app', texto: 'Consumo de IA', icono: 'medidor', pintar: consumo },
   ];
 
   /* `modelos` (toda la app, PUT /api/preferencias): los procesos que no son un agente de la oficina. El de cada agente se
@@ -298,6 +299,41 @@ App.Ajustes = (function () {
         }).catch(function (e) { err.textContent = e.message; el.poner(actual[p2.clave]); });
       }
       hj.cuerpo.appendChild(App.ajuste(p.titulo, p.bajada, el));
+    });
+    hj.cuerpo.appendChild(err);
+  }
+
+  /* `ia` (toda la app, PUT /api/preferencias): esfuerzo y opciones de consumo por defecto. Valen para todo lo que usa la IA
+     (charlas, reuniones, tareas, flujos, consultas y tareas de fondo); el esfuerzo de un agente (su ficha) le gana, y cada
+     charla o reunión nueva puede cambiarlos para sí. Se guarda al elegir. */
+  function consumo(crear) {
+    var hj = crear({ titulo: 'Consumo de IA' });
+    var err = h('div.error-txt');
+    App.add(hj.cuerpo, h('div.ayuda', { style: { marginTop: 0 } },
+      'Vale para todas tus oficinas y para todo lo que hace la IA: charlas, reuniones, tareas, flujos y consultas entre colegas. ' +
+      'Cada charla y cada reunión nueva lo pueden cambiar para sí, y el esfuerzo de un agente se elige en su ficha.'));
+    function guardar(clave, valor, el, antes, texto) {
+      var cuerpo = { ia: {} }; cuerpo.ia[clave] = valor;
+      err.textContent = '';
+      api().put('/api/preferencias', cuerpo).then(function (r) {
+        if (App.E && App.E.estado) App.E.estado.ia = r.ia;
+        App.guardado(texto + '.', function () { el.poner(antes); guardar(clave, antes, el, valor, texto); });
+      }).catch(function (e) { err.textContent = e.message; el.poner(antes); });
+    }
+    var ia = App.iaApp();
+    var esf = App.elegir({ forma: 'chips', etiqueta: 'Esfuerzo', valor: ia.esfuerzo,
+      opciones: App.ESFUERZOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; }),
+      alCambiar: function (v) { var antes = App.iaApp().esfuerzo; guardar('esfuerzo', v, esf, antes, 'Esfuerzo: ' + App.tituloEsfuerzo(v)); } });
+    hj.cuerpo.appendChild(App.ajuste('Esfuerzo', 'Cuánto piensa antes de responder. Lo que piensa se cobra como texto escrito: para el día a día, Bajo o Medio alcanza.', esf));
+    App.OPCIONES_IA.forEach(function (o) {
+      var actual = App.opcionPrendida(o, ia[o.clave]);
+      var el = App.elegir({ forma: 'chips', etiqueta: o.titulo, valor: actual,
+        opciones: [{ valor: true, titulo: o.si }, { valor: false, titulo: o.no }],
+        alCambiar: function (si) {
+          var antes = App.iaApp()[o.clave];
+          guardar(o.clave, App.valorOpcion(o, si), { poner: function (x) { el.poner(App.opcionPrendida(o, x)); } }, antes, o.titulo + ': ' + (si ? o.si : o.no));
+        } });
+      hj.cuerpo.appendChild(App.ajuste(o.titulo, o.sub, el));
     });
     hj.cuerpo.appendChild(err);
   }

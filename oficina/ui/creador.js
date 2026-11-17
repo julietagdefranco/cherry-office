@@ -186,7 +186,7 @@ window.App = window.App || {};
     var txt = h('textarea.campo', { rows: 2, maxlength: 60000, placeholder: 'Pegá el texto completo de cómo querés tu oficina, o contame de a poco' });
     var enviar = h('button.btn.primario.icono', { title: 'Enviar (Cmd/Ctrl+Enter)', onclick: mandar }, App.icono('enviar'));
     /* modelo y esfuerzo de esta charla con el Creador (por defecto, el de Ajustes › Modelos) */
-    var selector = App.SelectorCharla({ modelo: (App.E.estado && App.E.estado.modelos && App.E.estado.modelos.creador) || 'sonnet' });
+    var selector = App.SelectorCharla({ soloModelo: true, modelo: (App.E.estado && App.E.estado.modelos && App.E.estado.modelos.creador) || 'sonnet' });
     txt.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); mandar(); } });
     txt.addEventListener('input', function () { txt.style.height = 'auto'; txt.style.height = Math.min(180, txt.scrollHeight + 2) + 'px'; });
     var colChat = h('div.creador-col.creador-chat', cuerpoChat,

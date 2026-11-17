@@ -14,7 +14,8 @@ import { ErrorAPI } from './errores.js'
 import { esObjeto, objeto, objetoOpcional, type Obj } from './json.js'
 import { escribirAtomico, OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
-import { dirsVinculos, esfuerzoDe, Instrucciones, turnoConPermiso } from './permisos.js'
+import { conMemoria, dirsVinculos, esfuerzoDe, Instrucciones, turnoConPermiso } from './permisos.js'
+import { esMemoriaIA } from './config.js'
 import type { TurnoConPermiso } from './claude-runner.js'
 import { anexarDecisiones } from './plantillas.js'
 import { eleccionCharla } from './agentes.js'
@@ -88,6 +89,7 @@ export type ReunionFila = {
   /** Modelo y esfuerzo elegidos para toda la reunión (pisan los de cada agente). */
   modelo?: string
   esfuerzo?: string
+  memoria?: string
 }
 
 /** Resumen de lo dicho hasta ahora, sin cerrar: no deja acta ni toca decisiones ni pendientes. */
@@ -111,7 +113,7 @@ export type PasoTurno = { agente: string; fase: FaseTurno }
 
 // MARK: - SQLite (tablas `reuniones` y `turnos`, con clave de oficina)
 
-const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida,resumen_parcial,modelo,esfuerzo'
+const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida,resumen_parcial,modelo,esfuerzo,memoria'
 
 const opt = (v: SQLValor | undefined) => (v === null || v === undefined ? undefined : txt(v))
 
@@ -140,7 +142,7 @@ function filaReunion(r: Fila): ReunionFila {
   if (r.cerrada !== null && r.cerrada !== undefined) f.cerrada = num(r.cerrada)
   f.sintesis = opt(r.sintesis); f.errorSintesis = opt(r.error_sintesis); f.acta = opt(r.acta); f.error = opt(r.error)
   f.lider = opt(r.lider); f.bandos = bandos; f.salida = opt(r.salida); f.resumenParcial = opt(r.resumen_parcial)
-  f.modelo = opt(r.modelo); f.esfuerzo = opt(r.esfuerzo)
+  f.modelo = opt(r.modelo); f.esfuerzo = opt(r.esfuerzo); f.memoria = opt(r.memoria)
   for (const k of Object.keys(f) as (keyof ReunionFila)[]) if (f[k] === undefined) delete f[k]
   return f
 }
@@ -180,7 +182,7 @@ export class ReunionesDB {
     `)
     const cols = this.db.query('PRAGMA table_info(reuniones)').map((f) => txt(f.name))
     if (!cols.includes('documentos')) this.db.exec('ALTER TABLE reuniones ADD COLUMN documentos TEXT')
-    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT'], ['resumen_parcial', 'TEXT'], ['modelo', 'TEXT'], ['esfuerzo', 'TEXT']]) {
+    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT'], ['resumen_parcial', 'TEXT'], ['modelo', 'TEXT'], ['esfuerzo', 'TEXT'], ['memoria', 'TEXT']]) {
       if (!cols.includes(c!)) this.db.exec(`ALTER TABLE reuniones ADD COLUMN ${c} ${tipo}`)
     }
     this.prepararVista()
@@ -194,12 +196,12 @@ export class ReunionesDB {
     if (cols.length > 0 && !cols.includes('vista')) this.db.exec('ALTER TABLE reuniones ADD COLUMN vista INTEGER')
   }
 
-  crear(p: { id: string; oficina: string; tema: string; agentes: string[]; documentos?: string[]; patron?: string; lider?: string; bandos?: Record<string, string[]>; salida?: string; modelo?: string; esfuerzo?: string }) {
+  crear(p: { id: string; oficina: string; tema: string; agentes: string[]; documentos?: string[]; patron?: string; lider?: string; bandos?: Record<string, string[]>; salida?: string; modelo?: string; esfuerzo?: string; memoria?: string }) {
     const docs = p.documentos ?? []
-    this.db.run('INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos,patron,lider,bandos,salida,modelo,esfuerzo) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+    this.db.run('INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos,patron,lider,bandos,salida,modelo,esfuerzo,memoria) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
       p.id, p.oficina, p.tema, JSON.stringify(p.agentes), 'esperando', Date.now() / 1000, docs.length === 0 ? null : JSON.stringify(docs),
       p.patron ?? 'debate', p.lider ?? null, p.bandos ? JSON.stringify({ a: p.bandos.a, b: p.bandos.b }) : null, p.salida ?? null,
-      p.modelo ?? null, p.esfuerzo ?? null,
+      p.modelo ?? null, p.esfuerzo ?? null, p.memoria ?? null,
     ])
   }
 
@@ -919,6 +921,7 @@ export class ReunionesRouter implements SubRouter {
     if (f.salida !== undefined) o.salida = f.salida
     if (f.modelo !== undefined) o.modelo = f.modelo
     if (f.esfuerzo !== undefined) o.esfuerzo = f.esfuerzo
+    if (f.memoria !== undefined) o.memoria = f.memoria
     if (resumen) { o.turnos = turnos.length; return o }
     o.hablando = vivo ? habla ?? null : null
     o.rondas = turnos.reduce((m, t) => Math.max(m, t.ronda), 0)
@@ -1023,7 +1026,7 @@ export class ReunionesRouter implements SubRouter {
     const id = randomUUID().toLowerCase()
     const ordenados = ordenar(ids.map((x) => agenteDe(a.oficina, x)!), a.oficina, tema).map((x) => x.id)
     try {
-      this.db.crear({ id, oficina: a.carpeta, tema, agentes: ordenados, documentos, patron, lider, bandos, salida, ...eleccion })
+      this.db.crear({ id, oficina: a.carpeta, tema, agentes: ordenados, documentos, patron, lider, bandos, salida, modelo: eleccion.modelo, esfuerzo: eleccion.esfuerzo, memoria: eleccion.memoria })
     } catch {
       throw new ErrorAPI(500, 'No pude guardar la reunión.')
     }
@@ -1325,7 +1328,7 @@ export class ReunionesRouter implements SubRouter {
       const dirs = dirsVinculos(of, ag)
       texto = await runner.conCarrilDe(carpeta, ag.id, () => runner.actividad.seguir(
         { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.tema, extra: caja.observador() },
-        (obs) => runner.turnoSoloLectura({ agente: ag.id, prompt, cwd: carpeta, timeout, dirsExtra: dirs, obs, instrucciones: Instrucciones.para(of, ag), preguntar,
+        (obs) => runner.turnoSoloLectura({ agente: ag.id, prompt, cwd: carpeta, timeout, dirsExtra: dirs, obs, instrucciones: conMemoria(Instrucciones.para(of, ag), esMemoriaIA(f.memoria) ? f.memoria : this.s.config.iaEfectiva.memoria), preguntar,
           modelo: f.modelo, esfuerzo: f.esfuerzo ?? esfuerzoDe(ag) })))
       texto = recortarEspacios(texto)
       if (texto === '') { texto = '(sin respuesta)'; fallo = true }

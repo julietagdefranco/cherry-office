@@ -3,7 +3,7 @@
 // en el actor. Si un método necesita esperar algo en el medio (claude), tiene que releer la oficina después.
 import fs from 'node:fs'
 import path from 'node:path'
-import { Config, type ClaveModelo, type ConectoresAgentes, type ModoPermisos } from './config.js'
+import { Config, type ClaveModelo, type PreferenciasIA, type ConectoresAgentes, type ModoPermisos } from './config.js'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, type Obj } from './json.js'
 import { jsonSwift } from './json-swift.js'
@@ -279,6 +279,12 @@ export class Oficinas {
     this.log.info(`modelos: ${JSON.stringify(this.config.modelos)}`)
   }
 
+  guardarIA(ia: Partial<PreferenciasIA>) {
+    Object.assign(this.config.ia, ia)
+    this.guardarEstado()
+    this.log.info(`ia: ${JSON.stringify(this.config.ia)}`)
+  }
+
   private guardarEstado() {
     let o: Obj = {}
     if (fs.existsSync(this.estadoPath)) {
@@ -296,6 +302,7 @@ export class Oficinas {
     if (this.config.modoPermisos !== undefined) o.modo_permisos = this.config.modoPermisos
     if (this.config.conectoresAgentes !== undefined) o.conectores_agentes = this.config.conectoresAgentes
     if (Object.keys(this.config.modelos).length) o.modelos = { ...this.config.modelos }
+    if (Object.keys(this.config.ia).length) o.ia = { ...this.config.ia }
     o.oficinas_recientes = this.recientes.map((r) => ({ carpeta: r.carpeta, nombre: r.nombre, abierta: r.abierta }))
     try {
       fs.mkdirSync(this.config.datosDir, { recursive: true })

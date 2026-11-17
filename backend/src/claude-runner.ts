@@ -269,6 +269,8 @@ export class ClaudeRunner {
   static argsModelo(m: string): string[] { return m === 'inherit' ? [] : ['--model', m] }
   /** `--effort` (low…max); sin esfuerzo no pasa nada (queda el de Claude Code de la persona). */
   static argsEsfuerzo(e?: string): string[] { return e !== undefined && e !== '' ? ['--effort', e] : [] }
+  /** El esfuerzo pedido o, si no hay, el de la app (Ajustes › Consumo de IA). */
+  private esfuerzoO(e?: string): string | undefined { return e ?? (this.config.iaEfectiva.esfuerzo || undefined) }
 
   readonly actividad = new ActividadRegistro()
   /** Reciben el `rate_limit_info` de cada `rate_limit_event` de cualquier corrida (el medidor de uso). */
@@ -314,7 +316,7 @@ export class ClaudeRunner {
   async correrSinAgente(prompt: string, { timeout, cwd, modelo, esfuerzo, obs }: { timeout?: number; cwd?: string; modelo?: string; esfuerzo?: string; obs?: Observador } = {}): Promise<string> {
     this.verificar(cwd)
     const args = ['-p', ...ClaudeRunner.formatoSalida, '--tools', '', ...ClaudeRunner.sinConectores]
-    args.push(...ClaudeRunner.argsModelo(modelo ?? this.config.modelo('internos')), ...ClaudeRunner.argsEsfuerzo(esfuerzo))
+    args.push(...ClaudeRunner.argsModelo(modelo ?? this.config.modelo('internos')), ...ClaudeRunner.argsEsfuerzo(this.esfuerzoO(esfuerzo)))
     return this.resultado([...args, '--', prompt], { timeout: timeout ?? this.config.timeout, cwd, obs })
   }
 
@@ -338,7 +340,7 @@ export class ClaudeRunner {
     if (p.instrucciones) a.push('--append-system-prompt', p.instrucciones)
     // sin modelo manda el del `.md` del agente
     if (p.modelo !== undefined) a.push(...ClaudeRunner.argsModelo(p.modelo))
-    a.push(...ClaudeRunner.argsEsfuerzo(p.esfuerzo))
+    a.push(...ClaudeRunner.argsEsfuerzo(this.esfuerzoO(p.esfuerzo)))
     return this.resultado([...a, '--', p.prompt], { timeout: p.timeout ?? this.config.timeout, cwd: p.cwd, obs: p.obs, envExtra: q?.env })
   }
 

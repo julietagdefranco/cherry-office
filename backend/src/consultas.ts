@@ -11,7 +11,7 @@ import {
   HerramientasCompuestas, HerramientasVacias, MCPResultados, MCPTokens, type IdentidadMCP, type MCPHerramientas, type MCPResultado,
 } from './mcp-protocolo.js'
 import { OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
-import { Instrucciones, dirsVinculos, esfuerzoDe } from './permisos.js'
+import { Instrucciones, conMemoria, dirsVinculos, esfuerzoDe } from './permisos.js'
 import { PermisosVivos } from './permisos-vivos.js'
 import type { ClaudeRunner } from './claude-runner.js'
 import { no405, type Resp } from './router.js'
@@ -208,7 +208,7 @@ export class ConsultasMCP {
       const prompt = promptConsulta(yo, pregunta) + prep.extra
       const texto = await this.runner.actividad.seguir({ oficina: ident.oficina, agente: b.id, origen: 'consulta', tarea: `Consulta de ${yo.nombre}`, extra: caja.observador() },
         async (obs) => this.runner.turnoSoloLectura({
-          agente: b.id, prompt, cwd: ident.oficina, timeout: this.timeout, dirsExtra: dirs, obs, instrucciones: Instrucciones.para(o, b), esfuerzo: esfuerzoDe(b),
+          agente: b.id, prompt, cwd: ident.oficina, timeout: this.timeout, dirsExtra: dirs, obs, instrucciones: conMemoria(Instrucciones.para(o, b), this.runner.config.iaEfectiva.memoria), esfuerzo: esfuerzoDe(b),
         }))
       let t = prefijo(sanear(texto).trim(), ConsultasMCP.maxRespuesta)
       if (t !== '' && this.memoria) {
