@@ -15,7 +15,7 @@ App.OficinaPixel = (function () {
   var salas = [], items = [], EST = null, figs = {}, orden = [], puestos = {}, sillasReu = [], spotsOcio = [], recepcion = null, despacho = null, bandeja = null;
   var trabajo = {}, faroDe = {}, ocupados = {}, elegido = null, reunionActual = { ids: [], quien: null }, muroDatos = { entregas: [], sinRevisar: 0 };
   var piezas = [], etiquetas = [], etqSalas = [], etqBandeja = null, hover = null, pausado = false, oficinaNombre = '', deptoColor = {};
-  var FASE = null, LUZ = 0, T = 0, ultimoTick = 0, ultimo = 0, raf = 0, sucio = true;
+  var FASE = null, LUZ = 0, T = 0, ultimoTick = 0, ultimoRevisar = 0, ultimo = 0, raf = 0, dormido = 0, sucio = true;
 
   /* ---------- luz según la hora ---------- */
   var FASES = [
@@ -35,10 +35,17 @@ App.OficinaPixel = (function () {
   function hu(n, o) { return M.huellaDe ? M.huellaDe(n, o || {}) : ((M.huella && M.huella[n]) || { w: 1, d: 1 }); }
   function put(n, x, y, o) {
     o = o || {}; var h = hu(n, o), al = n === 'planta' ? ({ alta: 30, mediana: 20, chica: 10 }[o.tipo] || 20) : (ALTO_MU[n] || 10);
-    items.push({ b: [x, y, x + h.w, y + h.d, al], d: x + h.w / 2 + y + h.d / 2, f: function (t) { if (M[n]) M[n](x, y, Object.assign({ t: t, luz: LUZ }, o)); } });
+    // con funciones en las opciones (los monitores de un escritorio) depende del estado de los agentes: se dibuja siempre
+    var vivo = Object.keys(o).some(function (k) { return typeof o[k] === 'function'; });
+    items.push({ b: [x, y, x + h.w, y + h.d, al], d: x + h.w / 2 + y + h.d / 2, vivo: vivo, det: true, f: function (t) { if (M[n]) M[n](x, y, conT(t, o)); } });
     return h;
   }
-  function at(d, f, b) { items.push({ d: d, f: f, b: b }); }
+  /* una función que recibe t es animada; sin parámetros es fija y se guarda como sprite */
+  function at(d, f, b) { items.push({ d: d, f: f, b: b, vivo: f.length > 0 }); }
+  function atDecor(d, f, b) { items.push({ d: d, f: f, b: b, det: true }); }
+  /* opciones de un mueble con t de solo lectura: si el mueble la lee, es animado y no se guarda como sprite */
+  var leyoT = false;
+  function conT(t, o) { var r = Object.assign({ luz: LUZ }, o); Object.defineProperty(r, 't', { get: function () { leyoT = true; return t; }, enumerable: true, configurable: true }); return r; }
   var PARED = { t: '#f6efe3', l: '#e8dcc8', r: '#d4c6ae' }, MARCO = { t: '#a3815f', l: '#8f6f51', r: '#7a5d43' };
   var ANCHO = { pizarra: 1.4, corcho: 1, cuadro: .5, reloj: .5, tv: 1 };
   function tramos(u0, u1, huecos) {
@@ -54,12 +61,12 @@ App.OficinaPixel = (function () {
       at(h[1] + y + WT / 2, function () { box(h[1], y, .04, WT + .03, 0, WHI - 2, MARCO); }, [h[1], y, h[1] + .04, y + WT + .03, WHI]);
     });
     (decor || []).forEach(function (dc) { var fn = dc[0], u = dc[1], z = dc[2], o = dc[3] || {}, w = ANCHO[fn] || .6;
-      at(u + w + .3 + y + WT, function (t) { if (M.pared && M.pared[fn]) M.pared[fn]('x', u, y + WT, z, Object.assign({ t: t, luz: LUZ }, o)); }, [u, y + WT, u + w, y + WT + .03, WHI]); });
+      atDecor(u + w + .3 + y + WT, function (t) { if (M.pared && M.pared[fn]) M.pared[fn]('x', u, y + WT, z, conT(t, o)); }, [u, y + WT, u + w, y + WT + .03, WHI]); });
   }
   function paredY(x, y0, y1, decor) {
     tramos(y0, y1, []).forEach(function (s) { at(x + WT / 2 + (s[0] + s[1]) / 2, function () { box(x, s[0], WT, s[1] - s[0], 0, WHI, PARED); }, [x, s[0], x + WT, s[1], WHI]); });
     (decor || []).forEach(function (dc) { var fn = dc[0], u = dc[1], z = dc[2], o = dc[3] || {}, w = ANCHO[fn] || .6;
-      at(x + WT + u + w + .3, function (t) { if (M.pared && M.pared[fn]) M.pared[fn]('y', u, x + WT, z, Object.assign({ t: t, luz: LUZ }, o)); }, [x + WT, u, x + WT + .03, u + w, WHI]); });
+      atDecor(x + WT + u + w + .3, function (t) { if (M.pared && M.pared[fn]) M.pared[fn]('y', u, x + WT, z, conT(t, o)); }, [x + WT, u, x + WT + .03, u + w, WHI]); });
   }
 
   /* ---------- planta: se arma con los departamentos y agentes de la oficina ---------- */
@@ -127,9 +134,10 @@ App.OficinaPixel = (function () {
   }
   function islaDoble(x, y, a1, a2, s) {
     var h = hu('escritorioDoble', {}), cx = x + h.w / 2, taza = (R(x * 7)) % 3 === 0;
+    // el escritorio llama a atras/adelante sin argumentos: la animación sale de T (el cuadro actual)
     put('escritorioDoble', x, y, {
-      atras: function (t) { M.monitor(cx - .46, y + .3, { mira: '-y', estado: estadoMonitor(a1 && a1.id), t: t, luz: LUZ, seed: x * 3 }); M.tecladoMouse(cx - .45, y + .1, { mira: '-y' }); if (taza) M.taza(cx + .3, y + .2, { t: t }); },
-      adelante: function (t) { M.monitor(cx + .04, y + h.d - .42, { mira: '+y', estado: estadoMonitor(a2 && a2.id), t: t, luz: LUZ, seed: x * 5 }); M.tecladoMouse(cx + .05, y + h.d - .24, { mira: '+y' }); if (!taza) M.papeles(cx - .4, y + h.d - .3, {}); }
+      atras: function () { M.monitor(cx - .46, y + .3, { mira: '-y', estado: estadoMonitor(a1 && a1.id), t: T, luz: LUZ, seed: x * 3 }); M.tecladoMouse(cx - .45, y + .1, { mira: '-y' }); if (taza) M.taza(cx + .3, y + .2, { t: T }); },
+      adelante: function () { M.monitor(cx + .04, y + h.d - .42, { mira: '+y', estado: estadoMonitor(a2 && a2.id), t: T, luz: LUZ, seed: x * 5 }); M.tecladoMouse(cx + .05, y + h.d - .24, { mira: '+y' }); if (!taza) M.papeles(cx - .4, y + h.d - .3, {}); }
     });
     [[{ x: cx - .25, y: y - .38 }, '+y', a1], [{ x: cx + .25, y: y + h.d + .38 }, '-y', a2]].forEach(function (q) {
       var p = q[0], mira = q[1], a = q[2]; silla(p, mira);
@@ -353,7 +361,7 @@ App.OficinaPixel = (function () {
       var pts = [{ x: a.x, y: a.y }].concat(ruta(a, b));
       var largo = 0; for (var i = 1; i < pts.length; i++) largo += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
       piezas.push({ pts: pts, largo: largo, t0: performance.now(), dur: Math.max(1500, Math.min(3000, largo * 260)), color: color || (deptoColor[deptoDe(hacia)] || '#f2b84b') });
-      sucio = true; return true;
+      pedir(); return true;
     } catch (e) { return false; }
   }
   function dibujarPiezas(now) {
@@ -405,15 +413,46 @@ App.OficinaPixel = (function () {
     FASE = fase(); LUZ = FASE.glow;
     N.g = g; g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.clearRect(0, 0, W, H);
     g.drawImage(pisoPara(FASE.k), 0, 0);
-    ordenar().forEach(function (it) { it.f(T); });
+    ordenar().forEach(dibujarItem);
     dibujarPiezas(now);
     var F = FASE;
     if (F.tint) { g.globalCompositeOperation = 'multiply'; g.fillStyle = F.tint; g.fillRect(0, 0, W, H); g.globalCompositeOperation = 'destination-in'; g.drawImage(pisoPara(F.k), 0, 0); g.globalCompositeOperation = 'source-over'; }
-    if (F.glow > 0) {
-      g.globalCompositeOperation = 'lighter';
-      salas.forEach(function (s) { var p = iso((s.r[0] + s.r[2]) / 2, (s.r[1] + s.r[3]) / 2); N.dith(p[0], p[1] + 6, 90, 45, '#ffcf8c', .07 * F.glow); });
-      g.globalCompositeOperation = 'source-over';
-    }
+    if (F.glow > 0) { g.globalCompositeOperation = 'lighter'; g.drawImage(brilloPara(F), 0, 0); g.globalCompositeOperation = 'source-over'; }
+  }
+  /* ---------- sprites de los muebles fijos ----------
+     Cada mueble se pinta con miles de fillRect de 1 px. Los que no se animan se graban una vez por fase del día
+     (la luz cambia con la fase) en un canvas chico y después solo se copian; los animados se dibujan como siempre. */
+  function grabador() {
+    var ops = [], b = [Infinity, Infinity, -Infinity, -Infinity];
+    return { fillStyle: '#000', globalAlpha: 1, ops: ops, b: b,
+      fillRect: function (x, y, w, h) { ops.push(x, y, w, h, this.fillStyle, this.globalAlpha);
+        b[0] = Math.min(b[0], x, x + w); b[1] = Math.min(b[1], y, y + h); b[2] = Math.max(b[2], x, x + w); b[3] = Math.max(b[3], y, y + h); } };
+  }
+  function volcar(rec, ctx, ox, oy) {
+    var o = rec.ops;
+    for (var i = 0; i < o.length; i += 6) { ctx.fillStyle = o[i + 4]; ctx.globalAlpha = o[i + 5]; ctx.fillRect(o[i] - ox, o[i + 1] - oy, o[i + 2], o[i + 3]); }
+    ctx.globalAlpha = 1;
+  }
+  function dibujarItem(it) {
+    if (it.vivo) { it.f(T); return; }
+    var s = it.spr;
+    if (s && s.k === FASE.k) { if (s.cv) g.drawImage(s.cv, s.x, s.y); return; }
+    var rec = grabador(), g0 = N.g; leyoT = false; N.g = rec;
+    try { it.f(T); } catch (e) { N.g = g0; it.vivo = true; it.f(T); return; }
+    N.g = g0;
+    if (it.det && leyoT) { it.vivo = true; volcar(rec, g, 0, 0); return; }
+    var b = rec.b, x0 = Math.floor(b[0]), y0 = Math.floor(b[1]), cv = null;
+    if (rec.ops.length) { cv = document.createElement('canvas'); cv.width = Math.max(1, Math.ceil(b[2]) - x0); cv.height = Math.max(1, Math.ceil(b[3]) - y0); volcar(rec, cv.getContext('2d'), x0, y0); g.drawImage(cv, x0, y0); }
+    it.spr = { k: FASE.k, cv: cv, x: x0, y: y0 };
+  }
+  /* el brillo de las salas de noche es un tramado píxel a píxel (decenas de miles de fillRect): se pinta una vez por fase
+     en su propia capa y después solo se copia */
+  function brilloPara(F) {
+    if (pisos['brillo:' + F.k]) return pisos['brillo:' + F.k];
+    var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    var g0 = N.g; N.g = cv.getContext('2d'); N.g.globalCompositeOperation = 'lighter';
+    salas.forEach(function (s) { var p = iso((s.r[0] + s.r[2]) / 2, (s.r[1] + s.r[3]) / 2); N.dith(p[0], p[1] + 6, 90, 45, '#ffcf8c', .07 * F.glow); });
+    N.g = g0; pisos['brillo:' + F.k] = cv; return cv;
   }
 
   /* ---------- etiquetas (las mismas clases que la maqueta 3D) ---------- */
@@ -498,7 +537,7 @@ App.OficinaPixel = (function () {
     cw = vista.width = Math.max(1, R(cssW * dpr)); ch = vista.height = Math.max(1, R(cssH * dpr));
     kLejos = Math.max(1, Math.min(Math.floor(cw / W), Math.floor(ch / H)));
     kCerca = Math.max(kLejos + 1, Math.floor(cw / 420));
-    sucio = true; presentar();
+    presentar(); if (items.length) pedir(); else sucio = true;   // antes de construir no hay mundo que dibujar
   }
   function presentar() {
     if (!vc) return;
@@ -548,7 +587,7 @@ App.OficinaPixel = (function () {
       if (ptrs.size === 1) arr = { x: e.clientX, y: e.clientY, cx: cam.cx, cy: cam.cy };
       if (ptrs.size === 2) { var v = Array.from(ptrs.values()); pinch = { d: Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]), k: cam.k }; arr = null; } });
     vista.addEventListener('pointermove', function (e) {
-      if (!ptrs.has(e.pointerId)) { var h = golpe(e); if (JSON.stringify(h && { t: h.tipo, i: h.id }) !== JSON.stringify(hover && { t: hover.tipo, i: hover.id })) { hover = h; vista.style.cursor = h ? 'pointer' : 'default'; pintarEtiquetas(); sucio = true; if (cbPasar) cbPasar(h ? { tipo: h.tipo, id: h.id, texto: h.texto } : null); } return; }
+      if (!ptrs.has(e.pointerId)) { var h = golpe(e); if (JSON.stringify(h && { t: h.tipo, i: h.id }) !== JSON.stringify(hover && { t: hover.tipo, i: hover.id })) { hover = h; vista.style.cursor = h ? 'pointer' : 'default'; pintarEtiquetas(); pedir(); if (cbPasar) cbPasar(h ? { tipo: h.tipo, id: h.id, texto: h.texto } : null); } return; }
       ptrs.set(e.pointerId, [e.clientX, e.clientY]);
       if (pinch && ptrs.size === 2) { var v = Array.from(ptrs.values()), d = Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]), r = vista.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
         zoom(R(pinch.k * d / pinch.d), ((v[0][0] + v[1][0]) / 2 - r.left) * dpr, ((v[0][1] + v[1][1]) / 2 - r.top) * dpr); movido = true; return; }
@@ -559,7 +598,7 @@ App.OficinaPixel = (function () {
     vista.addEventListener('pointerup', function (e) { var era = !movido && ptrs.size === 1; soltar(e); if (!era) return; var h = golpe(e); if (!h) return;
       if (h.tipo === 'agente') cbAgente(h.id); else cbLugar(h.tipo); });
     vista.addEventListener('pointercancel', soltar);
-    vista.addEventListener('pointerleave', function () { if (hover) { hover = null; pintarEtiquetas(); if (cbPasar) cbPasar(null); } });
+    vista.addEventListener('pointerleave', function () { if (hover) { hover = null; pintarEtiquetas(); pedir(); if (cbPasar) cbPasar(null); } });
   }
   function zoom(nk, px0, py0) {
     nk = Math.max(kLejos, Math.min(kCerca + 3, nk)); if (nk === cam.k) return; tween = null;
@@ -569,18 +608,30 @@ App.OficinaPixel = (function () {
   }
 
   /* ---------- ciclo ---------- */
-  function pedir() { sucio = true; if (!raf && !pausado) raf = requestAnimationFrame(cuadro); }
+  function pedir() { sucio = true; if (pausado) return; despertar(); }
+  function despertar() { if (dormido) { clearTimeout(dormido); dormido = 0; } if (!raf) raf = requestAnimationFrame(cuadro); }
   function cuadro(now) {
     raf = 0; if (pausado) return;
+    var mover = !!tween;
     if (tween) { var p = Math.min(1, (now - tween.t0) / 650), e = 1 - Math.pow(1 - p, 3), f = tween.from, to = tween.to;
       cam.cx = f.cx + (to.cx - f.cx) * e; cam.cy = f.cy + (to.cy - f.cy) * e; cam.k = p < 1 ? Math.max(kLejos, R(f.k + (to.k - f.k) * e)) : to.k; if (p >= 1) tween = null; }
     var dt = ultimo ? Math.min(.1, (now - ultimo) / 1000) : 0; ultimo = now;
     Object.keys(figs).forEach(function (id) { avanzar(figs[id], dt); });
-    if (now - ultimoTick > 1000) revisar(now);
-    var animado = !reducido;
-    if (now - ultimoTick > 60 && (sucio || animado)) { ultimoTick = now; T = Math.floor(now / 125); render(now); sucio = false; }
-    presentar();
-    raf = requestAnimationFrame(cuadro);
+    if (now - ultimoRevisar > 1000) { ultimoRevisar = now; revisar(now); }
+    /* el mundo se vuelve a dibujar solo si algo cambió o si toca el siguiente cuadro de la animación (cada 125 ms);
+       y se copia a la pantalla solo si se redibujó o se movió la cámara: repetir el mismo cuadro 120 veces por segundo
+       era lo que hacía arrastrar la app */
+    var t2 = Math.floor(now / 125), animado = !reducido && t2 !== T;
+    if (now - ultimoTick > 60 && (sucio || animado)) { ultimoTick = now; T = t2; sucio = false; render(now); mover = true; }   // render puede volver a marcarlo (piezas en viaje)
+    if (mover) presentar();
+    /* con la cámara quieta, nadie caminando y nada pendiente, no hace falta despertarse en cada refresco de pantalla
+       (120 por segundo): se duerme hasta el próximo cuadro de la animación, o un segundo si no hay animación.
+       pedir() lo despierta antes si cambia algo */
+    var ocupado = tween || sucio || Object.keys(figs).some(function (id) { return figs[id].ruta; });
+    if (ocupado) { raf = requestAnimationFrame(cuadro); return; }
+    ultimo = 0;
+    var ahora = performance.now(), espera = reducido ? 1000 : 125 - (ahora % 125) + 1;
+    dormido = setTimeout(function () { dormido = 0; if (!pausado) despertar(); }, espera);
   }
 
   /* ---------- interfaz pública ---------- */
@@ -621,12 +672,13 @@ App.OficinaPixel = (function () {
   function reunion(ids, quien) { reunionActual = { ids: (ids || []).slice(0, 10), quien: quien || null }; pintarEtiquetas(); revisar(performance.now()); pedir(); }
   function finReunion() { reunion([], null); }
   function muro(entregas, sinRevisar) { muroDatos = { entregas: entregas || [], sinRevisar: sinRevisar || 0 }; pintarEtiquetas(); pedir(); }
-  function pausar(si) { pausado = !!si; if (!pausado) pedir(); }
+  function pausar(si) { pausado = !!si; if (pausado && dormido) { clearTimeout(dormido); dormido = 0; } if (!pausado) pedir(); }
 
   return {
     iniciar: iniciar, construir: construir, alElegirAgente: function (fn) { cbAgente = fn || function () {}; }, alElegirLugar: function (fn) { cbLugar = fn || function () {}; },
     alPasar: function (fn) { cbPasar = fn; }, elegir: elegir, ocupado: ocupado, reunion: reunion, finReunion: finReunion, encuadrar: encuadrar, actividad: actividad,
     faros: faros, enfocar: function (x, z) { return enfocar(x, z); }, enfocarAgente: enfocarAgente, margen: margen, marcar: marcar, enfocarLugar: enfocarLugar, muro: muro, pieza: pieza, pedir: pedir, pausar: pausar,
-    pixel: true, _estado: function () { return { salas: salas.length, figuras: Object.keys(figs).length, items: items.length, W: W, H: H, cam: cam, fase: FASE && FASE.k }; }
+    pixel: true, _estado: function () { return { salas: salas.length, figuras: Object.keys(figs).length, items: items.length, W: W, H: H, cam: cam, fase: FASE && FASE.k,
+      caminando: Object.keys(figs).filter(function (id) { return figs[id].ruta; }).length, dormido: !!dormido, piezas: piezas.length }; }
   };
 })();
