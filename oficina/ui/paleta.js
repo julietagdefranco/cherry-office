@@ -155,12 +155,15 @@ App.Paleta = (function () {
 
   /* ---------------- barra de pistas ---------------- */
   var esMac = /Mac/.test(navigator.platform || navigator.userAgent);
-  var BASE = 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte · ' + (esMac ? '⌘K' : 'Ctrl+K') + ' buscar · N siguiente aviso';
+  function base() {
+    return (App.estiloOficina === 'pixel' ? 'Rueda o pellizco para acercarte · arrastrá para moverte · ' : 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte · ') +
+      (esMac ? '⌘K' : 'Ctrl+K') + ' buscar · N siguiente aviso';
+  }
   var VERBO = { pensando: 'pensando', leyendo: 'leyendo', escribiendo: 'escribiendo', buscando: 'buscando', consultando: 'consultando a', trabajando: 'trabajando' };
   function pista(hov) {
     var el = App.dom && App.dom.lienzo && App.dom.lienzo.parentNode && App.dom.lienzo.parentNode.querySelector('.pista');
     if (!el) return;
-    if (!hov) { el.textContent = BASE; el.classList.remove('viva'); return; }
+    if (!hov) { el.textContent = base(); el.classList.remove('viva'); return; }
     var t;
     if (hov.tipo === 'agente') {
       var a = App.agente(hov.id), act = (App.E.actividad || {})[hov.id];
@@ -169,11 +172,13 @@ App.Paleta = (function () {
     } else if (hov.tipo === 'reunion') t = 'Clic: abrir la sala de reuniones';
     else if (hov.tipo === 'biblioteca') t = 'Clic: abrir la biblioteca';
     else if (hov.tipo === 'direccion') t = 'Clic: lo que te espera para revisar';
-    else if (hov.tipo === 'yo') t = 'Sos vos' + (App.Yo.nombre() ? ', ' + App.Yo.nombre() : '') + ' · clic: cambiar tu nombre o tu minifig';
+    else if (hov.tipo === 'yo') t = 'Sos vos' + (App.Yo.nombre() ? ', ' + App.Yo.nombre() : '') + ' · clic: cambiar tu nombre o ' + (App.estiloOficina === 'pixel' ? 'tu apariencia' : 'tu minifig');
+    else if (hov.tipo === 'creador') t = 'Clic: armar o cambiar la oficina con el Creador';
+    else if (hov.tipo === 'juegos') t = 'Juegos y café: acá descansan los agentes sin trabajo';
     else if (hov.texto) t = hov.texto;   // bandeja de entregables: el 3D ya arma el texto
-    el.textContent = t || BASE;
+    el.textContent = t || base();
     el.classList.toggle('viva', !!t);
   }
 
-  return { abrir: abrir, cerrar: cerrar, pista: pista, BASE: BASE };
+  return { abrir: abrir, cerrar: cerrar, pista: pista, get BASE() { return base(); } };
 })();

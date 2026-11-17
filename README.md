@@ -1,7 +1,8 @@
 # Oficina
 
-Una oficina 3D estilo LEGO donde trabajan tus agentes de Claude Code. Cada minifig es un agente real
+Una oficina en pixel art isométrico donde trabajan tus agentes de Claude Code. Cada personaje es un agente real
 (`.claude/agents/<id>.md`): le hablás, lo llamás a reuniones, le das tareas y te deja lo que termina en tu bandeja.
+La maqueta 3D estilo LEGO de las versiones anteriores sigue disponible en Ajustes › Apariencia.
 Hay app para **Mac** y para **Windows**.
 
 ## Instalar
@@ -19,10 +20,11 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
 - **Oficinas:** cada oficina es una carpeta (por defecto `~/Oficinas/<Nombre>/`) con su `oficina.json`, sus agentes,
   su conocimiento, sus reuniones y sus archivos. Podés crear una a mano, **armarla charlando con el Creador** (le contás
   cómo trabajás y te propone departamentos, agentes y flujos), abrir una existente o importar un `.zip` exportado.
-- **Quién dirige:** tu nombre y tu minifig, guardados en cada oficina. Tenés tu despacho en la maqueta y una bandeja
+- **Quién dirige:** tu nombre y tu apariencia, guardados en cada oficina. Tenés tu despacho en la oficina y una bandeja
   en el escritorio donde los agentes apilan lo que te entregan.
 - **Agentes y departamentos:** cada departamento es una sala del edificio. A los agentes los vestís con el editor de
-  minifigs (caras, peinados, ropa, sombreros, piel) y les ajustás modelo, permisos y conectores.
+  apariencia (piel, peinado, ropa, colores y accesorios) y les ajustás modelo, permisos y conectores. Los agentes sin
+  trabajo caminan a la sala de juegos y café, y la luz de la oficina sigue la hora del día.
 - **Chat y reuniones:** clic en un personaje para hablarle en privado, o «Llamar a reunión» para juntar a varios. Desde una charla, «Sacar tareas» propone
   el trabajo que quedó pendiente (para ese agente o para otros) y, después de revisarlo, lo crea como tareas.
 - **Flujos:** procesos de varios pasos que pasan de agente en agente, con aprobaciones tuyas donde haga falta. Ves
@@ -34,12 +36,12 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
 ## Estructura del repo
 | Carpeta | Qué hay |
 |---|---|
-| `oficina/` | El front (HTML, JS y three.js, con `vendor/` offline): la maqueta 3D y todas las pantallas. |
+| `oficina/` | El front (HTML y JS, con `vendor/` offline): la oficina pixel (`ui/pixel/`), la maqueta 3D LEGO opcional (three.js) y todas las pantallas. |
 | `backend/` | El backend en TypeScript (Node): oficinas, agentes, chat, flujos, tareas, biblioteca. La API está en [backend/API.md](backend/API.md). |
 | `desktop/` | La app de escritorio: carcasa Electron alrededor de `backend/` y `oficina/`. De acá salen el `.dmg` y el `.exe` de las releases. Ver [desktop/README.md](desktop/README.md). |
 | `docs/` | Planes de diseño, `aprendizajes.md` (cómo se comporta el `claude` real) y `caso-prospera/` (el texto con el que se prueba armar una oficina con el Creador). |
 | `tools/` | Utilidades sueltas, como el empaquetado de piezas LDraw. |
-| `bocetos/` | Pruebas de diseño que no forman parte de la app. `bocetos/pixel/` es la oficina en pixel art isométrico pensada para reemplazar a la maqueta LEGO. Ver [bocetos/pixel/README.md](bocetos/pixel/README.md). |
+| `bocetos/` | Pruebas de diseño que no forman parte de la app. `bocetos/pixel/` es el boceto del que salió la oficina pixel, con su renderizador de sprites a PNG. Ver [bocetos/pixel/README.md](bocetos/pixel/README.md). |
 
 Hasta la 0.7 la app de Mac era nativa en Swift, con su propio backend; se retiró al pasar las dos plataformas a
 Electron (queda en el historial de git, antes de borrar `app/`).

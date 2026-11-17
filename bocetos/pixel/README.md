@@ -34,7 +34,6 @@ cd bocetos/pixel/v2
 node render.mjs /tmp/catalogo.png 520 520 3 PREVIEW_PJ personajes.js preview-personajes.js
 ```
 
-## Qué falta para llevarlo a la app
-Implementar `App.OficinaPixel` con las mismas funciones que `App.Oficina3D` (`construir`, `elegir`, `ocupado`,
-`actividad`, `enfocarAgente`, `encuadrar`, `reunion`, …), conectarla a los agentes reales, sumar lo que hoy hace la
-maqueta (la pieza que viaja en los flujos, el muro, los faros) y pasar el editor de minifigs a las capas pixel.
+## En la app
+La oficina pixel ya está en la app: `oficina/ui/pixel/` (`App.OficinaPixel`, con la misma interfaz que
+`App.Oficina3D`), elegible en Ajustes › Apariencia. Este boceto queda como banco de pruebas y origen de los sprites.
