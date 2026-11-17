@@ -1,0 +1,510 @@
+<title>Estudio con oficina pixel</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* La app tal como está en main (riel · lista · vista, tokens de oficina/ui/estilo.css). Solo la oficina, los retratos y el editor de apariencia son pixel. */
+:root{
+  --fondo:#f2f0ec;--panel:#ffffff;--panel-2:#f8f7f4;--linea:#e4e1db;--linea-fuerte:#d3cfc7;
+  --texto:#1d1d1f;--suave:#6d6962;--tenue:#9a958d;--acento:#1d1d1f;--sobre-acento:#ffffff;
+  --peligro:#b3362c;--ok:#3b7a4b;--aviso:#a46a12;--foco:rgba(29,29,31,.10);
+  --sombra:0 1px 2px rgba(20,18,15,.06),0 8px 24px rgba(20,18,15,.08);
+  --sombra-alta:0 2px 6px rgba(20,18,15,.08),0 24px 60px rgba(20,18,15,.18);
+  --radio:10px;--radio-chico:7px;--riel:68px;--lista:284px;--ancho-lectura:760px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --fondo:#19191b;--panel:#232326;--panel-2:#1e1e21;--linea:#333337;--linea-fuerte:#45454a;
+  --texto:#f1f1f2;--suave:#a3a3a8;--tenue:#75757b;--acento:#f1f1f2;--sobre-acento:#1b1b1d;
+  --peligro:#e0675d;--ok:#6cbf80;--aviso:#e0a84a;--foco:rgba(255,255,255,.2);
+  --sombra:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);--sombra-alta:0 2px 6px rgba(0,0,0,.35),0 24px 60px rgba(0,0,0,.5);color-scheme:dark}}
+:root[data-theme="dark"]{
+  --fondo:#19191b;--panel:#232326;--panel-2:#1e1e21;--linea:#333337;--linea-fuerte:#45454a;
+  --texto:#f1f1f2;--suave:#a3a3a8;--tenue:#75757b;--acento:#f1f1f2;--sobre-acento:#1b1b1d;
+  --peligro:#e0675d;--ok:#6cbf80;--aviso:#e0a84a;--foco:rgba(255,255,255,.2);
+  --sombra:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);--sombra-alta:0 2px 6px rgba(0,0,0,.35),0 24px 60px rgba(0,0,0,.5);color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--fondo);color:var(--texto);font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,textarea{font:inherit;color:inherit}
+h2,h3{margin:0;font-weight:600;letter-spacing:-.01em}
+p{margin:0}
+svg{flex:none}
+button:focus-visible,[role="button"]:focus-visible{outline:2px solid var(--acento);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 13px;border-radius:var(--radio-chico);border:1px solid var(--linea-fuerte);background:var(--panel);cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--panel-2)}
+.btn.pri{background:var(--acento);border-color:var(--acento);color:var(--sobre-acento)}
+.btn.pri:hover{opacity:.88}
+.btn.chico{height:26px;padding:0 9px;font-size:12px}
+.btn.peligro{color:var(--peligro)}
+.btn svg{width:15px;height:15px}
+.campo{width:100%;height:34px;padding:0 10px;border-radius:var(--radio-chico);border:1px solid var(--linea-fuerte);background:var(--panel);outline:none}
+textarea.campo{height:auto;min-height:64px;padding:8px 10px;resize:vertical}
+.campo:focus{border-color:var(--suave);box-shadow:0 0 0 2px var(--foco)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;border:1px solid var(--linea-fuerte);background:var(--panel);font-size:12px;cursor:pointer}
+.chip.sel,.chip[aria-pressed="true"]{background:var(--acento);color:var(--sobre-acento);border-color:var(--acento)}
+.chip .punto{width:8px;height:8px;border-radius:2px}
+.insignia{display:inline-flex;align-items:center;gap:5px;height:18px;padding:0 7px;border-radius:9px;border:1px solid var(--linea);background:var(--panel-2);font-size:11px;color:var(--suave);white-space:nowrap}
+.insignia .punto{width:7px;height:7px;border-radius:2px}
+.oculto-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+/* ---------- estructura ---------- */
+.app{height:100%;display:grid;grid-template-columns:var(--riel) var(--lista) minmax(0,1fr);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+.app.en-oficina{grid-template-columns:var(--riel) 0 minmax(0,1fr)}
+.app.en-oficina .lista-col{display:none}
+.riel{grid-column:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 0;background:var(--panel-2);border-right:1px solid var(--linea);min-height:0;overflow-y:auto;scrollbar-width:none}
+.riel-logo{border:0;background:none;padding:4px;border-radius:10px;cursor:pointer;margin-bottom:4px}
+.riel-logo:hover{background:var(--panel)}
+.logo{width:30px;height:30px;border-radius:8px;background:var(--acento);color:var(--sobre-acento);display:grid;place-items:center}
+.logo svg{width:17px;height:17px}
+.riel-nuevo{width:40px;height:40px;border-radius:12px;border:1px solid var(--linea-fuerte);background:var(--panel);cursor:pointer;display:flex;align-items:center;justify-content:center;margin:2px 0 8px;flex:none}
+.riel-nuevo:hover{background:var(--fondo)}
+.riel-nuevo svg{width:18px;height:18px}
+.riel-item{position:relative;width:56px;min-height:50px;border:0;border-radius:12px;background:none;cursor:pointer;color:var(--suave);flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:500;padding:4px 2px}
+.riel-item svg{width:19px;height:19px}
+.riel-item:hover{background:var(--panel);color:var(--texto)}
+.riel-item.activo{background:var(--panel);color:var(--texto);box-shadow:inset 0 0 0 1px var(--linea-fuerte)}
+.riel-item .n{position:absolute;top:2px;right:2px;height:16px;min-width:16px;padding:0 4px;font-size:10px;border-radius:8px;border:1px solid var(--linea);background:var(--panel);color:var(--texto);display:flex;align-items:center;justify-content:center}
+.riel-item .n.aviso{background:var(--aviso);border-color:var(--aviso);color:#1d1d1f}
+.riel-sep{flex:1;min-height:8px}
+.riel-uso{width:56px;padding:6px 2px;border:0;background:none;border-radius:12px;font-size:10px;color:var(--suave);display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.25;cursor:pointer;font-variant-numeric:tabular-nums}
+.riel-uso:hover{background:var(--panel)}
+.riel-uso svg{width:15px;height:15px}
+.riel-uso b{color:var(--texto);font-weight:600}
+.lista-col{grid-column:2;display:flex;flex-direction:column;min-height:0;min-width:0;border-right:1px solid var(--linea);background:var(--panel-2);overflow:hidden}
+.lista-cab{display:flex;align-items:center;gap:8px;padding:16px 14px 8px}
+.lista-cab h2{font-size:16px;flex:1}
+.lista-buscar{margin:0 12px 6px;position:relative}
+.lista-buscar>svg{position:absolute;left:9px;top:9px;width:15px;height:15px;color:var(--tenue)}
+.lista-buscar .campo{padding-left:30px;height:32px}
+.lista-cuerpo{flex:1;overflow-y:auto;padding:0 8px 14px;min-height:0}
+.lista-grupo{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--tenue);text-transform:uppercase;letter-spacing:.04em;padding:14px 8px 5px}
+.lista-grupo .punto{width:8px;height:8px;border-radius:2px}
+.lista-grupo .cuenta{margin-left:auto;font-weight:500}
+.lista-item{display:flex;gap:10px;align-items:center;width:100%;padding:7px 8px;border-radius:var(--radio-chico);cursor:pointer;border:0;background:none;text-align:left}
+.lista-item:hover{background:var(--panel)}
+.lista-item.activo{background:var(--panel);box-shadow:inset 0 0 0 1px var(--linea-fuerte)}
+.lista-icono{width:32px;height:32px;border-radius:8px;background:var(--fondo);display:flex;align-items:center;justify-content:center;color:var(--suave);flex:none}
+.lista-item.simple{padding:6px 8px}
+.lista-item.simple .lista-icono{width:auto;height:auto;background:none}
+.lista-item-txt{min-width:0;flex:1}
+.lista-item-tit{display:flex;gap:6px;align-items:baseline}
+.lista-item-tit b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.lista-item.simple b{font-weight:500}
+.lista-item-tit small{color:var(--tenue);font-size:11px;flex:none}
+.lista-item-sub{color:var(--suave);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lista-item .cnt{color:var(--tenue);font-size:12px}
+.retrato{width:32px;height:32px;border-radius:8px;background:var(--fondo);image-rendering:pixelated;flex:none;display:block}
+.vista{grid-column:3;position:relative;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+/* oficina */
+#stage{position:absolute;inset:0;overflow:hidden}
+#view{display:block;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges}
+.tilt{position:absolute;left:0;right:0;height:0;pointer-events:none;transition:height .45s}
+.tilt.up{top:0;-webkit-mask-image:linear-gradient(#000 35%,transparent);mask-image:linear-gradient(#000 35%,transparent)}
+.tilt.dn{bottom:0;-webkit-mask-image:linear-gradient(transparent,#000 65%);mask-image:linear-gradient(transparent,#000 65%)}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--linea);border-radius:var(--radio-chico);box-shadow:var(--sombra);padding:3px 9px;font-size:12px;white-space:nowrap;transform:translate(-50%,-130%);z-index:3}
+.rotulo{position:absolute;top:14px;left:14px;z-index:5;display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);border:1px solid var(--linea);border-radius:var(--radio);box-shadow:var(--sombra);max-width:40%}
+.rotulo b{font-weight:650;font-size:14px;display:block}
+.rotulo small{font-size:12px;color:var(--suave)}
+.herr{position:absolute;top:14px;right:14px;display:flex;gap:8px;z-index:5}
+.herr .btn{box-shadow:var(--sombra)}
+.pista{position:absolute;left:14px;bottom:10px;color:var(--tenue);font-size:11.5px;z-index:4}
+.zonas{position:absolute;left:14px;bottom:32px;display:flex;gap:6px;flex-wrap:wrap;z-index:4;right:14px;pointer-events:none}
+.zonas .chip{pointer-events:auto;box-shadow:var(--sombra)}
+.app.en-seccion #stage,.app.en-seccion .rotulo,.app.en-seccion .herr,.app.en-seccion .pista,.app.en-seccion .zonas{display:none}
+.app.en-oficina .panel{display:none}
+/* pantalla de sección */
+.panel{flex:1;display:flex;flex-direction:column;min-height:0;background:var(--panel)}
+.der-cab{display:flex;align-items:center;gap:12px;padding:16px 16px 12px}
+.der-ico{width:52px;height:52px;border-radius:12px;background:var(--fondo);border:1px solid var(--linea);display:flex;align-items:center;justify-content:center;color:var(--suave);flex:none}
+.der-ico svg{width:22px;height:22px}
+.der-cab h2{font-size:16px;line-height:1.25}
+.der-cab small{color:var(--suave);font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.der-acciones{display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap}
+.pestanas{display:flex;gap:4px;padding:0 16px;border-bottom:1px solid var(--linea);overflow-x:auto}
+.pestana{background:none;border:0;padding:9px 8px;cursor:pointer;color:var(--suave);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;font-weight:500}
+.pestana.activa{color:var(--texto);border-bottom-color:var(--texto)}
+.der-cuerpo{flex:1;min-height:0;overflow-y:auto;padding:14px 16px}
+.der-pie{border-top:1px solid var(--linea);padding:10px 16px 14px}
+.lectura{width:100%;max-width:var(--ancho-lectura);margin-left:auto;margin-right:auto}
+.der-cuerpo>.lectura{display:flex;flex-direction:column;gap:10px}
+.acciones{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
+.acciones>.izq{margin-right:auto;display:flex;gap:8px}
+.nav-vacio{margin:auto;text-align:center;color:var(--suave);padding:40px 24px;max-width:420px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.nav-vacio>svg{width:34px;height:34px;color:var(--tenue);margin-bottom:6px}
+.nav-vacio b{color:var(--texto);font-size:15px}
+.nav-vacio .fila{margin-top:12px;justify-content:center}
+.card{background:var(--panel);border:1px solid var(--linea);border-radius:var(--radio);padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.card h3{font-size:13.5px}
+.card p{color:var(--suave);font-size:12.5px}
+.fila{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fila .sp{margin-left:auto}
+.mini{width:22px;height:22px;border-radius:6px;background:var(--fondo);image-rendering:pixelated;flex:none}
+.meta{color:var(--tenue);font-size:12px}
+.sec-tit{font-size:11px;font-weight:600;color:var(--tenue);text-transform:uppercase;letter-spacing:.04em;margin-top:8px}
+.fila-dec{display:flex;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid var(--linea)}
+.fila-dec:first-child{border-top:0}
+.fila-txt{flex:1;min-width:0}
+.fila-tit{font-weight:500}
+.fila-sub{color:var(--suave);font-size:12px}
+.pasos{display:flex;gap:4px}
+.pasos i{flex:1;height:6px;border-radius:3px;background:var(--linea)}
+.pasos i.ok{background:var(--ok)}
+.pasos i.va{background:var(--aviso);animation:latir 1.2s ease-in-out infinite}
+@keyframes latir{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pasos i.va{animation:none}}
+/* chat */
+.chat{display:flex;flex-direction:column;gap:10px}
+.msg{max-width:78%;padding:8px 12px;border-radius:12px;background:var(--panel-2);border:1px solid var(--linea)}
+.msg.yo{align-self:flex-end;background:var(--acento);color:var(--sobre-acento);border-color:var(--acento)}
+.herram{align-self:flex-start;font-size:12px;color:var(--suave);border:1px solid var(--linea);background:var(--panel-2);border-radius:var(--radio-chico);padding:3px 9px;display:flex;gap:6px;align-items:center}
+.herram svg{width:13px;height:13px}
+.herram.err{color:var(--peligro)}
+.sug{display:flex;flex-wrap:wrap;gap:6px}
+.redactar{display:flex;gap:8px;align-items:flex-end}
+.redactar textarea{flex:1;resize:none;background:var(--panel);border:1px solid var(--linea-fuerte);border-radius:var(--radio);padding:9px 11px;min-height:40px}
+.redactar textarea:focus{outline:none;border-color:var(--suave);box-shadow:0 0 0 2px var(--foco)}
+.ib{width:40px;height:40px;border-radius:var(--radio);display:grid;place-items:center;background:var(--panel);border:1px solid var(--linea-fuerte);cursor:pointer;color:var(--suave)}
+.ib.pri{background:var(--acento);border-color:var(--acento);color:var(--sobre-acento)}
+.ib svg{width:16px;height:16px}
+.nota-ch{font-size:11.5px;color:var(--tenue);margin-top:6px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.agente-cara{position:relative;border:0;padding:0;background:none;cursor:pointer;border-radius:10px;flex:none}
+.agente-cara .retrato{width:40px;height:40px;border-radius:10px}
+.agente-lapiz{position:absolute;right:-4px;bottom:-4px;width:22px;height:22px;border-radius:50%;background:var(--panel);border:1px solid var(--linea-fuerte);display:flex;align-items:center;justify-content:center;color:var(--suave);box-shadow:var(--sombra);opacity:0;transition:opacity .12s}
+.agente-lapiz svg{width:12px;height:12px}
+.agente-cara:hover .agente-lapiz{opacity:1}
+/* perfil y apariencia */
+.perfil-cara{display:flex;flex-direction:column;gap:8px;width:220px}
+.perfil-prev{width:220px;height:200px;border:1px solid var(--linea);border-radius:var(--radio);background:var(--panel-2);display:grid;place-items:center}
+.perfil-prev canvas{image-rendering:pixelated;width:192px;height:156px}
+details.apariencia summary{cursor:pointer;color:var(--suave);font-size:12.5px;padding:4px 0}
+.ap-grid{display:grid;gap:12px;padding:10px 0 4px}
+.etq{font-size:12px;font-weight:500;color:var(--suave);margin-bottom:6px;display:block}
+.etq-sub{font-size:12px;color:var(--tenue);margin:-4px 0 6px}
+.sw{display:flex;gap:6px;flex-wrap:wrap}
+.sw button{width:24px;height:24px;border-radius:6px;border:1px solid rgba(0,0,0,.12);cursor:pointer;padding:0}
+.sw button[aria-pressed="true"]{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--acento)}
+.opts{display:flex;gap:6px;flex-wrap:wrap}
+.opts .chip{text-transform:capitalize}
+.form{display:grid;gap:12px}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--linea)}
+.toggle b{font-weight:550;display:block}
+.toggle small{color:var(--suave);font-size:12px}
+.sw-on{width:34px;height:20px;border-radius:10px;background:var(--linea-fuerte);border:0;position:relative;flex:none;cursor:pointer;padding:0}
+.sw-on::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:left .12s}
+.sw-on[aria-checked="true"]{background:var(--acento)}
+.sw-on[aria-checked="true"]::after{left:16px;background:var(--sobre-acento)}
+/* biblioteca */
+.biblio-barra{display:flex;gap:8px;align-items:center;padding:0 16px 12px;flex-wrap:wrap}
+.biblio-barra .campo{flex:1;min-width:160px;height:32px}
+.biblio{flex:1;min-height:0;display:grid;grid-template-columns:150px minmax(0,1fr) minmax(0,1fr);border-top:1px solid var(--linea)}
+.biblio>div{overflow-y:auto;min-width:0}
+.biblio .filtros{padding:8px;border-right:1px solid var(--linea);display:flex;flex-direction:column;gap:2px}
+.biblio .filtros button{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border-radius:var(--radio-chico);border:0;background:none;cursor:pointer;text-align:left;color:var(--suave);font-size:12.5px}
+.biblio .filtros button.sel{background:var(--panel-2);color:var(--texto);font-weight:600}
+.biblio .filtros button span{margin-left:auto;color:var(--tenue)}
+.biblio .filtros svg{width:14px;height:14px}
+.biblio .docs{border-right:1px solid var(--linea);padding:6px}
+.doc{display:flex;gap:10px;align-items:flex-start;width:100%;padding:8px;border:0;background:none;border-radius:var(--radio-chico);cursor:pointer;text-align:left}
+.doc:hover,.doc.sel{background:var(--panel-2)}
+.doc svg{width:18px;height:18px;margin-top:1px}
+.doc b{font-weight:550;display:block;overflow-wrap:anywhere}
+.biblio .det{padding:16px;color:var(--suave)}
+/* menús, Ajustes y ⌘K */
+.menu-pop{position:fixed;background:var(--panel);border:1px solid var(--linea);border-radius:var(--radio);box-shadow:var(--sombra-alta);padding:5px;min-width:230px;z-index:30}
+.menu-pop button{display:flex;gap:10px;align-items:center;width:100%;height:32px;padding:0 10px;border-radius:var(--radio-chico);background:none;border:0;text-align:left;cursor:pointer}
+.menu-pop button:hover{background:var(--panel-2)}
+.menu-pop svg{width:16px;height:16px;color:var(--suave)}
+.velo{position:fixed;inset:0;background:rgba(20,18,15,.35);display:grid;place-items:start center;padding:10vh 16px 16px;z-index:20}
+.velo[hidden]{display:none!important}
+.modal{width:min(720px,100%);background:var(--panel);border:1px solid var(--linea);border-radius:14px;box-shadow:var(--sombra-alta);display:flex;flex-direction:column;max-height:80vh;overflow:hidden}
+.modal .der-cab .x{margin-left:auto}
+.ajustes{display:grid;grid-template-columns:180px minmax(0,1fr);min-height:0;flex:1;border-top:1px solid var(--linea)}
+.ajustes nav{border-right:1px solid var(--linea);padding:8px;display:flex;flex-direction:column;gap:2px;background:var(--panel-2)}
+.ajustes nav button{background:none;border:0;text-align:left;height:32px;padding:0 10px;border-radius:var(--radio-chico);cursor:pointer;color:var(--suave)}
+.ajustes nav button[aria-pressed="true"]{background:var(--panel);color:var(--texto);box-shadow:inset 0 0 0 1px var(--linea-fuerte)}
+.ajustes .der-cuerpo{display:flex;flex-direction:column;gap:12px}
+.temas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tema{border:1px solid var(--linea);border-radius:var(--radio);background:var(--panel);padding:10px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:4px}
+.tema.sel{border-color:var(--acento);box-shadow:inset 0 0 0 1px var(--acento)}
+.tema .pv{height:70px;border-radius:var(--radio-chico);display:grid;place-items:center;font-weight:600;color:#fff;letter-spacing:.04em}
+.tema span{color:var(--suave);font-size:12px}
+.x{width:32px;height:32px;border-radius:var(--radio-chico);background:none;border:0;cursor:pointer;display:grid;place-items:center;color:var(--suave)}
+.x:hover{background:var(--panel-2)}
+.x svg{width:16px;height:16px}
+.paleta{width:min(560px,100%);background:var(--panel);border:1px solid var(--linea);border-radius:14px;box-shadow:var(--sombra-alta);overflow:hidden}
+.paleta input{width:100%;background:var(--panel);border:0;border-bottom:1px solid var(--linea);font-size:15px;padding:14px 16px}
+.paleta input:focus{outline:none}
+.res{max-height:50vh;overflow-y:auto;padding:6px}
+.res .gr{font-size:11px;font-weight:600;color:var(--tenue);padding:8px 10px 4px;text-transform:uppercase;letter-spacing:.04em}
+.res button{display:flex;gap:10px;align-items:center;width:100%;background:none;border:0;padding:6px 10px;border-radius:var(--radio-chico);text-align:left;cursor:pointer}
+.res button:hover,.res button.act{background:var(--panel-2)}
+.res svg{width:16px;height:16px;color:var(--suave)}
+.res small{margin-left:auto;color:var(--tenue)}
+@media (max-width:1100px){.biblio{grid-template-columns:130px minmax(0,1fr)}.biblio .det{display:none}}
+/* celular: el riel abajo; en una sección se ve la lista o lo elegido */
+@media (max-width:720px){
+  .app,.app.en-oficina{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
+  .riel{grid-row:2;grid-column:1;flex-direction:row;justify-content:space-around;gap:0;padding:4px 4px calc(4px + env(safe-area-inset-bottom,0px));border-right:0;border-top:1px solid var(--linea);overflow-x:auto}
+  .riel-logo,.riel-sep,.riel-uso,.riel-extra{display:none}
+  .riel-nuevo{margin:0 4px;width:38px;height:38px}
+  .riel-item{width:auto;min-width:54px;min-height:46px}
+  .lista-col,.vista{grid-row:1;grid-column:1}
+  .lista-col{border-right:0;padding-top:env(safe-area-inset-top,0px)}
+  .app.en-seccion.con-detalle .lista-col{display:none}
+  .app.en-seccion:not(.con-detalle) .vista{display:none}
+  .rotulo{top:calc(12px + env(safe-area-inset-top,0px));left:12px;max-width:calc(100% - 160px)}
+  .herr{top:calc(12px + env(safe-area-inset-top,0px));right:12px}
+  .herr .btn-txt,.pista{display:none}
+  .der-cab{flex-wrap:wrap}
+  .biblio{grid-template-columns:minmax(0,1fr)}.biblio .filtros{display:none}
+  .ajustes{grid-template-columns:minmax(0,1fr)}
+  .ajustes nav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--linea)}
+}
+</style>
+
+<div class="app en-oficina" id="app">
+  <nav class="riel" id="riel" aria-label="Secciones"></nav>
+  <aside class="lista-col" id="lista"></aside>
+  <main class="vista" id="vista">
+    <div id="stage">
+      <canvas id="view" aria-label="Oficina isométrica en pixel art con 18 agentes"></canvas>
+      <div class="tilt up" id="tu"></div><div class="tilt dn" id="td"></div>
+      <div class="tip" id="tip" hidden></div>
+    </div>
+    <div class="rotulo"><span><b>Estudio</b><small>de Luis · 18 agentes</small></span></div>
+    <div class="herr"><button class="btn" id="b-reu"><span id="i-reu"></span><span class="btn-txt">Llamar a reunión</span></button></div>
+    <div class="zonas" id="zones" role="group" aria-label="Zona de la oficina">
+      <button class="chip" data-z="" aria-pressed="true">Toda la oficina</button>
+      <button class="chip" data-z="A" aria-pressed="false">Producto</button>
+      <button class="chip" data-z="B" aria-pressed="false">Contenido</button>
+      <button class="chip" data-z="C" aria-pressed="false">Ingeniería</button>
+      <button class="chip" data-z="R" aria-pressed="false">Reuniones</button>
+      <button class="chip" data-z="J" aria-pressed="false">Juegos y café</button>
+      <button class="chip" data-z="E" aria-pressed="false">Recepción</button>
+      <button class="chip" data-z="D" aria-pressed="false">Dirección</button>
+    </div>
+    <div class="pista">Rueda o pellizco para acercarte · arrastrá para moverte · tocá un agente para charlar · ⌘K buscar</div>
+    <div class="panel" id="panel"></div>
+    <div id="legend" hidden></div><div id="info" hidden></div>
+  </main>
+</div>
+<div class="menu-pop" id="m-nuevo" hidden></div>
+<div class="velo" id="v-paleta" hidden><div class="paleta" role="dialog" aria-label="Buscar"><label class="oculto-sr" for="q">Buscar</label><input id="q" placeholder="Buscar agentes, salas y acciones…" autocomplete="off"><div class="res" id="res"></div></div></div>
+<div class="velo" id="v-ajustes" hidden><div class="modal" role="dialog" aria-label="Ajustes" id="ajustes"></div></div>
+
+<script src="v2/nucleo.js"></script>
+<script src="v2/muebles.js"></script>
+<script src="v2/personajes.js"></script>
+<script src="v2/oficina.js"></script>
+<script>
+(()=>{
+const O=window.OFI,$=s=>document.querySelector(s),app=$('#app'),lista=$('#lista'),panel=$('#panel');
+/* íconos de trazo fino: los mismos de oficina/ui/base.js */
+const P={mas:'M12 5v14M5 12h14',cerrar:'M6 6l12 12M18 6L6 18',menu:'M4 7h16M4 12h16M4 17h16',abajo:'M7 10l5 5 5-5',
+ personas:'M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M20 19v-1.5a3.5 3.5 0 0 0-2.5-3.35M15.5 4.2a3 3 0 0 1 0 5.6',
+ reunion:'M4 6h16v9H8l-4 4zM8 10h8',charla:'M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-5 4v-4H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM8 9.5h8M8 12.5h5',
+ bombilla:'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.2h5c0-.9.4-1.7 1.1-2.2A6 6 0 0 0 12 3z',libro:'M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3',
+ capas:'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',carpeta:'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',subir:'M12 16V4M7 9l5-5 5 5M5 20h14',
+ buscar:'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',enviar:'M5 12h13M13 6l6 6-6 6',enlace:'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',
+ edificio:'M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M8 8h3M8 12h3M8 16h3M3 21h18',chispa:'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z',
+ dado:'M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM9 9h.01M15 15h.01M15 9h.01M9 15h.01',
+ flujo:'M5 4h4v4H5zM15 16h4v4h-4zM9 6h3a3 3 0 0 1 3 3v7M12 10h0',medidor:'M4 16a8 8 0 1 1 16 0M12 16l3.5-4.5M7 19h10',reloj:'M7 3h10M7 21h10M8 3v4l4 5-4 5v4M16 3v4l-4 5 4 5v4',
+ enchufe:'M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4',escudo:'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6zM9 12l2 2 4-4',parte:'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
+ lapiz:'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',bandeja:'M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z',clip:'M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7.1',
+ ok:'M5 12l5 5 9-10',
+ ajustes:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z'};
+const ic=(n,c='currentColor')=>`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[n]||''}"/></svg>`;
+$('#i-reu').innerHTML=ic('reunion');
+
+/* ---------- retratos pixel ---------- */
+const _t=document.createElement('canvas');_t.width=16;_t.height=16;
+function retrato(c,cv){const tg=_t.getContext('2d');tg.clearRect(0,0,16,16);O.drawChar(tg,8,O.ALTO()+1,c,'se',false,false,0,'quieto');
+  cv.width=32;cv.height=32;const g=cv.getContext('2d');g.imageSmoothingEnabled=false;g.clearRect(0,0,32,32);g.drawImage(_t,0,0,32,32)}
+const cvTag=(n,cls='retrato')=>`<canvas class="${cls}" data-ag="${n}"></canvas>`;
+function pintar(root){root.querySelectorAll('canvas[data-ag]').forEach(cv=>retrato(cv.dataset.ag==='Luis'?yo.c:ag(cv.dataset.ag).c,cv))}
+
+/* ---------- datos de ejemplo ---------- */
+const ROL={Ana:'Investigadora de usuarios',Bruno:'Product manager',Carla:'Analista de datos',Diego:'Diseñador de producto',Elena:'Redactora de specs',Fede:'Encargado de releases',
+ Gala:'Editora',Hugo:'Redactor de blog',Inés:'Community manager',Juan:'Guionista de videos',Lola:'Correctora',Mateo:'SEO y métricas',
+ Nora:'Desarrolladora front',Omar:'Investigador técnico',Pía:'Arquitecta',Rafa:'QA y pruebas',Sol:'PM y coordinadora de tareas',Tomás:'Jefe de operaciones'};
+const DEP=[['M','Dirección','#e0679a'],['A','Producto','#5d7da6'],['B','Contenido','#b37b68'],['C','Ingeniería','#6a9b79']];
+const yo={c:{skc:'#f7d2a8',hcc:'#2e2d3d',hair:'peinado',top:{t:'campera',c:'#4fb176',in:'#f2f2f2'},leg:{t:'pantalon',c:'#2c3f78'},shoe:{c:'#f2f2f2',sole:'#c9ccd4'}}};
+const ag=n=>O.AG.find(a=>a.n===n);
+const dep=a=>DEP.find(d=>d[0]===a.t);
+const st=a=>O.ST[a.s];
+const ins=a=>{const d=dep(a);return `<span class="insignia"><i class="punto" style="background:${d[2]}"></i>${d[1]}</span>`};
+
+/* ---------- riel ---------- */
+const SEC=[['bandeja','Bandeja','bandeja',4],['oficina','Oficina','edificio'],['charlas','Charlas','charla'],['equipo','Equipo','personas'],['archivos','Archivos','carpeta'],['trabajo','Trabajo','reloj']];
+$('#riel').innerHTML=`<button class="riel-logo" id="b-logo" title="Cambiar de oficina"><span class="logo">${ic('edificio')}</span></button>
+ <button class="riel-nuevo" id="b-nuevo" title="Nuevo">${ic('mas')}</button>
+ ${SEC.map(([k,t,i,n])=>`<button class="riel-item" data-sec="${k}" title="${t}">${ic(i)}<span>${t}</span>${n?`<span class="n aviso">${n}</span>`:''}</button>`).join('')}
+ <div class="riel-sep"></div>
+ <button class="riel-uso riel-extra" title="Uso de Claude">${ic('medidor')}<span>5 horas <b>5%</b></span><span>semana <b>7%</b></span></button>
+ <button class="riel-item riel-extra" id="b-k" title="Buscar">${ic('buscar')}<span>⌘K</span></button>
+ <button class="riel-item riel-extra" id="b-aj" title="Ajustes">${ic('ajustes')}<span>Ajustes</span></button>`;
+$('#riel').addEventListener('click',e=>{const b=e.target.closest('[data-sec]');if(b)ir(b.dataset.sec)});
+
+/* ---------- navegación ---------- */
+let sec='oficina',sub=null,tab='perfil';
+function ir(s,x){sec=s;sub=x===undefined?DEF[s]:x;
+  app.classList.toggle('en-oficina',s==='oficina');app.classList.toggle('en-seccion',s!=='oficina');app.classList.toggle('con-detalle',!!sub);
+  document.querySelectorAll('.riel-item[data-sec]').forEach(b=>b.classList.toggle('activo',b.dataset.sec===s));
+  if(s==='oficina'){O.resize();return}
+  lista.innerHTML=LISTA[s]();pintar(lista);panel.innerHTML=VISTA[s]();pintar(panel);
+  if(s==='equipo'&&sub&&sub!=='deptos'&&tab==='perfil')prev();
+}
+const DEF={bandeja:'hoy',charlas:'Sol',equipo:null,archivos:'biblioteca',trabajo:'tareas'};
+const cab=t=>`<div class="lista-cab"><h2>${t[0]}</h2>${t[1]||''}</div>`;
+const li=(k,i,t,act,extra='')=>`<button class="lista-item simple${act?' activo':''}" data-sub="${k}"><span class="lista-icono">${ic(i)}</span><span class="lista-item-txt"><span class="lista-item-tit"><b>${t}</b></span></span>${extra}</button>`;
+lista.addEventListener('click',e=>{const b=e.target.closest('[data-sub]');if(b){if(sec==='equipo')tab=tab||'perfil';ir(sec,b.dataset.sub)}});
+
+const CHARLAS=[['Sol','Planificación de la semana','hace 5 min'],['Ana','Entrevistas a usuarios','hace 40 min'],['Inés','Se trabó con la carpeta de clientes','hace 1 h'],['Hugo','Post sobre agentes','ayer'],['Rafa','Pruebas de la release 4.2','ayer']];
+const LISTA={
+ bandeja:()=>cab(['Bandeja'])+`<div class="lista-cuerpo">${li('hoy','parte','Hoy',sub==='hoy')}<div class="lista-grupo">Por tipo</div>${li('revisar','bandeja','Para revisar',sub==='revisar','<span class="cnt">3</span>')}${li('permiso','escudo','Te piden permiso',sub==='permiso','<span class="cnt">1</span>')}</div>`,
+ charlas:()=>cab(['Charlas',`<button class="btn chico">${ic('mas')}Nueva</button>`])+`<div class="lista-buscar">${ic('buscar')}<input class="campo" placeholder="Buscar en charlas" aria-label="Buscar en charlas"></div><div class="lista-cuerpo"><div class="lista-grupo">Charlas</div>
+   ${CHARLAS.map(([n,t,h])=>`<button class="lista-item${sub===n?' activo':''}" data-sub="${n}">${cvTag(n)}<span class="lista-item-txt"><span class="lista-item-tit"><b>${t}</b><small>${h}</small></span><span class="lista-item-sub">${n} · ${ROL[n]}</span></span></button>`).join('')}</div>`,
+ equipo:()=>cab(['Equipo',`<button class="btn chico">${ic('mas')}Contratar</button>`])+`<div class="lista-cuerpo">
+   <div class="lista-grupo"><i class="punto" style="background:#e8b84a"></i>Vos</div>
+   <button class="lista-item" data-sub="Luis">${cvTag('Luis')}<span class="lista-item-txt"><span class="lista-item-tit"><b>Luis</b></span><span class="lista-item-sub">Tu bandeja: 4 cosas te esperan</span></span></button>
+   ${DEP.map(([k,nom,col])=>{const L=O.AG.filter(a=>a.t===k);return `<div class="lista-grupo"><i class="punto" style="background:${col}"></i>${nom}<span class="cuenta">${L.length}</span></div>`+
+     L.map(a=>`<button class="lista-item${sub===a.n?' activo':''}" data-sub="${a.n}">${cvTag(a.n)}<span class="lista-item-txt"><span class="lista-item-tit"><b>${a.n}</b></span><span class="lista-item-sub">${ROL[a.n]}</span></span></button>`).join('')}).join('')}
+   <div class="lista-grupo">La oficina</div>${li('deptos','capas','Departamentos',sub==='deptos')}</div>`,
+ archivos:()=>cab(['Archivos'])+`<div class="lista-cuerpo">${li('carpeta','carpeta','Carpeta de la oficina',sub==='carpeta')}${li('biblioteca','libro','Biblioteca',sub==='biblioteca')}${li('conocimiento','bombilla','Conocimiento',sub==='conocimiento')}</div>`,
+ trabajo:()=>cab(['Trabajo'])+`<div class="lista-cuerpo">${li('tareas','reloj','Tareas',sub==='tareas')}${li('flujos','flujo','Flujos',sub==='flujos')}</div>`
+};
+
+/* ---------- vistas ---------- */
+const derCab=(i,t,s,acc='')=>`<div class="der-cab lectura"><div class="der-ico">${ic(i)}</div><div style="min-width:0"><h2>${t}</h2><small>${s}</small></div>${acc?`<div class="der-acciones">${acc}</div>`:''}</div>`;
+const quien=n=>`<span class="fila" style="gap:6px">${cvTag(n,'mini')}<b>${n}</b></span>`;
+function entregas(){return [['Diego','Rediseño del onboarding (v2)','3 pantallas y un PDF con el flujo'],['Hugo','Post: “Cómo trabajamos con agentes”','1.400 palabras, listo para publicar'],['Rafa','Informe de pruebas de la release 4.2','2 fallas menores, nada que frene']]
+  .map(([n,t,d])=>`<div class="card"><div class="fila">${quien(n)}${ins(ag(n))}<span class="meta sp">hace 20 min</span></div><h3>${t}</h3><p>${d}</p><div class="acciones"><span class="izq"><button class="btn chico">Abrir</button></span><button class="btn chico">Pedir cambios</button><button class="btn chico pri">Aprobar</button></div></div>`).join('')}
+function permiso(){return `<div class="card"><div class="fila">${quien('Inés')}${ins(ag('Inés'))}<span class="meta sp">hace 1 h</span></div><h3>Quiere leer la carpeta «Clientes»</h3><p>La necesita para armar el informe de la semana.</p><div class="acciones"><button class="btn chico">No</button><button class="btn chico">Solo esta vez</button><button class="btn chico pri">Permitir siempre</button></div></div>`}
+function chat(a){const s=a.s;
+  return `<div class="chat">
+   <div class="msg yo">¿Cómo venís con lo que te pedí esta mañana?</div>
+   <div class="msg">${s==='error'?'Me trabé: no tengo acceso a la carpeta de clientes y sin eso no puedo seguir. ¿Me la habilitás?':s==='idle'?'Terminé todo lo que tenía. Si querés, te propongo próximos pasos.':s==='meet'?'Estoy en la reunión de planificación con Tomás; en un rato te paso el resumen.':'Voy bien. Ya tengo la mitad y te aviso cuando esté para revisar.'}</div>
+   ${s==='tool'?`<span class="herram">${ic('enchufe')}${O.TOOLTXT[a.tool]}</span>`:''}${s==='error'?`<span class="herram err">${ic('escudo')}Pide permiso para la carpeta «Clientes»</span>`:''}
+   <div class="sug"><button class="chip">Armame un plan para este proyecto nuevo</button><button class="chip">¿Qué tenés trabado esta semana?</button><button class="chip">Sacar tareas de esta charla</button></div></div>`}
+const PIEL=['#ffe1c4','#f7d2a8','#d9a376','#9d6b46','#6e4630'],PELO=['#2e2d3d','#5b3a29','#8b4532','#d4793a','#ecca6e','#cfc6bb'];
+const ROPA=['#e2574c','#4a80c6','#f2b84b','#4fb176','#9c88c0','#4a4d55','#2bb39a','#f2f2f2'],LEGS=['#3d4262','#2c3f78','#4a4d55','#6b5a44','#2ba59a','#f08a2a'];
+const PEIN=['corto','peinado','alto','bob','largo','coletas','cola'],TOP=['remera','polo','campera','traje','vestido','jardinero','musculosa'],PIER=['pantalon','short','pollera'];
+function perfil(a){const c=a.c,op=(l,v,k,lab)=>`<div class="opts" data-k="${k}">${l.map(x=>`<button class="chip${x===v?' sel':''}" data-v="${x}">${lab?lab(x):x}</button>`).join('')}</div>`,
+  sw=(l,v,k)=>`<div class="sw" data-k="${k}">${l.map(x=>`<button aria-pressed="${x===v}" data-v="${x}" style="background:${x}" title="${x}"></button>`).join('')}</div>`,d=dep(a);
+  return `<div class="perfil-cara"><div class="perfil-prev"><canvas id="ed-cv" width="64" height="52"></canvas></div><button class="btn" id="ed-otro">${ic('dado')}Otro aspecto</button></div>
+   <details class="apariencia" open><summary>Apariencia: piezas y colores</summary><div class="ap-grid">
+    <div><span class="etq">Piel</span>${sw(PIEL,c.skc,'skc')}</div>
+    <div><span class="etq">Peinado</span>${op(PEIN,c.hair,'hair')}</div>
+    <div><span class="etq">Color de pelo</span>${sw(PELO,c.hcc,'hcc')}</div>
+    <div><span class="etq">Arriba</span>${op(TOP,c.top.t,'top.t')}</div>
+    <div><span class="etq">Color de arriba</span>${sw(ROPA,c.top.c,'top.c')}</div>
+    <div><span class="etq">Abajo</span>${op(PIER,c.leg.t,'leg.t',x=>x==='pantalon'?'pantalón':x)}</div>
+    <div><span class="etq">Color de abajo</span>${sw(LEGS,c.leg.c,'leg.c')}</div></div></details>
+   <div class="sec-tit">Quién es</div>
+   <div class="form"><label><span class="etq">Nombre</span><input class="campo" value="${a.n}"></label><label><span class="etq">Rol</span><input class="campo" value="${ROL[a.n]}"></label>
+    <div><span class="etq">Departamento</span><p class="etq-sub">La sala de la oficina donde trabaja.</p><div class="fila">${DEP.map(x=>`<span class="chip${x===d?' sel':''}"><i class="punto" style="background:${x[2]}"></i>${x[1]}</span>`).join('')}</div></div>
+    <label><span class="etq">Descripción corta</span><textarea class="campo">${a.n} es ${ROL[a.n].toLowerCase()} en ${d[1]}.</textarea></label></div>`}
+function permisos(){return [['Correr comandos','bash, git y scripts en su carpeta',1],['Escribir archivos','Dentro de su carpeta; fuera, te pregunta',1],['Navegar la web','Buscar y leer páginas',1],['Mandar mails','Siempre como propuesta para que apruebes',0],['Conectores','Google Drive y Calendario',0]]
+  .map(([b,s,on])=>`<div class="toggle"><span><b>${b}</b><small>${s}</small></span><button class="sw-on" role="switch" aria-checked="${!!on}" aria-label="${b}"></button></div>`).join('')}
+function fichaAgente(a){const T=[['perfil','Perfil y apariencia'],['permisos','Permisos'],['notas','Notas'],['tareas','Tareas'],['archivos','Archivos']];
+  let c='';if(tab==='perfil')c=perfil(a);if(tab==='permisos')c=permisos();
+  if(tab==='notas')c=`<div class="card"><h3>Lo que ${a.n} recuerda</h3><p>Prefiere entregar en PDF. El cliente grande pide todo en inglés. La release sale los viernes.</p></div>`;
+  if(tab==='tareas')c=`<div class="card"><h3>Informe semanal</h3><p>Cada lunes · 9:00 · próxima en 3 d</p></div>`;
+  if(tab==='archivos')c=`<div class="nav-vacio">${ic('carpeta')}<b>Su carpeta está vacía</b>Lo que ${a.n} guarde aparece acá.</div>`;
+  return `<div class="der-cab lectura"><button class="agente-cara" data-ir-charla="${a.n}" title="Charlar">${cvTag(a.n)}</button><div style="min-width:0"><h2>${a.n}</h2><small>${ROL[a.n]} ${ins(a)}</small></div>
+    <div class="der-acciones"><button class="btn chico">${ic('reunion')}Reunión</button><button class="btn chico">${ic('reloj')}Tarea</button><button class="btn chico pri" data-ir-charla="${a.n}">${ic('charla')}Charlar</button></div></div>
+   <div class="pestanas"><div class="lectura fila" style="gap:4px">${T.map(([k,t])=>`<button class="pestana${k===tab?' activa':''}" data-tab="${k}">${t}</button>`).join('')}</div></div>
+   <div class="der-cuerpo"><div class="lectura">${c}</div></div>
+   ${tab==='perfil'?`<div class="der-pie"><div class="lectura acciones"><span class="izq"><button class="btn peligro">Despedir</button></span><button class="btn pri">Guardar cambios</button></div></div>`:''}`}
+const VISTA={
+ bandeja:()=>{if(sub==='revisar')return derCab('bandeja','Para revisar','3 entregas esperan tu visto bueno')+`<div class="der-cuerpo"><div class="lectura">${entregas()}</div></div>`;
+  if(sub==='permiso')return derCab('escudo','Te piden permiso','1 pedido')+`<div class="der-cuerpo"><div class="lectura">${permiso()}</div></div>`;
+  return derCab('parte','Hoy','Lo que te espera y lo que pasó desde hace 1 d')+`<div class="der-cuerpo"><div class="lectura">
+   <div class="sec-tit">Te esperan</div>${permiso()}${entregas()}
+   <div class="sec-tit">Lo que pasó</div><div class="card">${DEP.slice(1).map(([k,nom,col])=>O.AG.filter(a=>a.t===k).slice(0,2).map(a=>`<div class="fila-dec">${cvTag(a.n)}<div class="fila-txt"><div class="fila-tit">${a.n} <span class="meta">· ${nom}</span></div><div class="fila-sub">${a.s==='tool'?O.TOOLTXT[a.tool]:st(a).a}</div></div><span class="insignia"><i class="punto" style="background:${st(a).c}"></i>${st(a).l}</span></div>`).join('')).join('')}</div>
+  </div></div><div class="der-pie"><div class="lectura acciones"><button class="btn pri">Listo, ya lo vi</button></div></div>`},
+ charlas:()=>{const a=ag(sub)||ag('Sol');return `<div class="der-cab lectura"><button class="agente-cara" data-ir-ficha="${a.n}" title="Ver y editar su ficha">${cvTag(a.n)}<span class="agente-lapiz">${ic('lapiz')}</span></button><div style="min-width:0"><h2>${a.n}</h2><small>${ROL[a.n]} ${ins(a)} <span class="insignia"><i class="punto" style="background:${st(a).c}"></i>${st(a).l}</span></small></div><div class="der-acciones"><button class="btn chico">Sacar tareas</button><button class="btn chico">${ic('mas')}Nueva charla</button></div></div>
+   <div class="der-cuerpo" style="border-top:1px solid var(--linea)"><div class="lectura">${chat(a)}</div></div>
+   <div class="der-pie"><div class="lectura"><div class="redactar"><button class="ib" title="Adjuntar">${ic('clip')}</button><label class="oculto-sr" for="msg">Mensaje</label><textarea id="msg" rows="1" placeholder="Escribile a ${a.n}…"></textarea><button class="ib pri" title="Enviar">${ic('enviar')}</button></div><div class="nota-ch"><span>Enter para enviar · Mayús+Enter para otra línea · arrastrá o pegá archivos</span></div></div></div>`},
+ equipo:()=>{if(!sub)return `<div class="nav-vacio">${ic('personas')}<b>Tu equipo</b>Elegí a alguien para ver y cambiar su perfil, sus permisos, sus notas, sus tareas y sus archivos.<div class="fila"><button class="btn pri">${ic('mas')}Contratar un agente</button></div></div>`;
+  if(sub==='deptos')return derCab('capas','Departamentos','Las salas de la oficina')+`<div class="der-cuerpo"><div class="lectura">${DEP.map(([k,n,c])=>`<div class="card"><div class="fila"><i class="punto" style="width:10px;height:10px;border-radius:3px;background:${c}"></i><h3>${n}</h3><span class="meta sp">${O.AG.filter(a=>a.t===k).length} agentes</span></div></div>`).join('')}</div></div>`;
+  if(sub==='Luis')return derCab('personas','Luis','Vos')+`<div class="der-cuerpo"><div class="lectura"><div class="card"><h3>Tu despacho</h3><p>Desde acá ves tu bandeja y lo que el equipo te entregó.</p></div></div></div>`;
+  return fichaAgente(ag(sub))},
+ archivos:()=>{if(sub==='biblioteca')return derCab('libro','Biblioteca','Todo lo que entregaron los agentes')+`<div class="biblio-barra"><input class="campo" placeholder="Buscar en todos los documentos…" aria-label="Buscar documentos"><button class="btn chico">${ic('enlace')}Vincular carpeta</button><button class="btn chico pri">${ic('subir')}Subir a toda la oficina</button></div>
+   <div class="biblio"><div class="filtros"><button class="sel">${ic('capas')}Todo<span>6</span></button><div class="meta" style="padding:6px 8px 2px">De quién es</div><button>${ic('personas')}Toda la oficina<span>2</span></button>${DEP.slice(1).map(([k,n,c])=>`<button><i style="width:8px;height:8px;border-radius:50%;background:${c}"></i>${n}<span>${k==='A'?2:k==='B'?1:1}</span></button>`).join('')}<button>${ic('chispa')}Propuestas</button></div>
+   <div class="docs">${[['Onboarding v2.pdf','Diego · hoy'],['Métricas de octubre.xlsx','Carla · ayer'],['Guía de estilo.md','Gala · lun'],['Arquitectura 2027.md','Pía · lun'],['Post agentes.docx','Hugo · hoy'],['Pruebas 4.2.pdf','Rafa · hoy']].map(([t,m],i)=>`<button class="doc${i===0?' sel':''}">${ic('parte')}<span><b>${t}</b><span class="meta">${m}</span></span></button>`).join('')}</div>
+   <div class="det"><div class="fila" style="margin-bottom:8px">${ic('parte')}<b style="color:var(--texto)">Onboarding v2.pdf</b></div>De Diego · Producto · entregado hoy.<br>3 pantallas nuevas y el flujo completo de registro.</div></div>`;
+  if(sub==='conocimiento')return derCab('bombilla','Conocimiento','Lo que la oficina sabe de tu negocio')+`<div class="der-cuerpo"><div class="lectura">${[['Tono de marca','Cercano, en voseo, sin tecnicismos.'],['Clientes principales','Tres cuentas grandes, cada una con su contacto.'],['Cómo publicamos','Todo post pasa por corrección y SEO antes de tu OK.']].map(([t,d])=>`<div class="card"><h3>${t}</h3><p>${d}</p></div>`).join('')}</div></div>`;
+  return derCab('carpeta','Carpeta de la oficina','~/Oficinas/Estudio')+`<div class="der-cuerpo"><div class="lectura"><div class="card">${['agentes','biblioteca','entregas','flujos'].map(f=>`<div class="fila-dec">${ic('carpeta')}<div class="fila-txt"><div class="fila-tit">${f}</div></div></div>`).join('')}</div></div></div>`},
+ trabajo:()=>{if(sub==='flujos')return derCab('flujo','Flujos','Lo que está en marcha en la oficina')+`<div class="der-cuerpo"><div class="lectura"><div class="fila"><button class="chip sel">En curso</button><button class="chip">Terminadas</button><button class="chip">Todas</button></div>
+   <div class="card"><div class="fila"><h3>Publicar un post</h3><span class="meta sp">paso 3 de 5</span></div><div class="pasos"><i class="ok"></i><i class="ok"></i><i class="va"></i><i></i><i></i></div><p>Hugo escribió el borrador, Lola lo corrigió, ahora Mateo agrega SEO; después Gala edita y vos aprobás.</p><div class="fila">${quien('Hugo')}${quien('Lola')}${quien('Mateo')}</div></div>
+   <div class="card"><div class="fila"><h3>Release semanal</h3><span class="meta sp">paso 2 de 4</span></div><div class="pasos"><i class="ok"></i><i class="va"></i><i></i><i></i></div><p>Nora integra los cambios; después Rafa prueba y Fede publica.</p></div></div></div>
+   <div class="der-pie"><div class="lectura acciones"><span class="izq"><button class="btn">Flujos de la oficina…</button></span><button class="btn pri">${ic('mas')}Nueva corrida</button></div></div>`;
+  return derCab('reloj','Tareas','Encargos programados de toda la oficina')+`<div class="der-cuerpo"><div class="lectura">${[['Carla','Informe de métricas del día','Cada mañana · 9:00'],['Mateo','Revisar posiciones en Google','Lunes y jueves · 10:00'],['Fede','Preparar notas de la release','Una vez · viernes 17:00']].map(([n,t,c])=>`<div class="card"><div class="fila">${quien(n)}${ins(ag(n))}<span class="meta sp">próxima en 14 h</span></div><h3>${t}</h3><p>${c}</p></div>`).join('')}</div></div>
+   <div class="der-pie"><div class="lectura acciones"><button class="btn pri">${ic('mas')}Nueva tarea</button></div></div>`}
+};
+
+/* ---------- editor de apariencia ---------- */
+let edT=0;
+function prev(){const cv=$('#ed-cv');if(!cv||sec!=='equipo')return;const a=ag(sub);if(!a)return;const g=cv.getContext('2d');g.imageSmoothingEnabled=false;g.clearRect(0,0,64,52);
+  g.fillStyle='rgba(0,0,0,.12)';g.fillRect(12,48,13,2);g.fillRect(39,48,13,2);
+  O.drawChar(g,18,48,a.c,'se',false,false,edT,'caminar');O.drawChar(g,45,48,a.c,'ne',false,true,edT+2,'quieto')}
+setInterval(()=>{edT++;prev()},160);
+function repintarRetratos(){pintar(lista);pintar(panel)}
+panel.addEventListener('click',e=>{
+  const t=e.target.closest('[data-tab]');if(t){tab=t.dataset.tab;ir('equipo',sub);return}
+  const ch=e.target.closest('[data-ir-charla]');if(ch){ir('charlas',ch.dataset.irCharla);return}
+  const fi=e.target.closest('[data-ir-ficha]');if(fi){tab='perfil';ir('equipo',fi.dataset.irFicha);return}
+  const s=e.target.closest('.sw-on');if(s){s.setAttribute('aria-checked',s.getAttribute('aria-checked')!=='true');return}
+  const o=e.target.closest('.opts button,.sw button');if(o&&sec==='equipo'){const a=ag(sub),c=a.c,k=o.parentElement.dataset.k,v=o.dataset.v;
+    if(k.includes('.')){const [p,q]=k.split('.');c[p][q]=v}else c[k]=v;
+    if(k==='top.t'){if(v==='vestido')c.leg.t='nada';else if(c.leg.t==='nada')c.leg.t='pantalon'}
+    if(k==='leg.t'&&c.top.t==='vestido')c.top.t='remera';
+    o.parentElement.querySelectorAll('button').forEach(b=>{b.classList.toggle('sel',b===o&&b.classList.contains('chip'));if(!b.classList.contains('chip'))b.setAttribute('aria-pressed',String(b===o))});
+    if(k==='top.t'||k==='leg.t'){ir('equipo',sub);return}
+    repintarRetratos();prev();return}
+  if(e.target.closest('#ed-otro')){const a=ag(sub),r=l=>l[Math.floor(Math.random()*l.length)],c=a.c;
+    c.skc=r(PIEL);c.hcc=r(PELO);c.hair=r(PEIN);c.top.t=r(TOP);c.top.c=r(ROPA);c.leg.t=c.top.t==='vestido'?'nada':r(PIER);c.leg.c=r(LEGS);ir('equipo',sub)}
+});
+O.onPick=a=>ir('charlas',a.n);
+
+/* ---------- Nuevo, reunión, logo ---------- */
+const mn=$('#m-nuevo');
+mn.innerHTML=[['charla','Charlar con alguien…','ch'],['reunion','Llamar a reunión…','reu'],['personas','Contratar un agente…','con'],['chispa','Armar con el Creador…',''],['flujo','Nueva corrida de flujo…','flu'],['capas','Nuevo departamento…','dep']].map(([i,t,k])=>`<button data-k="${k}">${ic(i)}${t}</button>`).join('');
+$('#b-nuevo').onclick=e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();mn.style.left=Math.min(r.right+8,innerWidth-240)+'px';mn.style.top=r.top+'px';mn.hidden=!mn.hidden};
+mn.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;mn.hidden=true;const k=b.dataset.k;
+  if(k==='ch')ir('charlas','Ana');if(k==='reu')reunion();if(k==='con'){tab='perfil';ir('equipo','Ana')}if(k==='flu')ir('trabajo','flujos');if(k==='dep')ir('equipo','deptos')});
+document.addEventListener('click',e=>{if(!mn.hidden&&!e.target.closest('#m-nuevo'))mn.hidden=true});
+function reunion(){ir('oficina');O.go('M')}
+$('#b-reu').onclick=reunion;
+$('#b-aj').onclick=()=>ajustes();
+$('#b-logo').onclick=()=>ir('oficina');
+
+/* ---------- Ajustes ---------- */
+let secAj='apariencia';
+function ajustes(){const S=[['general','General'],['agentes','Agentes'],['permisos','Permisos de los agentes'],['conectores','Conectores'],['apariencia','Apariencia']];
+  let c=secAj==='apariencia'?`<div><span class="etq">Estilo de la oficina</span><div class="temas"><button class="tema sel"><span class="pv" style="background:#5d7da6">Pixel</span><b>Pixel</b><span>Diorama 2.5D, el nuevo.</span></button><button class="tema"><span class="pv" style="background:#8a8378">3D clásico</span><b>3D clásico</b><span>Congelado: no recibe funciones nuevas.</span></button></div></div>
+   <div class="toggle"><span><b>Luz según la hora</b><small>La oficina pasa por amanecer, mañana, mediodía, tarde, atardecer, anochecer y noche siguiendo tu reloj</small></span><button class="sw-on" role="switch" aria-checked="true" aria-label="Luz según la hora"></button></div></div>`
+   :secAj==='permisos'?permisos():`<div class="card"><h3>${S.find(s=>s[0]===secAj)[1]}</h3><p>Sección de ejemplo del boceto.</p></div>`;
+  $('#ajustes').innerHTML=`<div class="der-cab"><div class="der-ico">${ic('ajustes')}</div><div><h2>Ajustes</h2><small>Estudio · de Luis</small></div><button class="x" data-cerrar title="Cerrar">${ic('cerrar')}</button></div>
+   <div class="ajustes"><nav>${S.map(([k,t])=>`<button aria-pressed="${k===secAj}" data-s="${k}">${t}</button>`).join('')}</nav><div class="der-cuerpo">${c}</div></div>`;$('#v-ajustes').hidden=false}
+$('#v-ajustes').addEventListener('click',e=>{if(e.target.id==='v-ajustes'||e.target.closest('[data-cerrar]')){$('#v-ajustes').hidden=true;return}
+  const s=e.target.closest('[data-s]');if(s){secAj=s.dataset.s;ajustes();return}
+  const w=e.target.closest('.sw-on');if(w)w.setAttribute('aria-checked',w.getAttribute('aria-checked')!=='true');
+  const t=e.target.closest('.tema');if(t)document.querySelectorAll('.tema').forEach(x=>x.classList.toggle('sel',x===t))});
+
+/* ---------- ⌘K ---------- */
+const vp=$('#v-paleta'),q=$('#q'),res=$('#res');
+function lst(){const s=q.value.trim().toLowerCase(),m=x=>x.toLowerCase().includes(s);
+  const A=O.AG.filter(a=>m(a.n)||m(ROL[a.n])).slice(0,6),X=[['Ir a la oficina','edificio','of'],['Llamar a reunión','reunion','reu'],['Contratar un agente','personas','con'],['Abrir Ajustes','ajustes','aj'],['Ver la bandeja','bandeja','ban']].filter(x=>m(x[0]));
+  res.innerHTML=(A.length?'<div class="gr">Agentes</div>'+A.map(a=>`<button data-a="${a.n}">${cvTag(a.n,'mini')}${a.n}<small>${ROL[a.n]}</small></button>`).join(''):'')+(X.length?'<div class="gr">Acciones</div>'+X.map(([n,i,k])=>`<button data-x="${k}">${ic(i)}${n}</button>`).join(''):'')||'<div class="nav-vacio">Nada con ese nombre.</div>';
+  pintar(res);const f=res.querySelector('button');if(f)f.classList.add('act')}
+function paleta(on){vp.hidden=!on;if(on){q.value='';lst();q.focus()}}
+$('#b-k').onclick=()=>paleta(true);
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();paleta(vp.hidden)}
+  if(e.key==='Escape'){paleta(false);$('#v-ajustes').hidden=true;mn.hidden=true}if(!vp.hidden&&e.key==='Enter'){const b=res.querySelector('button.act');if(b)b.click()}});
+q.addEventListener('input',lst);
+vp.addEventListener('click',e=>{if(e.target===vp){paleta(false);return}const b=e.target.closest('button');if(!b)return;paleta(false);const k=b.dataset.x;
+  if(b.dataset.a)ir('charlas',b.dataset.a);if(k==='of')ir('oficina');if(k==='reu')reunion();if(k==='con'){tab='perfil';ir('equipo','Ana')}if(k==='aj')ajustes();if(k==='ban')ir('bandeja')});
+
+ir('oficina');
+})();
+
+</script>

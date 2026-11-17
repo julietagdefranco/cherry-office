@@ -39,6 +39,7 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
 | `desktop/` | La app de escritorio: carcasa Electron alrededor de `backend/` y `oficina/`. De acá salen el `.dmg` y el `.exe` de las releases. Ver [desktop/README.md](desktop/README.md). |
 | `docs/` | Planes de diseño, `aprendizajes.md` (cómo se comporta el `claude` real) y `caso-prospera/` (el texto con el que se prueba armar una oficina con el Creador). |
 | `tools/` | Utilidades sueltas, como el empaquetado de piezas LDraw. |
+| `bocetos/` | Pruebas de diseño que no forman parte de la app. `bocetos/pixel/` es la oficina en pixel art isométrico pensada para reemplazar a la maqueta LEGO. Ver [bocetos/pixel/README.md](bocetos/pixel/README.md). |
 
 Hasta la 0.7 la app de Mac era nativa en Swift, con su propio backend; se retiró al pasar las dos plataformas a
 Electron (queda en el historial de git, antes de borrar `app/`).
