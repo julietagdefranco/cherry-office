@@ -28,7 +28,7 @@ import { registrarModulo, type Servicios } from './servicios.js'
 import { num, txt, type Fila, type SQLiteDB, type SQLValor } from './sqlite.js'
 import { CajaCosto } from './stream.js'
 import { deReunion } from './tareas.js'
-import { Slug, Validar, largo, plegar, prefijo, uuidValido } from './validar.js'
+import { Slug, Validar, largo, plegar, prefijo, uuidDe, uuidValido } from './validar.js'
 
 // MARK: - modelo
 
@@ -395,6 +395,20 @@ ${decisiones(p.carpeta)}${docs}
 
 Lo que se dijo hasta ahora (estamos en la ronda ${p.ronda}):
 ${dicho === '' ? '(todavía no habló nadie)' : dicho}
+${sinResponder(p.turnos, p.quien.id, p.oficina, p.leidos)}
+${ReunionPatron.consigna(patron, p.fase ?? 'libre', p.quien, p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
+}
+
+/** El prompt de un turno que retoma la sesión del agente en la reunión: solo lo que se dijo desde lo que ya vio (`nuevos`),
+ *  lo que escribió la persona y la consigna de esta fase. El tema, la memoria y los documentos ya están en su sesión. */
+export function promptTurnoSeguido(p: {
+  oficina: Oficina; tema: string; quien: AgenteDef; turnos: TurnoReunion[]; nuevos: TurnoReunion[]; ronda: number
+  patron?: PatronReunion; fase?: FaseTurno; lider?: AgenteDef; bandoA?: AgenteDef[]; bandoB?: AgenteDef[]; leidos?: number
+}): string {
+  const patron = p.patron ?? 'debate'
+  const dicho = transcripcion(p.nuevos, p.oficina, maxTranscripcionTurno)
+  return `Sigue la reunión «${prefijo(p.tema, 200)}» (ronda ${p.ronda}).
+${dicho === '' ? 'Desde tu último turno no habló nadie más.' : `Lo que se dijo desde tu último turno:\n${dicho}`}
 ${sinResponder(p.turnos, p.quien.id, p.oficina, p.leidos)}
 ${ReunionPatron.consigna(patron, p.fase ?? 'libre', p.quien, p.lider, p.bandoA ?? [], p.bandoB ?? [])}`
 }
@@ -839,6 +853,8 @@ export class ReunionesRouter implements SubRouter {
   private readonly restantes = new Map<string, number>()
   /** `reunion:agente` → cuántos turnos había al armar su último prompt (para saber qué mensajes del usuario no vio). */
   private readonly leidos = new Map<string, number>()
+  /** `reunion:agente` → índices de los turnos que ya se le mostraron en su sesión de claude (en memoria). */
+  private readonly vistos = new Map<string, Set<number>>()
   private readonly cerrando = new Set<string>()
   private readonly resumiendo = new Set<string>()
 
@@ -1302,10 +1318,25 @@ export class ReunionesRouter implements SubRouter {
     const { lider, bandoA, bandoB } = rolesDe(f, of)
     const turnos = this.db.turnosDe(id)
     const clave = `${id}:${ag.id}`
-    const prompt = promptTurno({
+    const leidos = this.leidos.get(clave)
+    // una conversación de claude por agente y reunión: el primer turno lleva todo (tema, memoria, documentos, lo dicho);
+    // los siguientes retoman esa sesión y llevan solo lo que se dijo desde su último turno. Sin lo ya mostrado en memoria
+    // (la app se reinició) vuelve a mandar todo, una vez.
+    const completo = () => promptTurno({
       oficina: of, carpeta, tema: f.tema, participantes, quien: ag, turnos, ronda, fichas: fichas(carpeta, f.documentos),
-      patron, fase: paso.fase, lider, bandoA, bandoB, leidos: this.leidos.get(clave),
+      patron, fase: paso.fase, lider, bandoA, bandoB, leidos,
     })
+    const visibles = ReunionPatron.visibles(patron, turnos, ronda)
+    const indice = (t: TurnoReunion) => turnos.indexOf(t)
+    const yaHablo = turnos.some((t) => t.agente === ag.id)
+    const vistos = this.vistos.get(clave)
+    const sesion = { sid: uuidDe(`reunion:${id}:${ag.id}`), retomar: yaHablo }
+    let prompt: string
+    if (vistos && yaHablo) {
+      const nuevos = visibles.filter((t) => !vistos.has(indice(t)) && t.agente !== ag.id)
+      prompt = promptTurnoSeguido({ oficina: of, tema: f.tema, quien: ag, turnos, nuevos, ronda, patron, fase: paso.fase, lider, bandoA, bandoB, leidos })
+    } else prompt = completo()
+    this.vistos.set(clave, new Set([...(vistos ?? []), ...visibles.map(indice)]))
     this.leidos.set(clave, turnos.length)
     let texto: string
     let fallo = false
@@ -1328,8 +1359,18 @@ export class ReunionesRouter implements SubRouter {
       const dirs = dirsVinculos(of, ag)
       texto = await runner.conCarrilDe(carpeta, ag.id, () => runner.actividad.seguir(
         { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.tema, extra: caja.observador() },
-        (obs) => runner.turnoSoloLectura({ agente: ag.id, prompt, cwd: carpeta, timeout, dirsExtra: dirs, obs, instrucciones: conMemoria(Instrucciones.para(of, ag), esMemoriaIA(f.memoria) ? f.memoria : this.s.config.iaEfectiva.memoria), preguntar,
-          modelo: f.modelo, esfuerzo: f.esfuerzo ?? esfuerzoDe(ag) })))
+        async (obs) => {
+          const turno = (pr: string, ses: { sid: string; retomar: boolean }) => runner.turnoSoloLectura({ agente: ag.id, prompt: pr, cwd: carpeta, timeout, dirsExtra: dirs, obs,
+            instrucciones: conMemoria(Instrucciones.para(of, ag), esMemoriaIA(f.memoria) ? f.memoria : this.s.config.iaEfectiva.memoria), preguntar,
+            modelo: f.modelo, esfuerzo: f.esfuerzo ?? esfuerzoDe(ag), sesion: ses })
+          try {
+            return await turno(prompt, sesion)
+          } catch (e) {
+            // la sesión no estaba (su primer turno falló antes de crearla): todo de nuevo, en una sesión nueva con esa clave
+            if (sesion.retomar && e instanceof ClaudeError && e.sinSesion) return turno(completo(), { sid: sesion.sid, retomar: false })
+            throw e
+          }
+        }))
       texto = recortarEspacios(texto)
       if (texto === '') { texto = '(sin respuesta)'; fallo = true }
     } catch (e) {

@@ -81,6 +81,10 @@ export class ClaudeError extends Error {
   }
   get status() { return this.tipo === 'timeout' ? 504 : 500 }
   static clasificar(e: string) { return new ClaudeError(e.toLowerCase().includes('login') ? 'login' : 'claude', e) }
+  /** claude no encontró la sesión que se quiso retomar (`--resume`). */
+  get sinSesion() { return this.tipo === 'claude' && (this.detalle.includes('No conversation') || this.detalle.toLowerCase().includes('not found')) }
+  /** La sesión de `--session-id` ya existe. */
+  get sesionUsada() { return this.tipo === 'claude' && this.detalle.includes('already in use') }
 }
 
 // MARK: - proceso
@@ -266,6 +270,9 @@ export class ClaudeRunner {
   static readonly formatoSalida = ['--output-format', 'stream-json', '--verbose']
   /** Para corridas sin agente: `dontAsk` y sin conectores de claude.ai. */
   static readonly sinConectores = ['--permission-mode', 'dontAsk', '--disallowedTools', 'mcp__claude_ai_*']
+  /** Prompt de sistema de las corridas sin agente: reemplaza el de Claude Code (pensado para programar, con herramientas
+   *  que acá no hay). Medido en el cartel: de 3.912 a 1.601 tokens con el mismo resultado. */
+  static readonly promptInterno = 'Sos un asistente de una oficina de trabajo. Hacé exactamente lo que pide el mensaje, en español, y respondé solo con lo que se pide, en el formato indicado.'
   /** `--model` para un modelo de `Config.modelos`; `inherit` no pasa nada (queda el de Claude Code). */
   static argsModelo(m: string): string[] { return m === 'inherit' ? [] : ['--model', m] }
   /** `--effort` (low…max); sin esfuerzo no pasa nada (queda el de Claude Code de la persona). */
@@ -328,7 +335,8 @@ export class ClaudeRunner {
    *  Sin `modelo` usa el de los procesos internos (Ajustes › Modelos). */
   async correrSinAgente(prompt: string, { timeout, cwd, modelo, esfuerzo, obs }: { timeout?: number; cwd?: string; modelo?: string; esfuerzo?: string; obs?: Observador } = {}): Promise<string> {
     this.verificar(cwd)
-    const args = ['-p', ...ClaudeRunner.formatoSalida, '--tools', '', ...ClaudeRunner.sinConectores]
+    // sin herramientas ni MCP (ni los de la persona) ni sesión guardada: es un texto que entra y otro que sale
+    const args = ['-p', ...ClaudeRunner.formatoSalida, '--tools', '', ...ClaudeRunner.sinConectores, '--system-prompt', ClaudeRunner.promptInterno, '--strict-mcp-config', '--no-session-persistence']
     args.push(...ClaudeRunner.argsModelo(modelo ?? this.config.modelo('internos')), ...ClaudeRunner.argsEsfuerzo(this.esfuerzoO(esfuerzo)))
     return this.resultado([...args, '--', prompt], { timeout: timeout ?? this.config.timeout, cwd, obs })
   }
@@ -336,12 +344,25 @@ export class ClaudeRunner {
   /** Un turno de `agente` en una sesión nueva, solo con Read/Glob/Grep (reuniones, consultas). Sin carril.
    *  Con `preguntar` (reuniones, con la persona mirando): además las herramientas de sus reglas guardadas y las que puede
    *  pedir, en modo normal con `--permission-prompt-tool`, así lo que no tiene permitido se le pregunta a la persona. */
-  async turnoSoloLectura(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string; preguntar?: TurnoConPermiso; modelo?: string; esfuerzo?: string }): Promise<string> {
+  /** Una sesión con nombre para `turnoSoloLectura`: `retomar` = ya existe (`--resume`); si no, se crea (`--session-id`).
+   *  Si se quiso crear y ya existía, se retoma. Si se quiso retomar y no existe, lanza un ClaudeError con `sinSesion`:
+   *  el llamador vuelve a mandar el prompt completo (el de continuación no alcanza sin la historia). */
+  async turnoSoloLectura(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string; preguntar?: TurnoConPermiso; modelo?: string; esfuerzo?: string; sesion?: { sid: string; retomar: boolean } }): Promise<string> {
+    if (!p.sesion) return this.turnoUno(p, ['--session-id', randomUUID().toLowerCase()])
+    try {
+      return await this.turnoUno(p, [p.sesion.retomar ? '--resume' : '--session-id', p.sesion.sid])
+    } catch (e) {
+      if (!p.sesion.retomar && e instanceof ClaudeError && e.sesionUsada) return this.turnoUno(p, ['--resume', p.sesion.sid])
+      throw e
+    }
+  }
+
+  private async turnoUno(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string; preguntar?: TurnoConPermiso; modelo?: string; esfuerzo?: string }, sesion: string[]): Promise<string> {
     this.verificar(p.cwd)
     const q = p.preguntar
     const herramientas = ['Read', 'Glob', 'Grep']
     for (const h of q?.herramientas ?? []) if (!herramientas.includes(h)) herramientas.push(h)
-    const a = ['-p', '--agent', p.agente, '--session-id', randomUUID().toLowerCase(), ...ClaudeRunner.formatoSalida,
+    const a = ['-p', '--agent', p.agente, ...sesion, ...ClaudeRunner.formatoSalida,
       '--tools', herramientas.join(',')]
     // en modo automático (preferencia de la app) el clasificador decide y lo que frena se le pregunta a la persona
     if (q) a.push('--permission-mode', this.config.modoPermisos === 'auto' ? 'auto' : 'default', '--permission-prompt-tool', q.herramientaPermiso, '--mcp-config', q.mcpConfig)
@@ -489,7 +510,7 @@ export class ClaudeRunner {
   /** Lanza el resumen en segundo plano y lo vuelca en la actividad. Devuelve con qué cancelarlo, o undefined si el
    *  mensaje es corto. El costo se registra con origen "resumen". */
   resumirTarea(msg: string, p: { oficina: string; agente: string; token: string; store: Store }): { cancelar(): void } | undefined {
-    if (!ResumenTarea.haceFalta(msg)) return undefined
+    if (!ResumenTarea.haceFalta(msg) || !this.config.iaEfectiva.carteles) return undefined
     let cancelado = false
     const caja = new CajaCosto()
     void (async () => {

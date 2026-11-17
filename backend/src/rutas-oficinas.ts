@@ -48,7 +48,7 @@ function iaPedida(v: unknown): Partial<PreferenciasIA> {
     if (k === 'esfuerzo') {
       if (typeof x !== 'string' || (x !== '' && !Validar.esfuerzos.has(x))) throw new ErrorAPI(400, '«ia.esfuerzo» tiene que ser "", low, medium, high, xhigh o max.')
       r.esfuerzo = x
-    } else if (k === 'colegas' || k === 'mcpLocales') {
+    } else if (k === 'colegas' || k === 'mcpLocales' || k === 'carteles') {
       if (typeof x !== 'boolean') throw new ErrorAPI(400, `«ia.${k}» tiene que ser verdadero o falso.`)
       r[k] = x
     } else if (k === 'skills') {
@@ -58,7 +58,7 @@ function iaPedida(v: unknown): Partial<PreferenciasIA> {
     } else if (k === 'memoria') {
       if (!esMemoriaIA(x)) throw new ErrorAPI(400, '«ia.memoria» tiene que ser "completa" o "liviana".')
       r.memoria = x
-    } else throw new ErrorAPI(400, `«ia.${k}» no existe (esfuerzo, skills, memoria, colegas, mcpLocales).`)
+    } else throw new ErrorAPI(400, `«ia.${k}» no existe (esfuerzo, skills, memoria, colegas, mcpLocales, carteles).`)
   }
   return r
 }

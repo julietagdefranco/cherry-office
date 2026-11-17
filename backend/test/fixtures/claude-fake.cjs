@@ -61,7 +61,7 @@ async function main() {
     else if (m.includes('imagen que est')) kind = 'imagen'
     else if (m.includes('en 3 a 6 palabras')) kind = 'resumen'
   } else {
-    if (m.includes('en una reuni')) kind = 'turno'
+    if (m.includes('en una reuni') || m.startsWith('Sigue la reuni')) kind = 'turno'
     else if (m.includes('documento a la biblioteca')) kind = 'lectura'
     else if (m.includes('consulta de un colega')) kind = 'consulta'
   }

@@ -27,7 +27,7 @@ const fix = (agentes: Ag[] = equipo, env: Record<string, string> = {}) =>
 const nfc = (l: string[]) => l.map((x) => x.normalize('NFC'))
 /** Prompts (último argumento) de todas las llamadas, en NFC. */
 const prompts = (f: Fix) => f.sb.llamadas.map((a) => (a.at(-1) ?? '').normalize('NFC'))
-const promptsTurno = (f: Fix) => prompts(f).filter((p) => p.includes('Estás en una reunión'))
+const promptsTurno = (f: Fix) => prompts(f).filter((p) => p.includes('Estás en una reunión') || p.startsWith('Sigue la reunión'))
 const llamadasConPrompt = (f: Fix, t: string) => f.sb.llamadas.map(nfc).filter((a) => (a.at(-1) ?? '').includes(t))
 
 const nueva = (f: Cli, tema = 'plan de lanzamiento', agentes: string[] = ['marce', 'nico', 'betty'], extra: Obj = {}) =>
@@ -54,7 +54,7 @@ function hoy(): string {
 }
 
 /** Prompts de los turnos de agentes (no la síntesis), en orden. */
-const llamadasTurno = (f: Fix) => llamadasConPrompt(f, 'Estás en una reunión')
+const llamadasTurno = (f: Fix) => f.sb.llamadas.map(nfc).filter((a) => (a.at(-1) ?? '').includes('Estás en una reunión') || (a.at(-1) ?? '').startsWith('Sigue la reunión'))
 
 const uuidValido = (s: string) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s)
 
@@ -195,11 +195,13 @@ describe('Reuniones', () => {
       expect(Sandbox.valor(l, '--permission-mode')).toBe('default')
       expect(Sandbox.valor(l, '--permission-prompt-tool')).toBe('mcp__hq__pedir_permiso')
       expect(Sandbox.valor(l, '--output-format')).toBe('stream-json')
-      expect(l.includes('--session-id') && !l.includes('--resume')).toBe(true)
+      // una conversación por agente: la crea su primer turno y la retoman los siguientes, con solo lo nuevo
+      if (i < 3) expect(l.includes('--session-id') && !l.includes('--resume')).toBe(true)
+      else expect(Sandbox.valor(l, '--resume')).toBe(Sandbox.valor(ll[i - 3]!, '--session-id'))
       expect(l.includes('--add-dir')).toBe(false)
-      sids.add(Sandbox.valor(l, '--session-id') ?? '')
+      sids.add(Sandbox.valor(l, '--session-id') ?? Sandbox.valor(l, '--resume') ?? '')
     })
-    expect(sids.size).toBe(6)                           // sesión nueva en cada turno
+    expect(sids.size).toBe(3)
     expect([...sids].every(uuidValido)).toBe(true)
     expect(f.sb.cwds.every((c) => sinPrivate(c) === sinPrivate(f.carpeta))).toBe(true)
     // los turnos no tocan el historial del chat 1 a 1
@@ -252,7 +254,10 @@ describe('Reuniones', () => {
     expect(p[1]!.includes('(todavía no habló nadie)')).toBe(false)
     expect(p[2]!.includes('Nico: Opinión de nico sobre el tema.')).toBe(true)
     // la ronda 2 ve toda la ronda 1 y, a medida que avanza, la 2
-    expect(p[3]!.includes('(estamos en la ronda 2)')).toBe(true)
+    // la ronda 2 retoma la sesión: solo lo que se dijo desde su turno (sin repetir tema ni memoria)
+    expect(p[3]!.startsWith('Sigue la reunión «plan de lanzamiento» (ronda 2).')).toBe(true)
+    expect(p[3]!.includes('MEMORIA_X')).toBe(false)
+    expect(p[3]!.includes('Marce: Opinión')).toBe(false)
     expect(p[3]!.includes('Betty: Opinión de betty sobre el tema.')).toBe(true)
     expect(p[3]!.includes('— Ronda 2 —')).toBe(false)
     expect(p[4]!.includes('— Ronda 2 —\nMarce: Opinión de marce sobre el tema.')).toBe(true)
@@ -366,7 +371,9 @@ describe('Reuniones', () => {
     const ult = promptsTurno(f).at(-1)!
     expect(ult.includes('Ana (dueño de la oficina): ahora más corto')).toBe(true)
     // la transcripción del turno no incluye los turnos fallidos ni repite la ronda
-    expect(ult.includes('— Ronda 1 —\nMarce: Opinión de marce sobre el tema.\n\nAna (dueño de la oficina): ahora más corto')).toBe(true)
+    // retoma su sesión: solo lo nuevo (el mensaje), sin repetir su propio turno
+    expect(ult.startsWith('Sigue la reunión')).toBe(true)
+    expect(ult.includes('Marce: Opinión de marce')).toBe(false)
   })
 
   test('intervención: validaciones y errores (404, 409 si está cerrada)', async () => {
@@ -969,7 +976,7 @@ describe('Reuniones', () => {
     expect(new Set(turnos(fin).filter((t) => t.ronda === 2).map((t) => str(t.agente)))).toEqual(esperados)
     const p = promptsTurno(f)
     expect(p.length).toBe(6)
-    const ronda1 = p.filter((x) => x.includes('estamos en la ronda 1')), ronda2 = p.filter((x) => x.includes('estamos en la ronda 2'))
+    const ronda1 = p.filter((x) => x.includes('estamos en la ronda 1')), ronda2 = p.filter((x) => x.includes('(ronda 2).'))
     expect(ronda1.length === 3 && ronda2.length === 3).toBe(true)
     for (const x of ronda1) {
       expect(x.includes('Opinión de')).toBe(false)                      // nadie vio a nadie
@@ -978,7 +985,8 @@ describe('Reuniones', () => {
     }
     for (const x of ronda2) {
       expect(x.includes('— Ronda 1 —')).toBe(true)
-      expect(['Opinión de marce', 'Opinión de nico', 'Opinión de betty'].every((o) => x.includes(o))).toBe(true)
+      // retoma su sesión: ve lo de los otros dos (lo suyo ya está en su conversación)
+      expect(['Opinión de marce', 'Opinión de nico', 'Opinión de betty'].filter((o) => x.includes(o)).length).toBe(2)
       expect(x.includes('— Ronda 2 —')).toBe(false)
     }
     // el costo se registra por turno, como siempre (6 x 0.02)

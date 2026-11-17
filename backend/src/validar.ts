@@ -1,4 +1,5 @@
 // Slugs, UUIDs y validaciones de texto (Slug, Router.uuidValido, Config.esIdValido, Validar de Swift).
+import { createHash } from 'node:crypto'
 import { ErrorAPI } from './errores.js'
 
 const segmentador = new Intl.Segmenter('es', { granularity: 'grapheme' })
@@ -69,6 +70,12 @@ export const Slug = {
 }
 
 /** UUID con guiones (mayúsculas o minúsculas). */
+/** UUID fijo derivado de un texto (sha256 con forma de v4): la misma sesión de claude para la misma clave, sin guardarla. */
+export function uuidDe(texto: string): string {
+  const h = createHash('sha256').update(texto).digest('hex')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${'89ab'[parseInt(h[16]!, 16) % 4]}${h.slice(17, 20)}-${h.slice(20, 32)}`
+}
+
 export function uuidValido(s: string): boolean {
   if (s.length !== 36) return false
   for (let i = 0; i < 36; i++) {

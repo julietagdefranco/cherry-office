@@ -3,6 +3,7 @@
 //
 // Otros módulos (coordinador, acciones, creador) agregan sus herramientas al servidor con
 // `mcpDe(s)?.registrarHerramientas(...)` desde su `instalar`.
+import { randomUUID } from 'node:crypto'
 import { ClaudeError } from './claude-runner.js'
 import { esObjeto, type Obj } from './json.js'
 import type { HQLog } from './log.js'
@@ -127,6 +128,12 @@ export class ConsultasMCP {
   private readonly creador: FabricaHerramientas[] = []
   /** Preguntas frecuentes (módulo de conocimiento); undefined = las consultas no dejan memoria. */
   memoria?: MemoriaConsultas
+  /** Una conversación de claude por par (oficina, quien pregunta, colega): se retoma mientras la caché de claude sigue
+   *  fresca (dura una hora) y no se alargó demasiado; así el colega no relee la memoria ni el contexto en cada consulta.
+   *  Pasada la frescura conviene una nueva: retomar con la caché fría reescribe toda la historia. */
+  private readonly sesiones = new Map<string, { sid: string; ultimo: number; usos: number; ocupada: boolean }>()
+  static readonly frescuraMs = 50 * 60_000
+  static readonly maxUsos = 8
 
   /** `timeout`: segundos por consulta (120 por defecto; `HQ_CONSULTA_TIMEOUT` en el entorno lo cambia). */
   constructor(private readonly s: Servicios, readonly tokens: MCPTokens, readonly timeout = 120, readonly permisos: PermisosVivos = new PermisosVivos()) {}
@@ -206,10 +213,43 @@ export class ConsultasMCP {
       let prep: { extra: string; contexto?: unknown } = { extra: '' }
       try { if (this.memoria) prep = this.memoria.preparar({ oficina: ident.oficina, de: yo.id, colega: b.id, pregunta }) } catch {}
       const prompt = promptConsulta(yo, pregunta) + prep.extra
-      const texto = await this.runner.actividad.seguir({ oficina: ident.oficina, agente: b.id, origen: 'consulta', tarea: `Consulta de ${yo.nombre}`, extra: caja.observador() },
-        async (obs) => this.runner.turnoSoloLectura({
-          agente: b.id, prompt, cwd: ident.oficina, timeout: this.timeout, dirsExtra: dirs, obs, instrucciones: conMemoria(Instrucciones.para(o, b), this.runner.config.iaEfectiva.memoria), esfuerzo: esfuerzoDe(b),
-        }))
+      const k = [ident.oficina, yo.id, b.id].join('\u001f')
+      const ahora = Date.now()
+      let ses = this.sesiones.get(k)
+      const retomar = !!ses && !ses.ocupada && ahora - ses.ultimo < ConsultasMCP.frescuraMs && ses.usos < ConsultasMCP.maxUsos
+      if (!retomar) {
+        const nueva = { sid: randomUUID().toLowerCase(), ultimo: ahora, usos: 0, ocupada: false }
+        // si la del par está en uso (dos consultas a la vez), esta va aparte y no la reemplaza
+        if (!ses?.ocupada) this.sesiones.set(k, nueva)
+        ses = nueva
+      }
+      const mia = ses!
+      mia.ocupada = true
+      const turno = (sesion: { sid: string; retomar: boolean }, obs: Parameters<typeof this.runner.turnoSoloLectura>[0]['obs']) => this.runner.turnoSoloLectura({
+        agente: b.id, prompt, cwd: ident.oficina, timeout: this.timeout, dirsExtra: dirs, obs, instrucciones: conMemoria(Instrucciones.para(o, b), this.runner.config.iaEfectiva.memoria), esfuerzo: esfuerzoDe(b),
+        sesion,
+      })
+      let texto: string
+      try {
+        texto = await this.runner.actividad.seguir({ oficina: ident.oficina, agente: b.id, origen: 'consulta', tarea: `Consulta de ${yo.nombre}`, extra: caja.observador() },
+          async (obs) => {
+            try {
+              return await turno({ sid: mia.sid, retomar }, obs)
+            } catch (e) {
+              if (!retomar || !(e instanceof ClaudeError) || !e.sinSesion) throw e
+              mia.sid = randomUUID().toLowerCase()
+              mia.usos = 0
+              return turno({ sid: mia.sid, retomar: false }, obs)
+            }
+          })
+        mia.ultimo = Date.now()
+        mia.usos++
+      } catch (e) {
+        if (this.sesiones.get(k) === mia) this.sesiones.delete(k)
+        throw e
+      } finally {
+        mia.ocupada = false
+      }
       let t = prefijo(sanear(texto).trim(), ConsultasMCP.maxRespuesta)
       if (t !== '' && this.memoria) {
         try { t = this.memoria.registrar({ oficina: ident.oficina, de: yo.id, colega: b.id, pregunta, respuesta: t, contexto: prep.contexto }).trim() } catch {}
