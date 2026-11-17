@@ -150,7 +150,7 @@ App.Nav = (function () {
   function vacio() {
     if (App.modoDerecho() && App.modoDerecho() !== 'vacio') App.cerrarDerecho(true);
     var der = App.dom.derecho;
-    der.classList.remove('con-relacionado');
+    der.classList.remove('con-relacionado', 'lado-movil');
     der.classList.add('abierto'); der.setAttribute('data-modo', 'vacio');
     var txt = {
       bandeja: ['bandeja', 'Lo que te espera', 'Hoy junta lo que te entregaron, los permisos que te piden y lo que pasó.'],
@@ -259,7 +259,7 @@ App.Nav = (function () {
   }
   /* App.abrirDerecho avisa acá: si el módulo se abrió desde otro lado, la sección y la ruta lo siguen */
   function alAbrir(modo) {
-    if (modo !== 'agente') App.dom.derecho.classList.remove('con-relacionado');
+    if (modo !== 'agente') App.dom.derecho.classList.remove('con-relacionado', 'lado-movil');
     var lugar = lugarDe(modo);
     if (!lugar) return;
     if (seccion !== lugar[0] || (lugar[1] && sub !== lugar[1])) ponerSeccion(lugar[0], lugar[1]);
@@ -551,6 +551,16 @@ App.Nav = (function () {
     }).catch(function () { App.vaciar(notas); });
     return caja;
   }
+  /* cuántas charlas, tareas, archivos y notas tiene: alLlegar(clave, n) por cada una, a medida que llegan */
+  function cuentas(id, alLlegar) {
+    var charlas_ = function () { alLlegar('charlas', charlasDe(id).length); };
+    if (sesiones) charlas_(); else cargarSesiones().then(charlas_);
+    api().get('/api/tareas').then(function (r) { alLlegar('tareas', (r.tareas || []).filter(function (t) { return t.agente === id; }).length); }).catch(function () {});
+    api().get('/api/biblioteca/entregables', { agente: id }).then(function (r) { alLlegar('archivos', (r.entregables || []).length); }).catch(function () {});
+    api().get('/api/agentes/' + encodeURIComponent(id) + '/conocimiento').then(function (r) {
+      alLlegar('notas', (r.texto || '').split('\n').map(function (l) { return l.replace(/^\s*([-*+]|\d+\.|#+)\s*/, '').replace(/[*_`>]/g, '').trim(); }).filter(Boolean).length);
+    }).catch(function () {});
+  }
   /* todas sus charlas, para «Ver todas» (con buscador) */
   function todasLasCharlas(id, q) {
     var caja = h('div'), actualSid = App.Agente.sesion(id);
@@ -589,6 +599,6 @@ App.Nav = (function () {
     riel: riel, aplicar: aplicar, ir: ir, alAbrir: alAbrir, alCerrar: alCerrar, refrescar: refrescar,
     seccion: function () { return seccion; }, enSeccion: function () { return !!seccion && seccion !== 'oficina'; },
     pintarLista: pintarLista, elegirAgente: elegirAgente, relacionado: relacionado, menuNueva: menuNueva,
-    todasLasCharlas: todasLasCharlas, tituloCharla: tituloCharla, acomodar: acomodar
+    todasLasCharlas: todasLasCharlas, tituloCharla: tituloCharla, acomodar: acomodar, cuentas: cuentas
   };
 })();
