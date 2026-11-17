@@ -1361,7 +1361,7 @@ export class ReunionesRouter implements SubRouter {
         { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.tema, extra: caja.observador() },
         async (obs) => {
           const turno = (pr: string, ses: { sid: string; retomar: boolean }) => runner.turnoSoloLectura({ agente: ag.id, prompt: pr, cwd: carpeta, timeout, dirsExtra: dirs, obs,
-            instrucciones: conMemoria(Instrucciones.para(of, ag), esMemoriaIA(f.memoria) ? f.memoria : this.s.config.iaEfectiva.memoria), preguntar,
+            instrucciones: conMemoria(Instrucciones.para(of, ag, { enApp: true }), esMemoriaIA(f.memoria) ? f.memoria : this.s.config.iaEfectiva.memoria), preguntar,
             modelo: f.modelo, esfuerzo: f.esfuerzo ?? esfuerzoDe(ag), sesion: ses })
           try {
             return await turno(prompt, sesion)

@@ -70,6 +70,15 @@ describe('Instrucciones', () => {
     expect(sd).not.toContain('Podés leer con')
   })
 
+  test('en la app (chat, tareas, reuniones) se le cuenta qué puede mostrar; a un colega no', () => {
+    const chat = Instrucciones.para(oficinaDe(), agente(), { conMCP: true })!
+    expect(chat).toContain('## Cómo se ve lo que respondés')
+    expect(chat).toContain('```html, ```svg o ```mermaid')
+    expect(chat).toContain('![descripción](ruta)')
+    expect(Instrucciones.para(oficinaDe(), agente(), { enApp: true })).toBe(Instrucciones.vistaEnApp)
+    expect(Instrucciones.para(oficinaDe(), agente())).toBeUndefined()   // consulta entre colegas
+  })
+
   test('tope de 8000 caracteres', () => {
     const reglas = Array.from({ length: 40 }, (_, i) => ({ id: `r${i}`, texto: 'x'.repeat(590) }))
     const t = Instrucciones.para(oficinaDe('Ana', reglas), agente())!

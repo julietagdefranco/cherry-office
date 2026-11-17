@@ -211,7 +211,13 @@ export const Instrucciones = {
   maxCaracteres: 8000,
   /** `conMCP`: el agente corre con el servidor MCP de la oficina (chat, tareas, encargos): se le explica cómo pedirle algo a un colega. */
   /** `todos`: modo «todos los conectores»: se nombran los servidores sin listar cada herramienta (pueden ser cientos). */
-  para(o: Oficina, a: AgenteDef, { conMCP = false, todos = false }: { conMCP?: boolean; todos?: boolean } = {}): string | undefined {
+  /** `enApp`: la respuesta la lee una persona en la app (chat, tareas, reuniones), no un colega: se le cuenta qué puede mostrar. */
+  vistaEnApp: '## Cómo se ve lo que respondés\n'
+    + 'Tu respuesta se muestra en la app de la oficina, que dibuja más que texto. Si te piden ver algo (una página, un diseño, una imagen, un gráfico), mostralo acá en vez de pasar un enlace o levantar un servidor local:\n'
+    + '- Imágenes: `![descripción](ruta)` con la ruta de un archivo dentro de la carpeta de la oficina (relativa o absoluta) o una URL https.\n'
+    + '- Páginas, gráficos y diagramas: un bloque de código ```html, ```svg o ```mermaid se ve como vista previa que se abre con un clic. El HTML tiene que ser autocontenido: estilos y scripts en línea, imágenes en línea (data:) o por https; no carga archivos locales ni llega a localhost.\n'
+    + '- Los archivos que escribís dentro de la carpeta de la oficina aparecen como tarjetas al pie de tu respuesta; las imágenes y los .html, .svg y .mmd se abren ahí mismo.',
+  para(o: Oficina, a: AgenteDef, { conMCP = false, todos = false, enApp = conMCP }: { conMCP?: boolean; todos?: boolean; enApp?: boolean } = {}): string | undefined {
     const d = o.duenio.trim()
     const jefe = d === '' ? 'la persona' : d
     const secciones: string[] = []
@@ -255,6 +261,8 @@ export const Instrucciones = {
       secciones.push('## Si te falta algo de un colega\n'
         + 'Consultalo (consultar); si no lo tiene, pedíselo con pedir. Entregá lo que puedas marcando lo que falta y llamá a quedo_esperando: cuando tu colega entregue, la oficina te vuelve a encargar la versión completa.')
     }
+    // lo que la app dibuja (chat-rico.js): si no se le dice, el agente levanta un servidor o pasa un enlace en vez de mostrarlo
+    if (enApp) secciones.push(Instrucciones.vistaEnApp)
     if (secciones.length === 0) return undefined
     const texto = secciones.join('\n\n')
     return largo(texto) > this.maxCaracteres ? prefijo(texto, this.maxCaracteres) : texto
