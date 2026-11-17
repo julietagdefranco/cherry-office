@@ -106,18 +106,24 @@
   /* la columna del costado: detalles, la ficha (perfil o permisos) o la lista completa de algo */
   function columnaLado(a) {
     var caja = h('aside.relacionado');
-    if (lado === 'detalles') { App.add(caja, h('div.lat-cab', h('b', 'Detalles')), App.Nav.relacionado(a.id)); return caja; }
+    /* cada cabecera de la columna termina con la cruz: así queda arriba a la derecha de todo el panel */
+    var latCab = function () {
+      var c = App.add(h('div.lat-cab'), Array.prototype.slice.call(arguments));
+      c.appendChild(h('button.btn.fantasma.icono.lat-cerrar', { title: 'Cerrar la charla', onclick: App.cerrarDerecho }, App.icono('cerrar')));
+      return c;
+    };
+    if (lado === 'detalles') { App.add(caja, latCab(h('b', 'Detalles')), App.Nav.relacionado(a.id)); return caja; }
     var volver = h('button.btn.fantasma.icono', { title: 'Volver a los detalles', onclick: function () { verLado('detalles'); } }, App.icono('atras'));
     var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
     if (lado === 'perfil' || lado === 'permisos') {
-      App.add(caja, h('div.lat-cab', volver, h('div.pestanas.lat-pest', [['perfil', 'Perfil y apariencia'], ['permisos', 'Permisos']].map(function (p) {
+      App.add(caja, latCab(volver, h('div.pestanas.lat-pest', [['perfil', 'Perfil y apariencia'], ['permisos', 'Permisos']].map(function (p) {
         return h('button.pestana' + (lado === p[0] ? '.activa' : ''), { onclick: function () { if (lado !== p[0]) verLado(p[0]); } }, p[1]);
       }))), cuerpo, pie);
       if (lado === 'perfil') pintarPerfil(a, cuerpo, pie); else pintarPermisos(a, cuerpo, pie);
       return caja;
     }
     var TIT = { charlas: 'Charlas', tareas: 'Tareas', archivos: 'Archivos', notas: 'Notas' };
-    App.add(caja, h('div.lat-cab', volver, h('b', TIT[lado] || '')));
+    App.add(caja, latCab(volver, h('b', TIT[lado] || '')));
     if (lado === 'charlas') {
       var inp = h('input.campo', { placeholder: 'Buscar en sus charlas', value: ladoFiltro, 'aria-label': 'Buscar en sus charlas' });
       var lista = h('div');
@@ -161,7 +167,7 @@
               onclick: function () { verLado(lado === 'perfil' || lado === 'permisos' ? 'detalles' : 'perfil'); } }, App.icono('lapiz')),
             h('button.btn.fantasma.icono', { title: 'Ver dónde está ' + a.nombre + ' en la oficina', onclick: function () {
               if (App.Oficina3D.marcar) App.Oficina3D.marcar(a.id); else if (App.Oficina3D.enfocarAgente) App.Oficina3D.enfocarAgente(a.id); } }, App.icono('pin')),
-            h('button.btn.fantasma.icono', { title: 'Cerrar la charla', onclick: App.cerrarDerecho }, App.icono('cerrar')))),
+            /* cerrar no va acá: queda arriba a la derecha del todo, en la cabecera de la columna del costado */)),
         h('div.charla-barra', h('b.charla-tit', App.Nav.tituloCharla ? App.Nav.tituloCharla(a.id) : ''),
           h('button.btn.chico.fantasma.sacar-tareas', { title: 'Convertir esta charla en tareas (para ' + a.nombre + ' o para otros)', onclick: function () { App.ChatTareas.abrir(a, sesiones[a.id]); } }, App.icono('reloj'), 'Sacar tareas')),
         cuerpo, pie);
