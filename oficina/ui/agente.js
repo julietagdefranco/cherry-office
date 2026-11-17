@@ -315,7 +315,7 @@
     var reglas = (ag().reglas || []).slice();
     var catalogo = null, carpetaEnt = '';
     var global = ((App.E.estado && App.E.estado.conectores_agentes) || 'por_agente') === 'todos';
-    var resumen = h('div.resumen-ui'), zonaReglas = h('div'), zonaConectores = h('div');
+    var resumen = h('div.resumen-ui'), zonaReglas = h('div'), zonaConectores = h('div'), zonaHab = h('div');
     var url = '/api/agentes/' + encodeURIComponent(id);
 
     /* un guardado a la vez: cada uno arma su cuerpo con lo último que quedó guardado */
@@ -404,9 +404,14 @@
         return;
       }
       if (!catalogo) { zonaConectores.appendChild(App.seccion('Conectores', App.cargando('Trayendo tus conectores…'))); return; }
-      var servs = catalogo.servidores || [], asig = ag().conectores || [];
+      var iaOf = (App.E.oficina && App.E.oficina.ia) || {};
+      var habilitado = function (n) { return !iaOf.conectores || iaOf.conectores.some(function (x) { return normServ(x) === normServ(n); }); };
+      var todosServs = catalogo.servidores || [], asig = ag().conectores || [];
+      // los que la oficina no habilita no se ofrecen (Ajustes › Skills y MCP)
+      var servs = todosServs.filter(function (s) { return habilitado(s.nombre); });
+      var fuera = todosServs.length - servs.length;
       // servidores asignados que ya no aparecen en el catálogo: se muestran apagados y se conservan
-      var extra = asig.filter(function (c) { return !servs.some(function (s) { return s.nombre === c.servidor; }); })
+      var extra = asig.filter(function (c) { return habilitado(c.servidor) && !todosServs.some(function (s) { return s.nombre === c.servidor; }); })
         .map(function (c) { return { nombre: c.servidor, disponible: false, herramientas: [], _viejo: c }; });
       var todos = servs.concat(extra);
       var filas = todos.map(function (s) {
@@ -423,9 +428,47 @@
       });
       App.add(zonaConectores, App.seccion('Conectores', [
         catalogo.detectando ? h('div.ayuda', 'Mirando tus conectores de claude.ai… puede tardar un minuto.') : null,
-        todos.length ? filas : h('div.ayuda', catalogo.detectando ? '' : 'No hay conectores detectados. Conectalos en claude.ai y actualizá la lista en Ajustes › Conectores.'),
+        todos.length ? filas : h('div.ayuda', catalogo.detectando ? '' : fuera ? 'La oficina no habilita ningún conector.' : 'No hay conectores detectados. Conectalos en claude.ai y actualizá la lista en Ajustes › Conectores.'),
+        fuera ? h('div.ayuda', fuera === 1 ? 'Hay 1 conector que la oficina no habilita.' : 'Hay ' + fuera + ' conectores que la oficina no habilita.',
+          ' ', h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.abrir('habilitados'); } }, 'Ajustes › Skills y MCP')) : null,
         h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.abrir('conectores'); } }, App.icono('enchufe'), 'Ver todos los conectores')],
         { ayuda: 'Actuar es hacer algo afuera (mandar, publicar, crear) y siempre queda como propuesta que aprobás vos.' }));
+    }
+
+    function normServ(n) { var t = String(n || '').trim().toLowerCase(); return t.indexOf('claude.ai ') === 0 ? t.slice(10).trim() : t; }
+
+    /* skills y MCP de Claude Code: hereda lo que habilita la oficina o elige dentro de eso (PATCH skills/mcp; null = hereda) */
+    function pintarHabilitados(cat) {
+      App.vaciar(zonaHab);
+      var iaOf = (App.E.oficina && App.E.oficina.ia) || {};
+      function fila(clave, titulo, catalogoTipo, ayuda, nombreOp) {
+        var deOficina = iaOf[clave];
+        var base = deOficina ? deOficina.slice() : (catalogoTipo || []).slice();
+        var ops = App.Ajustes.opcionesNombres(base);
+        if (nombreOp) ops.forEach(nombreOp);
+        var el = App.Ajustes.selector({ etiqueta: titulo, opciones: ops, valor: ag()[clave],
+          vacio: deOficina ? 'La oficina no habilita ninguno.' : 'No hay nada instalado en tu Claude Code.',
+          todo: { titulo: 'Hereda de la oficina', sub: deOficina ? 'Usa los ' + deOficina.length + ' que habilita la oficina' : 'Usa todos los que habilita la oficina' },
+          algunas: { titulo: 'Solo los que elijas', sub: 'Dentro de lo que habilita la oficina' },
+          alCambiar: function (v) {
+            var antes = ag()[clave];
+            var previo = {}; previo[clave] = antes === undefined ? null : copia(antes);
+            guardar(function () { var c = {}; c[clave] = v; return c; },
+              titulo + ': ' + (v ? (v.length ? 'solo ' + v.length + ' de la lista' : 'nada') : 'hereda de la oficina') + '.', previo);
+          } });
+        return App.ajuste(titulo, ayuda, el);
+      }
+      App.add(zonaHab, App.seccion('Skills y MCP', [
+        fila('skills', 'Skills', cat.skills, 'Las skills de Claude Code que recibe en cada paso. Menos skills, menos tokens.'),
+        fila('mcp', 'Servidores MCP', cat.mcp, 'Los MCP de tu Claude Code que puede usar.',
+          function (o) { o.titulo = nombreServ(o.sub.replace(/^plugin:[^:]+:/, '')); }),
+        h('button.btn.chico.fantasma', { onclick: function () { App.Ajustes.abrir('habilitados'); } }, App.icono('chispa'), 'Lo que habilita la oficina')],
+        { ayuda: 'Lo que la oficina no habilita no aparece acá.' }));
+    }
+    function cargarHabilitados() {
+      zonaHab.appendChild(App.seccion('Skills y MCP', App.cargando('Trayendo lo que tenés en Claude Code…')));
+      api.get('/api/skills').then(function (r) { if (vigente()) pintarHabilitados(r); })
+        .catch(function () { if (vigente()) pintarHabilitados({ skills: [], mcp: [] }); });
     }
 
     function cargarCatalogo() {
@@ -448,8 +491,8 @@
     App.add(cont, resumen, zonaReglas,
       App.ajuste('Hace solo', 'Lo que resuelve sin consultarte.', chipsSolo),
       App.ajuste('Te consulta antes', 'Mail, publicar o gastar siempre quedan como propuesta, aunque no figure acá.', chipsProponer),
-      zonaConectores);
-    pintarReglas(); pintarConectores();
+      zonaHab, zonaConectores);
+    pintarReglas(); pintarConectores(); cargarHabilitados();
     if (!global) cargarCatalogo();
     api.get('/api/biblioteca/entregables', { agente: id }).then(function (r) {
       if (vigente() && r.carpeta) { carpetaEnt = String(r.carpeta); pintarReglas(); }

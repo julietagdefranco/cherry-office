@@ -85,6 +85,8 @@ export class Config {
   get iaEfectiva(): PreferenciasIA { return { ...iaPorDefecto, ...this.ia } }
   /** Skills instaladas que vio la última corrida (las pone el runner): para apagar las que un agente no eligió. */
   skillsInstaladas: () => string[] | undefined = () => undefined
+  /** Servidores MCP del Claude Code de la persona que vio la última corrida sin `--strict-mcp-config` (los pone el runner). */
+  mcpInstalados: () => string[] | undefined = () => undefined
 
   /** Modelo elegido para `clave`, o el de por defecto. */
   modelo(clave: ClaveModelo): string { return this.modelos[clave] ?? modelosPorDefecto[clave] }

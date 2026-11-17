@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { ErrorAPI } from './errores.js'
 import { esObjeto, type Obj } from './json.js'
 import { jsonSwift } from './json-swift.js'
+import { Habilitados, type IAOficina } from './habilitados.js'
 import { decodificarFlujo, decodificarRegla, type FlujoDef, type Regla } from './modelo-flujos.js'
 import { decodificarTarea, type TareaProgramada } from './tareas.js'
 import { Slug, Validar, largo, plegar, prefijo } from './validar.js'
@@ -32,8 +33,10 @@ export type AgenteDef = {
   modelo?: string
   /** Esfuerzo por defecto de sus corridas (`--effort`: low…max). Sin él, el de Claude Code de la persona. */
   esfuerzo?: string
-  /** Skills de Claude Code que usa (modo «Las de cada agente»). */
+  /** Skills de Claude Code que usa, dentro de las que habilita la oficina. Sin el campo, hereda las de la oficina; [] = ninguna. */
   skills?: string[]
+  /** Servidores MCP de Claude Code que usa, dentro de los que habilita la oficina. Sin el campo, hereda; [] = ninguno. */
+  mcp?: string[]
   chips?: string[]
   /** Temas sobre los que sabe (para que los colegas sepan a quién preguntarle): `colegas()` y `quien_sabe(tema)`. */
   sabeDe?: string[]
@@ -67,6 +70,8 @@ export type Oficina = {
   tareas?: TareaProgramada[]
   flujos?: FlujoDef[]
   reglas?: Regla[]
+  /** Skills, MCP de Claude Code y conectores de claude.ai habilitados para los agentes de esta oficina (habilitados.ts). */
+  ia?: IAOficina
 }
 
 // MARK: - decodificación (como Codable)
@@ -106,7 +111,7 @@ function decodificarAgente(v: unknown): AgenteDef {
   const o = obj(v)
   return sinUndefined({
     id: str(o.id), nombre: str(o.nombre), rol: str(o.rol), departamento: str(o.departamento),
-    brief: optStr(o.brief), modelo: optStr(o.modelo), esfuerzo: optStr(o.esfuerzo), skills: optStrs(o.skills), chips: optStrs(o.chips), sabeDe: optStrs(o.sabeDe),
+    brief: optStr(o.brief), modelo: optStr(o.modelo), esfuerzo: optStr(o.esfuerzo), skills: optStrs(o.skills), mcp: optStrs(o.mcp), chips: optStrs(o.chips), sabeDe: optStrs(o.sabeDe),
     avatar: opt(o.avatar, decodificarAvatar), creado: optStr(o.creado), escritura: optStrs(o.escritura),
     limites: opt(o.limites, (x) => { const l = obj(x); return sinUndefined({ solo: optStrs(l.solo), proponer: optStrs(l.proponer) }) }),
     conectores: opt(o.conectores, (x) => (Array.isArray(x) ? x : falla()).map((c) => {
@@ -145,6 +150,7 @@ function decodificarOficina(v: unknown): Oficina {
     tareas: lista(o.tareas)?.map(decodificarTarea),
     flujos: lista(o.flujos)?.map(decodificarFlujo),
     reglas: lista(o.reglas)?.map(decodificarRegla),
+    ia: opt(o.ia, (x) => { const d = obj(x); return sinUndefined({ skills: optStrs(d.skills), mcp: optStrs(d.mcp), conectores: optStrs(d.conectores) }) }),
   })
 }
 
@@ -274,7 +280,10 @@ export function validarOficina(o: Oficina) {
     if (a.permisos) ValidarAgenteExtra.permisos(a.permisos)
     if (a.reglas) ValidarAgenteExtra.reglas(a.reglas)
     if (a.sabeDe) ValidarAgenteExtra.sabeDe(a.sabeDe)
+    if (a.skills) Habilitados.lista(a.skills, `skills de ${a.id}`)
+    if (a.mcp) Habilitados.lista(a.mcp, `mcp de ${a.id}`)
   }
+  if (o.ia) Habilitados.validarOficina(o.ia)
   const vins = new Set<string>()
   for (const v of o.vinculos ?? []) {
     if (!Slug.valido(v.id) || vins.has(v.id)) throw new ErrorAPI(400, `Carpeta vinculada con id inválido o repetido: ${v.id}.`)

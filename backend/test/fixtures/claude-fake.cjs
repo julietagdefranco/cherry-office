@@ -50,7 +50,7 @@ async function main() {
   const tiene = (flag) => args.includes(flag)
   const m = msg.normalize('NFC')
   // skills instaladas (el system/init del claude real las trae): el sondeo de /api/skills y los mensajes con SKILLS
-  if (m.includes('SKILLS') || (m === 'Respondé solo: ok' && args[args.indexOf('--tools') + 1] === 'Skill')) salida(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', skills: ['docx', 'pdf', 'xlsx'] }))
+  if (m.includes('SKILLS') || (m === 'Respondé solo: ok' && args[args.indexOf('--tools') + 1] === 'Skill')) salida(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', skills: ['docx', 'pdf', 'xlsx'], mcp_servers: [{ name: 'context7', status: 'connected' }, { name: 'plugin:pw:playwright', status: 'pending' }, { name: 'claude.ai Gmail', status: 'connected', source: 'claudeai' }, { name: 'hq', status: 'connected' }] }))
 
   let kind = ''
   if (agent === '') {

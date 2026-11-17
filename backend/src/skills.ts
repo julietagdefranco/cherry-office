@@ -3,7 +3,8 @@
 // - `resumidas`: todas, con la descripción recortada (`skillListingMaxDescChars`): menos de la mitad y las sigue eligiendo
 //   bien (probado pidiendo una presentación y una planilla).
 // - `completas`: todas, tal cual (como era antes).
-// - `agente`: solo las que el agente tiene elegidas en su ficha (`skillOverrides: off` para las demás); sin ninguna, sin Skill.
+// - `agente`: solo las elegidas (ficha del agente u oficina, habilitados.ts); sin ninguna elegida, sin Skill.
+// En todos los modos, si la oficina o el agente acotan la lista, las demás van con `skillOverrides: off`.
 // - `ninguna`: sin la herramienta Skill.
 // Las reglas `--disallowedTools Skill(x)` NO achican la lista (probado): por eso va con `--settings`.
 import fs from 'node:fs'
@@ -24,15 +25,17 @@ export function modoSkillsDe(v: unknown): ModoSkills | undefined {
 /** Caracteres de la descripción de cada skill en modo `resumidas`. */
 export const largoResumido = 150
 
-/** Skills instaladas que vio la última corrida (`skills` del `system/init`), guardadas en `skills.json` de la carpeta de
- *  datos. Hacen falta para apagar las que no eligió un agente (skillOverrides va por nombre). */
-export class CatalogoSkills {
+/** Nombres que vio la última corrida en su `system/init` (skills instaladas, servidores MCP de Claude Code), guardados en
+ *  un archivo de la carpeta de datos (`skills.json`, `mcp-locales.json`). Hacen falta para apagar lo que no está elegido
+ *  (skillOverrides y las reglas de MCP van por nombre). */
+export class CatalogoNombres {
   private nombres?: string[]
-  constructor(private readonly archivo?: string) {
+  constructor(private readonly archivo?: string, private readonly clave = 'skills') {
     if (!archivo) return
     try {
       const o: unknown = JSON.parse(fs.readFileSync(archivo, 'utf8'))
-      if (esObjeto(o) && Array.isArray(o.skills) && o.skills.every((x) => typeof x === 'string')) this.nombres = o.skills as string[]
+      const l = esObjeto(o) ? o[clave] : undefined
+      if (Array.isArray(l) && l.every((x) => typeof x === 'string')) this.nombres = l as string[]
     } catch {}
   }
   get lista(): string[] | undefined { return this.nombres ? [...this.nombres] : undefined }
@@ -43,19 +46,28 @@ export class CatalogoSkills {
     if (!this.archivo) return
     try {
       fs.mkdirSync(path.dirname(this.archivo), { recursive: true })
-      fs.writeFileSync(this.archivo, JSON.stringify({ skills: n }))
+      fs.writeFileSync(this.archivo, JSON.stringify({ [this.clave]: n }))
     } catch {}
   }
 }
 
-/** `--settings` de una corrida según el modo, o undefined si no hace falta (completas, ninguna, o sin datos). `undefined`
- *  en `elegidas` + modo `agente` no pasa: el llamador ya sacó la herramienta Skill. */
-export function settingsSkills(modo: ModoSkills, elegidas: string[], catalogo: string[] | undefined): Record<string, unknown> | undefined {
-  if (modo === 'resumidas') return { skillListingMaxDescChars: largoResumido }
-  if (modo !== 'agente') return undefined
-  // sin catálogo todavía (primera corrida): resumidas, y la próxima ya sabe cuáles apagar
-  if (!catalogo) return { skillListingMaxDescChars: largoResumido }
-  const off: Record<string, string> = {}
-  for (const s of catalogo) if (!elegidas.includes(s)) off[s] = 'off'
-  return { skillOverrides: off }
+/** Skills instaladas (`skills.json`). */
+export class CatalogoSkills extends CatalogoNombres {
+  constructor(archivo?: string) { super(archivo, 'skills') }
+}
+
+/** `--settings` de una corrida, o undefined si no hace falta. `elegidas` = las que puede usar el agente (lo de la oficina
+ *  y su ficha, habilitados.ts); undefined = todas. El llamador ya sacó la herramienta Skill si no queda ninguna (o con
+ *  `agente` sin lista). Con lista y catálogo, las demás van `off`; en `resumidas`, además, la descripción recortada. */
+export function settingsSkills(modo: ModoSkills, elegidas: string[] | undefined, catalogo: string[] | undefined): Record<string, unknown> | undefined {
+  const r: Record<string, unknown> = {}
+  if (modo === 'resumidas') r.skillListingMaxDescChars = largoResumido
+  if (elegidas !== undefined) {
+    // sin catálogo todavía (primera corrida): resumidas, y la próxima ya sabe cuáles apagar
+    if (!catalogo) return { skillListingMaxDescChars: largoResumido }
+    const off: Record<string, string> = {}
+    for (const s of catalogo) if (!elegidas.includes(s)) off[s] = 'off'
+    if (Object.keys(off).length > 0) r.skillOverrides = off
+  }
+  return Object.keys(r).length > 0 ? r : undefined
 }

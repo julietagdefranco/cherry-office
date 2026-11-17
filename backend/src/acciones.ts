@@ -7,7 +7,7 @@ import { ErrorAPI } from './errores.js'
 import { jsonCompacto } from './json-swift.js'
 import { esObjeto, type Obj } from './json.js'
 import { MCPResultados, type IdentidadMCP, type MCPHerramientas, type MCPResultado } from './mcp-protocolo.js'
-import { OficinaStore, type AgenteDef } from './oficina.js'
+import { OficinaStore, type AgenteDef, type Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
 import { Acciones as AccionesPermisos, TodosConectores, cortoHerramienta } from './permisos.js'
 import { Programador, type Ejecucion } from './programador.js'
@@ -210,7 +210,7 @@ export const Acciones = {
     if (!ac || ac.estado !== 'pendiente') throw new ErrorAPI(409, 'Esa acción ya no está pendiente.')
     const def = act.oficina.agentes.find((a) => a.id === ac.agente)
     if (!def) throw new ErrorAPI(409, 'El agente que la propuso ya no está en la oficina.')
-    if (!actuarDe(s, def).includes(ac.herramienta)) throw new ErrorAPI(409, 'El agente ya no tiene asignada esa herramienta para actuar.')
+    if (!actuarDe(s, act.oficina, def).includes(ac.herramienta)) throw new ErrorAPI(409, 'El agente ya no tiene asignada esa herramienta para actuar.')
     const jefe = act.oficina.duenio.trim()
     const aprueba = jefe === '' ? 'La persona' : jefe
     const consigna = `${aprueba} aprobó esta acción. Ejecutá exactamente esto con la herramienta ${ac.herramienta} y estos argumentos, y no hagas nada más:
@@ -290,7 +290,7 @@ export class HerramientasAcciones implements MCPHerramientas {
     const ag = o.agentes.find((a) => a.id === this.identidad.agente)
     if (!ag) return MCPResultados.error('No pude leer la oficina.')
     const h = (typeof args.herramienta === 'string' ? args.herramienta : '').trim()
-    const asignadas = actuarDe(s, ag)
+    const asignadas = actuarDe(s, o, ag)
     if (h === '' || !asignadas.includes(h)) {
       return MCPResultados.error(`No tenés esa herramienta asignada para actuar. Las que podés proponer son: ${asignadas.join(', ')}.`)
     }
@@ -318,14 +318,15 @@ export class HerramientasAcciones implements MCPHerramientas {
   }
 }
 
-/** Herramientas de actuar de un agente: las asignadas, o las de todos los conectores en modo «todos». */
-const actuarDe = (s: Servicios, a: AgenteDef) => AccionesPermisos.actuar(TodosConectores.agente(s.config, a, s.catalogo?.()))
+/** Herramientas de actuar de un agente: las asignadas, o las de todos los conectores en modo «todos»; solo de los
+ *  conectores que habilita la oficina. */
+const actuarDe = (s: Servicios, o: Oficina, a: AgenteDef) => AccionesPermisos.actuar(TodosConectores.agente(s.config, a, s.catalogo?.(), o))
 
 /** Solo si el agente del token tiene herramientas de actuar asignadas. */
 export function herramientasAcciones(s: Servicios, token: string, identidad: IdentidadMCP): MCPHerramientas | undefined {
   let o
   try { o = OficinaStore.leer(identidad.oficina) } catch { return undefined }
   const a: AgenteDef | undefined = o.agentes.find((x) => x.id === identidad.agente)
-  if (!a || actuarDe(s, a).length === 0) return undefined
+  if (!a || actuarDe(s, o, a).length === 0) return undefined
   return new HerramientasAcciones(s, token, identidad)
 }

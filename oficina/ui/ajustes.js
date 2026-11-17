@@ -260,6 +260,7 @@ App.Ajustes = (function () {
     { id: 'general', grupo: 'oficina', texto: 'General', icono: 'edificio', pintar: function (c) { App.editarOficina(c); } },
     { id: 'reglas', grupo: 'oficina', texto: 'Reglas', icono: 'regla', pintar: function (c) { reglas(c); } },
     { id: 'conectores', grupo: 'oficina', texto: 'Conectores', icono: 'enchufe', pintar: function (c) { conectores(c); } },
+    { id: 'habilitados', grupo: 'oficina', texto: 'Skills y MCP', icono: 'chispa', pintar: habilitados },
     { id: 'avanzado', grupo: 'oficina', texto: 'Avanzado', icono: 'deslizadores', pintar: avanzado },
     /* la elige la persona la primera vez que abre la app (permisos.js); acá se ve y se cambia */
     { id: 'permisos', grupo: 'app', texto: 'Permisos de los agentes', icono: 'escudo', nota: modoPermisos,
@@ -359,6 +360,93 @@ App.Ajustes = (function () {
     hj.cuerpo.appendChild(err);
   }
 
+  /* ---------------- skills, MCP y conectores habilitados (habilitados.ts) ----------------
+     Dos niveles: la oficina habilita (PUT /api/oficina/ia) y cada agente elige dentro de eso en su ficha (o hereda).
+     `selector` sirve para los dos: un interruptor «todo / solo lo elegido» y, si se eligen, chips con el catálogo.
+     op: {etiqueta, opciones: [{valor, titulo, sub?}], valor: lista | undefined (= todo/hereda), todo: {titulo, sub},
+          algunas: {titulo, sub}, vacio: texto si no hay catálogo, alCambiar(lista | null)} */
+  function selector(op) {
+    var lista = op.valor ? op.valor.slice() : null;
+    var opciones = op.opciones.slice();
+    // lo elegido que ya no está en el catálogo igual se ve (y se puede sacar)
+    (lista || []).forEach(function (v) { if (!opciones.some(function (o) { return o.valor === v; })) opciones.push({ valor: v, titulo: v, sub: 'Ya no aparece en tu Claude Code' }); });
+    var caja = h('div.sel-hab');
+    var chips = null;
+    var modo = App.elegir({ forma: 'interruptor', etiqueta: op.etiqueta, valor: lista ? 'algunas' : 'todo',
+      opciones: [{ valor: 'todo', titulo: op.todo.titulo, sub: op.todo.sub }, { valor: 'algunas', titulo: op.algunas.titulo, sub: op.algunas.sub }],
+      alCambiar: function (v) {
+        // al pasar a «solo algunas» arranca con todo marcado: de ahí se sacan las que sobran
+        lista = v === 'todo' ? null : opciones.map(function (o) { return o.valor; });
+        pintar(); op.alCambiar(lista ? lista.slice() : null);
+      } });
+    function pintar() {
+      if (chips) chips.remove();
+      chips = null;
+      if (!lista) return;
+      chips = opciones.length
+        ? App.elegir({ forma: 'chips', multiple: true, etiqueta: op.etiqueta, valor: lista, opciones: opciones,
+            alCambiar: function (v) { lista = v; op.alCambiar(v.slice()); } })
+        : h('div.ayuda', op.vacio || 'No hay nada para elegir.');
+      caja.appendChild(chips);
+    }
+    App.add(caja, modo);
+    pintar();
+    caja.poner = function (v) { lista = v ? v.slice() : null; modo.poner(lista ? 'algunas' : 'todo'); pintar(); };
+    return caja;
+  }
+  /* opciones del catálogo de Claude Code: «plugin:skill» se muestra como «skill» (el nombre completo, en el title) */
+  function opcionesNombres(l) { return (l || []).map(function (s) { return { valor: s, titulo: s.replace(/^[^:]+:/, ''), sub: s }; }); }
+
+  var TIPOS_HAB = {
+    skills: { titulo: 'Skills', uno: 'skill', ayuda: 'Las skills y plugins de tu Claude Code que pueden usar los agentes de esta oficina. Cada una suma su descripción en cada paso.' },
+    mcp: { titulo: 'Servidores MCP', uno: 'servidor', ayuda: 'Los MCP que instalaste en Claude Code. Cada uno suma sus herramientas en cada paso.' },
+    conectores: { titulo: 'Conectores de claude.ai', uno: 'conector', ayuda: 'Lo que no habilites acá no lo usa ningún agente, aunque se lo hayas asignado.' }
+  };
+  function habilitados(crear) {
+    var hj = crear({ titulo: 'Skills y MCP' });
+    var err = h('div.error-txt');
+    var zona = h('div', App.cargando('Trayendo lo que tenés en Claude Code…'));
+    App.add(hj.cuerpo,
+      h('div.ayuda', { style: { marginTop: 0, marginBottom: '12px' } }, 'Lo que habilites acá es lo único que pueden usar los agentes de esta oficina. En la ficha de cada agente (Permisos) podés acotarlo más.'),
+      zona, err);
+    var cola = Promise.resolve();
+    function guardar(clave, v, el, antes) {
+      var cuerpo = {}; cuerpo[clave] = v;
+      err.textContent = '';
+      cola = cola.then(function () {
+        return put('/api/oficina/ia', cuerpo).then(function (r) {
+          App.actualizar(r.oficina);
+          var t = TIPOS_HAB[clave];
+          App.guardado(t.titulo + ': ' + (v ? (v.length ? 'solo ' + v.length + ' de la lista' : 'nada habilitado') : 'sin tope') + '.', function () {
+            var c2 = {}; c2[clave] = antes === undefined ? null : antes;
+            put('/api/oficina/ia', c2).then(function (r2) { App.actualizar(r2.oficina); el.poner(antes); }).catch(App.fallo);
+          });
+        });
+      }).catch(function (e) { err.textContent = e.message; el.poner(antes); });
+    }
+    function fila(clave, opciones, vacio) {
+      var t = TIPOS_HAB[clave];
+      var ia = (App.E.oficina && App.E.oficina.ia) || {};
+      var el = selector({ etiqueta: t.titulo, opciones: opciones, valor: ia[clave], vacio: vacio,
+        todo: { titulo: 'Todos', sub: 'Cada ' + t.uno + ' que tengas, también los que agregues después' },
+        algunas: { titulo: 'Solo los que elijas', sub: 'Los que no marques no llegan a ningún agente de la oficina' },
+        alCambiar: function (v) { var antes = (((App.E.oficina && App.E.oficina.ia) || {})[clave]); guardar(clave, v, el, antes); } });
+      return App.ajuste(t.titulo, t.ayuda, el);
+    }
+    Promise.all([
+      api().get('/api/skills').catch(function () { return { skills: [], mcp: [] }; }),
+      api().get('/api/conectores').catch(function () { return { servidores: [] }; })
+    ]).then(function (rs) {
+      App.vaciar(zona);
+      var cx = (rs[1].servidores || []).map(function (s) { return { valor: s.nombre, titulo: nombreServidor(s.nombre), sub: s.disponible ? '' : 'No disponible · conectalo en claude.ai' }; });
+      App.add(zona,
+        fila('skills', opcionesNombres(rs[0].skills), 'No encontré skills instaladas en tu Claude Code.'),
+        fila('mcp', opcionesNombres(rs[0].mcp).map(function (o) { o.titulo = nombreServidor(o.sub.replace(/^plugin:[^:]+:/, '')); return o; }),
+          'Todavía no vi servidores MCP de tu Claude Code. Aparecen después de la primera charla con un agente.'),
+        fila('conectores', cx, rs[1].detectando ? 'Mirando tus conectores de claude.ai…' : 'No hay conectores detectados. Actualizá la lista en Ajustes › Conectores.'));
+    });
+  }
+
   function avanzado(crear) {
     var hj = crear({ titulo: 'Avanzado' });
     function fila(titulo, bajada, boton, accion, peligro) {
@@ -441,5 +529,5 @@ App.Ajustes = (function () {
     if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === ',' && App.E.oficina && !(App.hojaAbierta && App.hojaAbierta())) { e.preventDefault(); abrir(); }
   });
 
-  return { reglas: reglas, conectores: conectores, nuevosConectores: nuevosConectores, delTipo: delTipo, nombreServidor: nombreServidor, abrir: abrir, atajo: atajo };
+  return { reglas: reglas, conectores: conectores, selector: selector, opcionesNombres: opcionesNombres, nuevosConectores: nuevosConectores, delTipo: delTipo, nombreServidor: nombreServidor, abrir: abrir, atajo: atajo };
 })();

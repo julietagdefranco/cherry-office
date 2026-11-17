@@ -322,7 +322,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     }
     if (seccion === 'skills' && n === 2) {
       if (method !== 'GET') return no405
-      // `GET /api/skills?actualizar=1`: las skills instaladas (las que vio la última corrida); sin datos o con actualizar,
+      // `GET /api/skills?actualizar=1` → {skills, mcp}: las skills instaladas (las que vio la última corrida); sin datos o con actualizar,
       // corre un claude mínimo para averiguarlas
       const act = oficinas.activa()
       let lista = runner.skills.lista
@@ -332,7 +332,8 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           throw e
         }
       }
-      return [200, { skills: lista ?? [] }]
+      // los servidores MCP de Claude Code salen del mismo sondeo (y de cualquier corrida sin --strict-mcp-config)
+      return [200, { skills: lista ?? [], mcp: runner.mcpLocales.lista ?? [] }]
     }
     if (seccion === 'permisos' && n === 3) return method === 'POST' ? responderPermiso(a2!, body) : no405
     if (seccion === 'avisos' && n === 2) {

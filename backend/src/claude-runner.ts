@@ -19,7 +19,8 @@ import { esObjeto, type Obj } from './json.js'
 import type { HQLog } from './log.js'
 import { CortadorLineas, parsearEvento, type Observador } from './stream.js'
 import { largo } from './validar.js'
-import { CatalogoSkills } from './skills.js'
+import { CatalogoNombres, CatalogoSkills } from './skills.js'
+import { mcpLocalesDe } from './habilitados.js'
 
 const esWindows = process.platform === 'win32'
 /** Ruta completa: no depender del PATH que tenga la app (o el entorno de un test). */
@@ -282,6 +283,8 @@ export class ClaudeRunner {
   readonly actividad = new ActividadRegistro()
   /** Skills instaladas de la persona: se actualiza con el `system/init` de cada corrida. */
   readonly skills: CatalogoSkills
+  /** Servidores MCP del Claude Code de la persona: se actualiza con el `system/init` de las corridas sin `--strict-mcp-config`. */
+  readonly mcpLocales: CatalogoNombres
   /** Reciben el `rate_limit_info` de cada `rate_limit_event` de cualquier corrida (el medidor de uso). */
   readonly alLimite: ((info: Obj) => void)[] = []
   private readonly carriles = new Carriles()
@@ -297,6 +300,8 @@ export class ClaudeRunner {
     this.mensajePorStdin = esWindows || env.HQ_MENSAJE_STDIN === '1'
     this.skills = new CatalogoSkills(path.join(config.datosDir, 'skills.json'))
     config.skillsInstaladas = () => this.skills.lista
+    this.mcpLocales = new CatalogoNombres(path.join(config.datosDir, 'mcp-locales.json'), 'mcp')
+    config.mcpInstalados = () => this.mcpLocales.lista
   }
 
   /** Corre un claude mínimo (haiku, esfuerzo bajo, solo Skill) para saber qué skills tiene instaladas la persona. */
@@ -448,11 +453,14 @@ export class ClaudeRunner {
   // MARK: lanzar
 
   /** Envuelve el lector de líneas para pasarle los `rate_limit_event` a `alLimite` (si hay alguien escuchando). */
-  private conLimites(alLinea?: (l: string) => void): ((l: string) => void) | undefined {
+  private conLimites(alLinea?: (l: string) => void, estricto = false): ((l: string) => void) | undefined {
     return (l) => {
       if (l.includes('"subtype":"init"')) {
         const sk = skillsDe(l)
         if (sk) this.skills.fijar(sk)
+        // con --strict-mcp-config solo viene el servidor de la oficina: no dice nada de los de la persona
+        const mcp = estricto ? undefined : mcpLocalesDe(l)
+        if (mcp) this.mcpLocales.fijar(mcp)
       } else if (this.alLimite.length > 0 && l.includes('"rate_limit_event"')) {
         const info = limiteDe(l)
         if (info) for (const f of this.alLimite) { try { f(info) } catch {} }
@@ -478,7 +486,7 @@ export class ClaudeRunner {
       if (this.cerrado) throw new ClaudeError('cerrando')
       // a la lista antes de lanzarlo (sin await en el medio): shutdown() lo ve aunque todavía no haya llegado 'spawn'
       this.vivos.add(p)
-      return await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea: this.conLimites(alLinea), stdin: this.mensajePorStdin },
+      return await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea: this.conLimites(alLinea, args.includes('--strict-mcp-config')), stdin: this.mensajePorStdin },
         () => {}, () => this.vivos.delete(p))
     } catch (e) {
       if (e instanceof ClaudeError) throw e

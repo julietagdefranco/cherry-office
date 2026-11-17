@@ -8,6 +8,7 @@ import { avatarValido, perfilJSON, type DepartamentoNuevo, type OficinaActiva, t
 import { no404, no405, type Resp, type RutaNucleo } from './router.js'
 import { Slug, Validar } from './validar.js'
 import { modoSkillsDe } from './skills.js'
+import { Habilitados, type IAOficina } from './habilitados.js'
 
 /** Lo que /api/estado necesita saber de claude (lo da el runner). */
 export interface InfoClaude {
@@ -166,6 +167,25 @@ export function rutasOficinas({ config, oficinas, claude, alAbrir = [], ocupada 
         return [200, { ok: true, carpeta: a.carpeta }]
       }
       return no405
+    }
+    if (seccion === 'oficina' && n === 3 && a2 === 'ia') {
+      // `PUT /api/oficina/ia` {skills?, mcp?, conectores?}: lo habilitado para los agentes de la oficina. Cada clave:
+      // ausente = no se toca; null = todo (sin tope); lista = solo eso ([] = nada).
+      if (method !== 'PUT') return no405
+      const d = objeto(body)
+      for (const k of Object.keys(d)) if (k !== 'skills' && k !== 'mcp' && k !== 'conectores') throw new ErrorAPI(400, `«${k}» no existe (skills, mcp, conectores).`)
+      const cambios: Partial<Record<keyof IAOficina, string[] | null>> = {}
+      for (const k of ['skills', 'mcp', 'conectores'] as const) {
+        const l = Habilitados.lista(d[k], k, { espacios: k === 'conectores' })
+        if (l !== undefined) cambios[k] = l
+      }
+      const [, a] = oficinas.modificar((o) => {
+        const ia: IAOficina = { ...(o.ia ?? {}) }
+        for (const [k, l] of Object.entries(cambios) as [keyof IAOficina, string[] | null][]) { if (l === null) delete ia[k]; else ia[k] = l }
+        if (Object.keys(ia).length === 0) delete o.ia
+        else o.ia = ia
+      })
+      return [200, sobreOficina(a)]
     }
     if (seccion === 'departamentos' && n === 2) {
       if (method !== 'POST') return no405

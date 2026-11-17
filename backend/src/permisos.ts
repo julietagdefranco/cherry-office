@@ -7,6 +7,7 @@ import { ClaudeRunner, type TurnoConPermiso } from './claude-runner.js'
 import { Config, type MemoriaIA } from './config.js'
 import { jsonCompacto } from './json-swift.js'
 import { settingsSkills, type ModoSkills } from './skills.js'
+import { Habilitados, prefijoMCP } from './habilitados.js'
 import type { AgenteDef, AlcanceVinculo, Oficina } from './oficina.js'
 import type { OficinaActiva } from './oficinas.js'
 import { Validar, largo, prefijo } from './validar.js'
@@ -48,8 +49,10 @@ export type ContextoOficina = {
   memoria?: MemoriaIA
   colegas?: boolean
   mcpLocales?: boolean
-  /** Skills elegidas en la ficha del agente (modo `agente`). */
-  skillsAgente?: string[]
+  /** Skills que puede usar el agente (oficina + ficha, habilitados.ts). undefined = todas (en modo `agente`: ninguna). */
+  skillsElegidas?: string[]
+  /** Servidores MCP de Claude Code que puede usar el agente (oficina + ficha). undefined = todos. */
+  mcpElegidos?: string[]
 }
 
 /** Herramientas MCP para hablar con colegas (consultar, pedir, esperar): se sacan con «Consultar a colegas» apagado. */
@@ -73,10 +76,25 @@ export function opcionesEfectivas(cfg: Config, ctx: ContextoOficina): { esfuerzo
     mcpLocales: ctx.mcpLocales ?? g.mcpLocales }
 }
 
-/** ¿La corrida lleva la herramienta Skill? No con `ninguna`, ni con `agente` si el agente no eligió ninguna. */
-function conSkill(cfg: Config, ctx: ContextoOficina): boolean {
+/** Skills de la corrida: undefined = todas; en modo `agente` sin lista, ninguna. */
+function skillsDeCorrida(cfg: Config, ctx: ContextoOficina): string[] | undefined {
   const m = opcionesEfectivas(cfg, ctx).skills
-  return m !== 'ninguna' && !(m === 'agente' && (ctx.skillsAgente ?? []).length === 0)
+  if (m === 'ninguna') return []
+  return ctx.skillsElegidas ?? (m === 'agente' ? [] : undefined)
+}
+
+/** ¿La corrida lleva la herramienta Skill? No con `ninguna`, ni si la lista que queda está vacía. */
+function conSkill(cfg: Config, ctx: ContextoOficina): boolean {
+  const l = skillsDeCorrida(cfg, ctx)
+  return l === undefined || l.length > 0
+}
+
+/** Reglas para vedar los servidores MCP de Claude Code que el agente no usa (los del catálogo que no están elegidos).
+ *  Sin catálogo todavía, no se puede vedar por nombre: no se veda nada. */
+function mcpVedados(cfg: Config, ctx: ContextoOficina): string[] {
+  if (!ctx.mcpElegidos) return []
+  const elegidos = new Set(ctx.mcpElegidos)
+  return (cfg.mcpInstalados() ?? []).filter((n) => !elegidos.has(n)).map(prefijoMCP)
 }
 
 /** ¿Usa conectores de claude.ai? (`--strict-mcp-config` los dejaría afuera: con ellos no se aplica). */
@@ -141,9 +159,10 @@ export const TodosConectores = {
   /** El agente como lo ven sus corridas: en modo «todos», con cada conector conectado de la cuenta asignado entero
    *  (las de leer, libres; las de actuar, por `proponer_accion` y la aprobación de la persona, como siempre). Sin el
    *  modo o sin catálogo, el agente tal cual. */
-  agente(cfg: Config | undefined, a: AgenteDef, catalogo: ServidorConector[] | undefined): AgenteDef {
-    if (!TodosConectores.activo(cfg) || !catalogo) return a
-    const conectores = catalogo.filter((s) => s.estado === 'connected' && s.herramientas.length > 0).map((s) => ({
+  agente(cfg: Config | undefined, a: AgenteDef, catalogo: ServidorConector[] | undefined, o?: Oficina): AgenteDef {
+    // lo que la oficina no habilita no llega a ningún agente (habilitados.ts)
+    if (!TodosConectores.activo(cfg) || !catalogo) return o ? Habilitados.conectoresAgente(o, a) : a
+    const conectores = catalogo.filter((s) => s.estado === 'connected' && s.herramientas.length > 0 && (!o || Habilitados.conectorHabilitado(o, s.nombre))).map((s) => ({
       servidor: s.nombre,
       leer: s.herramientas.filter((h) => clasificarHerramienta(cortoHerramienta(h)) === 'leer'),
       actuar: s.herramientas.filter((h) => clasificarHerramienta(cortoHerramienta(h)) === 'actuar'),
@@ -275,7 +294,9 @@ export function configMCP(url: string): string {
 /** Dónde corre un agente de oficina y qué puede escribir (rutas absolutas). */
 export function contexto(a: OficinaActiva, def: AgenteDef, { dirsExtra = [], actuar = [], catalogo, config }: { dirsExtra?: string[]; actuar?: string[]; catalogo?: ServidorConector[]; config?: Config } = {}): ContextoOficina {
   const todos = TodosConectores.activo(config)
-  const agente = TodosConectores.agente(config, def, catalogo)
+  const agente = TodosConectores.agente(config, def, catalogo, a.oficina)
+  const skillsElegidas = Habilitados.skills(a.oficina, def)
+  const mcpElegidos = Habilitados.mcp(a.oficina, def)
   const rutas = [a.ruta(`conocimiento/agentes/${agente.id}.md`)]
   for (const r of agente.escritura ?? []) if (Validar.rutaEscrituraValida(r)) rutas.push(a.ruta(r))
   const e = entregables(a, agente.id)
@@ -288,7 +309,8 @@ export function contexto(a: OficinaActiva, def: AgenteDef, { dirsExtra = [], act
     herramientasMCP: HerramientasMCPAgente.lista(a.oficina, agente), perfilMCP: Coordinador.perfil(a.oficina, agente),
     reglas: agente.reglas ?? [], preguntar: false, ...(todos ? { todosConectores: true } : {}),
     ...(esfuerzoDe(agente) !== undefined ? { esfuerzo: esfuerzoDe(agente) } : {}),
-    ...(agente.skills && agente.skills.length > 0 ? { skillsAgente: agente.skills } : {}),
+    ...(skillsElegidas !== undefined ? { skillsElegidas } : {}),
+    ...(mcpElegidos !== undefined ? { mcpElegidos } : {}),
   }
 }
 
@@ -383,11 +405,16 @@ export function argumentos(cfg: Config, ctx: ContextoOficina, p: { agente: strin
   if (ctx.mcpUrl !== undefined) a.push(...mcpDe(cfg, ctx))
   if (puedePreguntar(ctx)) a.push(herramientaPermiso)
   a.push(...ctx.permitidas)
-  if (ctx.vedadas.length > 0) a.push('--disallowedTools', ...ctx.vedadas)
   const op = opcionesEfectivas(cfg, ctx)
-  // MCP del Claude Code de la persona apagados: solo el servidor de la oficina (salvo que use conectores de claude.ai)
-  if (!op.mcpLocales && !usaConectores(ctx)) a.push('--strict-mcp-config')
-  const ajustes = conSkill(cfg, ctx) ? settingsSkills(op.skills, ctx.skillsAgente ?? [], cfg.skillsInstaladas()) : undefined
+  // MCP del Claude Code de la persona apagados (o ninguno elegido): solo el servidor de la oficina (salvo que use
+  // conectores de claude.ai, que --strict-mcp-config dejaría afuera); con algunos elegidos, se vedan los demás
+  const sinMCPLocales = !op.mcpLocales || (ctx.mcpElegidos !== undefined && ctx.mcpElegidos.length === 0)
+  const estricto = sinMCPLocales && !usaConectores(ctx)
+  const vedadas = [...ctx.vedadas]
+  if (op.mcpLocales && !estricto) for (const v of mcpVedados(cfg, ctx)) if (!vedadas.includes(v)) vedadas.push(v)
+  if (vedadas.length > 0) a.push('--disallowedTools', ...vedadas)
+  if (estricto) a.push('--strict-mcp-config')
+  const ajustes = conSkill(cfg, ctx) ? settingsSkills(op.skills, skillsDeCorrida(cfg, ctx), cfg.skillsInstaladas()) : undefined
   if (ajustes) a.push('--settings', jsonCompacto(ajustes))
   const instrucciones = conMemoria(ctx.instrucciones, op.memoria)
   if (instrucciones) a.push('--append-system-prompt', instrucciones)

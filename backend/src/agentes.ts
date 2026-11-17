@@ -1,6 +1,7 @@
 // Agentes de la oficina: contratar, borrador, editar, despedir y notas (Agentes.swift + rutas de /api/agentes).
 import { esMemoriaIA, type MemoriaIA } from './config.js'
 import { modoSkillsDe, type ModoSkills } from './skills.js'
+import { Habilitados } from './habilitados.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ErrorAPI } from './errores.js'
@@ -187,7 +188,10 @@ export type CambiosAgente = {
   prompt?: string; description?: string; chips?: string[]; modelo?: string; brief?: string
   /** '' = volver al de Claude Code. */
   esfuerzo?: string
-  skills?: string[]
+  /** null = heredar las de la oficina; [] = ninguna. */
+  skills?: string[] | null
+  /** Servidores MCP de Claude Code. null = heredar los de la oficina; [] = ninguno. */
+  mcp?: string[] | null
   limites?: LimitesAgente; conectores?: ConectorAsignado[]; permisos?: string[]; sabeDe?: string[]
   /** Permisos guardados con «Siempre» (solo se pueden quitar o reemplazar: los agrega `agregarReglas`). */
   reglas?: string[]
@@ -203,7 +207,9 @@ export function cambiosAgenteDesde(d: Obj): CambiosAgente {
   c.brief = Validar.texto(d.brief, 'brief', 4000, false)
   if (d.modelo !== undefined && d.modelo !== null) c.modelo = modeloValido(d.modelo)
   if (d.esfuerzo !== undefined) c.esfuerzo = esfuerzoValido(d.esfuerzo)
-  if (d.skills !== undefined) c.skills = skillsValidas(d.skills)
+  if (d.skills !== undefined) c.skills = d.skills === null ? null : skillsValidas(d.skills)
+  const mcp = Habilitados.lista(d.mcp, 'mcp')
+  if (mcp !== undefined) c.mcp = mcp
   if (d.chips !== undefined && d.chips !== null) c.chips = chipsValidos(d.chips)
   c.avatar = avatarValido(d.avatar)
   c.limites = limitesValidos(d.limites)
@@ -404,7 +410,8 @@ export function editarAgente(oficinas: Oficinas, id: string, c: CambiosAgente): 
     if (c.chips !== undefined) { if (c.chips.length === 0) delete ag.chips; else ag.chips = c.chips }
     if (c.modelo !== undefined) ag.modelo = c.modelo
     if (c.esfuerzo !== undefined) { if (c.esfuerzo === '') delete ag.esfuerzo; else ag.esfuerzo = c.esfuerzo }
-    if (c.skills !== undefined) { if (c.skills.length === 0) delete ag.skills; else ag.skills = c.skills }
+    if (c.skills !== undefined) { if (c.skills === null) delete ag.skills; else ag.skills = c.skills }
+    if (c.mcp !== undefined) { if (c.mcp === null) delete ag.mcp; else ag.mcp = c.mcp }
     if (c.limites !== undefined) { if (vacio(c.limites)) delete ag.limites; else ag.limites = c.limites }
     if (c.conectores !== undefined) { if (c.conectores.length === 0) delete ag.conectores; else ag.conectores = c.conectores }
     if (c.permisos !== undefined) { if (c.permisos.length === 0) delete ag.permisos; else ag.permisos = c.permisos }
