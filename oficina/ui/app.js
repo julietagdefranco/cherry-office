@@ -296,6 +296,8 @@
       dom.avisoReu = h('div.aviso-reunion.oculto');
       dom.derecho = h('aside.derecho');
       dom.lista = h('aside.lista-col');
+      /* la ventana que abre el riel: la lista de la sección y el panel, juntos y sobre la oficina */
+      dom.ventana = h('div.ventana', dom.lista, dom.derecho);
       var riel = App.Nav.riel({
         menuOficina: menuOficina, menuNuevo: menuNuevo,
         insignias: { bandeja: dom.navEnt, equipo: dom.navReu, trabajo: dom.navTar },
@@ -305,11 +307,11 @@
           h('button.riel-item.riel-extra', { title: 'Ajustes (' + App.atajoMod + ',)', onclick: function () { App.Ajustes.abrir(); } }, App.icono('ajustes'), h('span', 'Ajustes'))
         ]
       });
-      dom.app = h('div.app.en-oficina', riel, dom.lista,
+      dom.app = h('div.app.en-oficina', riel,
         /* llamar a reunión: en Equipo › Reuniones y en el «+» del riel (ya no flota un botón sobre la oficina) */
         h('main.vista', dom.lienzo, dom.carga, dom.avisoReu, dom.marca,
           h('div.pista', App.Paleta ? App.Paleta.BASE : 'Arrastrá para girar · dos dedos para moverte · pellizcá para acercarte'),
-          dom.derecho));
+          dom.ventana));
       App.vaciar(raiz).appendChild(dom.app);
       App.dom = dom;
       if (!App.Oficina3D.iniciar(dom.lienzo)) dom.carga.textContent = App.Oficina3D.sinMotor
@@ -464,6 +466,12 @@
     else if (m === 'parte' && App.Parte && App.Parte.alCerrarPanel) App.Parte.alCerrarPanel();
     else if (m === 'tareas' && App.Tareas) App.Tareas.alCerrarPanel();
     else if (m === 'flujos' && App.Flujos && App.Flujos.alCerrarPanel) App.Flujos.alCerrarPanel();
+  };
+  /* La × de cada ventana (Biblioteca, una charla, Tareas…): el riel abre ventanas de a una y la × la cierra. En la compu
+     vuelve a la oficina, como mostrar el escritorio; en el celular, a la lista de la sección. */
+  App.cerrarVentana = function () {
+    if (App.Nav.enSeccion() && !window.matchMedia('(max-width: 720px)').matches) App.Nav.ir('#/oficina');
+    else if (App.modoDerecho()) App.cerrarDerecho();
   };
   App.modoDerecho = function () { return dom.derecho && dom.derecho.classList.contains('abierto') ? dom.derecho.getAttribute('data-modo') : null; };
   App.volverAlInicio = inicio;

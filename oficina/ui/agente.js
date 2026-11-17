@@ -123,7 +123,7 @@
       if (op.alCerrar) op.alCerrar();
     }
     var cab = h('div.lat-cab', h('button.btn.fantasma.icono', { title: 'Cerrar el archivo', onclick: cerrarVisor }, App.icono('atras')), tit,
-      h('button.btn.fantasma.icono.lat-cerrar', { title: 'Cerrar la charla', onclick: App.cerrarDerecho }, App.icono('cerrar')));
+      h('button.btn.fantasma.icono.lat-cerrar', { title: 'Cerrar la charla', onclick: App.cerrarVentana }, App.icono('cerrar')));
     var caja = h('aside.relacionado.lado-visor', cab, cuerpo, op.sinPie ? null : pie);
     var obj = { el: caja, cuerpo: cuerpo, pie: pie, cab: cab, cerrar: cerrarVisor, titulo: function (t) { tit.textContent = t; tit.title = t; } };
     visor = { caja: caja, obj: obj };
@@ -159,7 +159,7 @@
     /* cada cabecera de la columna termina con la cruz: así queda arriba a la derecha de todo el panel */
     var latCab = function () {
       var c = App.add(h('div.lat-cab'), Array.prototype.slice.call(arguments));
-      c.appendChild(h('button.btn.fantasma.icono.lat-cerrar', { title: 'Cerrar la charla', onclick: App.cerrarDerecho }, App.icono('cerrar')));
+      c.appendChild(h('button.btn.fantasma.icono.lat-cerrar', { title: 'Cerrar la charla', onclick: App.cerrarVentana }, App.icono('cerrar')));
       return c;
     };
     if (lado === 'detalles') { App.add(caja, latCab(h('b', 'Detalles')), App.Nav.relacionado(a.id)); return caja; }
@@ -202,7 +202,7 @@
     var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
     var sub = h('div.sub', a.rol, d ? h('span.insignia', h('span.punto', { style: { background: d.color, marginRight: '5px' } }), d.nombre) : null,
       (a.permisos || []).indexOf('coordinador') >= 0 ? h('span.insignia.coord', 'Coordinador/a') : null);
-    var cerrarBtn = h('button.btn.fantasma.icono.cerrar-panel', { title: 'Cerrar', onclick: App.cerrarDerecho }, App.icono('cerrar'));
+    var cerrarBtn = h('button.btn.fantasma.icono.cerrar-panel', { title: 'Cerrar', onclick: App.cerrarVentana }, App.icono('cerrar'));
     var der = App.dom.derecho;
     der.removeAttribute('data-lado'); der.removeAttribute('data-visor');
     if (pestana === 'chat' && esCompu() && App.Nav && App.Nav.enSeccion()) {

@@ -736,10 +736,16 @@ button.adjunto:hover { background: var(--panel-2); }
    --charla: la charla · --escritorio: bandeja, archivos y trabajo · --escritorio-ancho: biblioteca, conocimiento, creador… */
 @media (min-width: 1900px) { :root { --charla: 520px; --escritorio: 860px; } }
 @media (min-width: 2400px) { :root { --charla: 600px; --escritorio: 960px; --escritorio-ancho: 1440px; } }
-.app { grid-template-columns: var(--riel) var(--lista) minmax(0, 1fr); }
-.app.en-oficina { grid-template-columns: var(--riel) 0 minmax(0, 1fr); }
-.app.en-oficina .lista-col { display: none; }
-.riel { grid-column: 1; } .lista-col { grid-column: 2; } .vista { grid-column: 3; }
+.app { grid-template-columns: var(--riel) minmax(0, 1fr); }
+.riel { grid-column: 1; } .vista { grid-column: 2; container-type: size; }
+/* La ventana (nav.js): lo que abre cada botón del riel, con su lista y su panel. Una sola a la vez; la × la cierra y
+   queda la oficina. Su forma depende de la pantalla: en el celular la ocupa toda; en la compu va pegada al riel o, si
+   sobra oficina, flota centrada como una tarjeta (abajo, en «compu»). */
+.ventana { display: none; }
+.app.en-seccion .ventana { display: flex; position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; max-width: 100%; min-width: 0; }
+.ventana > .lista-col { flex: none; }
+.app.en-seccion .ventana > .derecho { position: relative; top: auto; right: auto; bottom: auto; left: auto; flex: none; transform: none; transition: none; z-index: auto; }
+.app.en-seccion .ventana > .derecho:not(.abierto) { display: none; }
 
 /* riel */
 .riel { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 0; background: var(--panel-2); border-right: 1px solid var(--linea); min-height: 0; overflow-y: auto; scrollbar-width: none; }
@@ -812,7 +818,7 @@ button.adjunto:hover { background: var(--panel-2); }
 .app.en-seccion .derecho:not([data-modo="biblioteca"]):not([data-modo="conocimiento"]):not([data-modo="creador"]) .der-pie > * { width: 100%; max-width: var(--ancho-lectura); margin-left: auto; margin-right: auto; }
 .app.en-seccion .der-cab { padding-top: 16px; }
 .app.en-seccion .der-pie { padding-bottom: 14px; }
-.app.en-seccion .cerrar-panel { display: none; }
+.nav-vacio-cerrar { position: absolute; top: 12px; right: 12px; }
 .app.en-seccion .msg { max-width: 78%; }
 .app.en-seccion .avisos-banner { left: auto; right: 20px; transform: none; bottom: 110px; z-index: 20; max-width: min(560px, calc(100% - 40px)); }
 .app.en-seccion .permisos-pila { top: 74px; right: 20px; }
@@ -835,10 +841,12 @@ button.adjunto:hover { background: var(--panel-2); }
   .riel-mas { display: flex; }
   .riel-nuevo { margin: 0 4px; width: 38px; height: 38px; }
   .riel-item { width: auto; min-width: 54px; min-height: 46px; }
-  .lista-col, .vista { grid-row: 1; grid-column: 1; }
-  .lista-col { border-right: 0; }
-  .app.en-seccion.con-detalle .lista-col { display: none; }
-  .app.en-seccion:not(.con-detalle) .vista { display: none; }
+  .vista { grid-row: 1; grid-column: 1; }
+  .app.en-seccion .ventana { right: 0; }
+  .ventana > .lista-col { flex: 1; border-right: 0; }
+  .app.en-seccion .ventana > .derecho { flex: 1; width: auto; }
+  .app.en-seccion.con-detalle .ventana > .lista-col { display: none; }
+  .app.en-seccion:not(.con-detalle) .ventana > .derecho { display: none; }
   .vista > .marca { top: 12px; left: 12px; max-width: calc(100% - 140px); }
   .app.en-seccion .avisos-banner { left: 12px; right: 12px; bottom: 90px; max-width: none; }
   .app.en-seccion .msg { max-width: 92%; }
@@ -997,21 +1005,22 @@ button.adjunto:hover { background: var(--panel-2); }
   .pestana { flex: none; }
 }
 
-/* ================= compu: todo crece desde el riel y la oficina queda viva a la derecha =================
-   riel · lista (pegada) · panel (pegado a la lista) · oficina. La cámara centra en el hueco que queda (nav.js acomodar).
-   Si no entra, la lista se pliega y tocar la sección en el riel la muestra encima. */
+/* ================= compu: la ventana sobre la oficina viva =================
+   La ventana (lista + panel) va pegada al riel, o flota centrada como una tarjeta si sobra oficina (nav.js acomodar
+   decide; la cámara centra en el hueco que queda). Si no entra, la lista se pliega y tocar la sección en el riel la
+   muestra encima. Los anchos del panel se miden contra la oficina (100cqw de .vista) menos la lista visible. */
 .app { position: relative; }
 @media (min-width: 721px) {
   .app.en-seccion .lienzo { visibility: visible; }
-  .app.en-seccion .derecho { left: 0; right: auto; width: 440px; max-width: 100%; border-left: 0; border-right: 1px solid var(--linea);
-    box-shadow: 10px 0 28px rgba(20, 18, 15, .10); }
-  .app.en-seccion .derecho:not(.abierto) { visibility: hidden; }
+  .app.en-seccion .ventana { --lista-v: var(--lista); --panel-max: calc(100cqw - var(--lista-v)); box-shadow: 10px 0 28px rgba(20, 18, 15, .10); }
+  .app.en-seccion .ventana > .lista-col { width: var(--lista); }
+  .app.en-seccion .derecho { width: 440px; max-width: var(--panel-max); border-left: 0; box-shadow: none; }
   .app.en-seccion .derecho[data-modo="vacio"] { width: 360px; }
   /* lo de escritorio (biblioteca, archivos, tareas, flujos…) necesita más ancho; la oficina conserva su franja */
-  .app.en-seccion:is([data-seccion="bandeja"], [data-seccion="archivos"], [data-seccion="trabajo"]) .derecho:not([data-modo="vacio"]) { width: min(var(--escritorio), calc(100% - 240px)); min-width: min(440px, 100%); }
-  .app.en-seccion[data-seccion] .derecho.abierto:is([data-modo="biblioteca"], [data-modo="conocimiento"], [data-modo="creador"], [data-modo="flujos-editor"], [data-modo="deptos"], [data-modo="contratar"]) { width: min(max(640px, calc(100% - 300px)), var(--escritorio-ancho)); max-width: 100%; }
+  .app.en-seccion:is([data-seccion="bandeja"], [data-seccion="archivos"], [data-seccion="trabajo"]) .derecho:not([data-modo="vacio"]) { width: min(var(--escritorio), calc(var(--panel-max) - 240px)); min-width: min(440px, var(--panel-max)); }
+  .app.en-seccion[data-seccion] .derecho.abierto:is([data-modo="biblioteca"], [data-modo="conocimiento"], [data-modo="creador"], [data-modo="flujos-editor"], [data-modo="deptos"], [data-modo="contratar"]) { width: min(max(640px, calc(var(--panel-max) - 400px)), var(--escritorio-ancho)); max-width: var(--panel-max); }
   /* la charla con su columna al costado: detalles (angosta) o ficha / lista completa (ancha) */
-  .app.en-seccion .derecho.con-relacionado { --det: 290px; display: grid; width: calc(var(--charla) + var(--det)); max-width: 100%; grid-template-columns: minmax(0, 1fr) var(--det); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .app.en-seccion .derecho.con-relacionado { --det: 290px; display: grid; width: calc(var(--charla) + var(--det)); max-width: var(--panel-max); grid-template-columns: minmax(0, 1fr) var(--det); grid-template-rows: auto auto minmax(0, 1fr) auto; }
   .app.en-seccion .derecho.con-relacionado[data-lado="ancho"] { --det: 400px; }
   .app.en-seccion .derecho.con-relacionado > :not(.relacionado) { grid-column: 1; }
   .app.en-seccion .derecho.con-relacionado .relacionado { display: flex; flex-direction: column; min-height: 0; grid-column: 2; grid-row: 1 / -1; border-left: 1px solid var(--linea); background: var(--panel-2); overflow: hidden; padding: 0; }
@@ -1024,16 +1033,15 @@ button.adjunto:hover { background: var(--panel-2); }
   /* con tres columnas la cruz de la charla queda solo arriba a la derecha del todo (en el visor) */
   .app.en-seccion .derecho.con-relacionado[data-visor="junto"] .relacionado:not(.lado-visor) .lat-cerrar { display: none; }
   .app.en-seccion .derecho .der-cab, .app.en-seccion .derecho .pestanas, .app.en-seccion .derecho .der-cuerpo > *, .app.en-seccion .derecho .der-pie > * { max-width: none; }
-  /* pantalla ancha: el panel flota centrado sobre la oficina como una tarjeta (nav.js acomodar decide cuándo).
-     left + right + margin auto lo centran con el ancho que tenga cada modo. */
-  .app.en-seccion.panel-flotante .derecho { top: 14px; bottom: 14px; left: 14px; right: 14px; margin: auto; max-width: calc(100% - 28px); border: 1px solid var(--linea);
-    border-radius: 14px; overflow: hidden; box-shadow: var(--sombra-alta); }
-  /* en pantallas altas (2K, 4K) la tarjeta no se estira hasta abajo: tiene un alto máximo y queda centrada */
-  .app.en-seccion.panel-flotante .derecho { height: min(calc(100% - 28px), 1000px); }
-  /* lista plegada */
-  .app.lista-plegada { grid-template-columns: var(--riel) 0 minmax(0, 1fr); }
-  .app.lista-plegada .lista-col { display: none; }
-  .app.lista-plegada.lista-ver .lista-col { display: flex; position: absolute; z-index: 40; left: var(--riel); top: 0; bottom: 0; width: var(--lista); box-shadow: var(--sombra-alta); }
+  /* pantalla ancha: la ventana flota centrada sobre la oficina como una tarjeta (nav.js acomodar decide cuándo).
+     left + right + margin auto + fit-content la centran con el ancho que tenga; en pantallas altas tiene un alto máximo. */
+  .app.en-seccion.panel-flotante .ventana { top: 14px; bottom: 14px; left: 14px; right: 14px; margin: auto; width: fit-content; max-width: calc(100% - 28px);
+    height: min(calc(100% - 28px), 1000px); border: 1px solid var(--linea); border-radius: 14px; overflow: hidden; box-shadow: var(--sombra-alta); }
+  .app.en-seccion.panel-flotante .ventana { --panel-max: calc(100cqw - 28px - var(--lista-v)); }
+  /* lista plegada: el panel usa todo el ancho y la lista se muestra encima al tocar la sección en el riel */
+  .app.lista-plegada .ventana { --lista-v: 0px; }
+  .app.lista-plegada .ventana > .lista-col { display: none; }
+  .app.lista-plegada.lista-ver .ventana > .lista-col { display: flex; position: absolute; z-index: 5; left: 0; top: 0; bottom: 0; box-shadow: var(--sombra-alta); }
 }
 @media (min-width: 721px) and (max-width: 1180px) { :root { --lista: 248px; } }
 

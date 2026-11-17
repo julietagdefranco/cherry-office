@@ -1,11 +1,12 @@
 /* Navegación: riel de secciones, columna de lista y rutas con # (Atrás y Adelante funcionan).
    Los módulos siguen pintando en App.dom.derecho y llamando a App.abrirDerecho(modo). Acá se decide dónde se ve:
    - Bandeja: lo que te espera (para revisar, permisos pendientes, parte del día).
-   - Oficina: la maqueta 3D, sola.
+   - Oficina: la maqueta, sola (como mostrar el escritorio: cierra la ventana abierta, igual que su ×).
    - Equipo (como un chat: cada persona es un contacto; tocarla abre su charla, con sus otras charlas, tareas, archivos y
      notas al costado; en otra pestaña, las reuniones), Archivos y Trabajo.
-   En la compu todo crece desde el riel: la lista pegada al riel, el panel pegado a la lista, y la oficina queda viva a
-   la derecha (la cámara centra en el hueco que queda). En el celular, el panel ocupa la pantalla.
+   Cada botón del riel abre una ventana (App.dom.ventana: la lista de la sección y el panel) sobre la oficina viva; de a
+   una, y su × la cierra. En la compu flota centrada si sobra oficina o va pegada al riel si no (acomodar); en el
+   celular ocupa la pantalla.
    Se sincroniza en los dos sentidos: una ruta abre el módulo, y un módulo abierto desde otro lado (un aviso, la
    maqueta, ⌘K) deja la ruta que le corresponde en el historial. */
 App.Nav = (function () {
@@ -123,23 +124,24 @@ App.Nav = (function () {
     App.dom.app.classList.toggle('con-detalle', seccion !== 'oficina' && !!m && m !== 'vacio');
     acomodar();
   }
-  /* En la compu: si lista + panel dejan menos de LIBRE px de oficina, la lista se pliega (tocar la sección en el riel la
-     muestra encima). Y la cámara de la oficina centra en el hueco que deja el panel. */
-  var LIBRE = 360, FLOTA = 560;   // FLOTA: oficina libre (sumando los dos lados) para que el panel flote centrado
+  /* En la compu, la forma de la ventana (lista + panel) según cuánta oficina deja libre:
+     - LIBRE px o más: flota centrada como una tarjeta, con la oficina a los costados;
+     - menos: va pegada al riel, de arriba abajo, y la lista se pliega (tocar la sección en el riel la muestra encima).
+     La cámara de la oficina centra en el hueco a la derecha de la ventana. */
+  var LIBRE = 360;
   function acomodar() {
     var app = App.dom && App.dom.app; if (!app) return;
     requestAnimationFrame(function () {
-      var der = App.dom.derecho, enSec = seccion && seccion !== 'oficina' && !esMovil();
-      var panel = enSec && app.classList.contains('con-detalle') ? der.offsetWidth : 0;
-      var lista = enSec ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lista')) || 284) : 0;
-      var riel = App.dom.riel ? App.dom.riel.offsetWidth : 68;
-      var plegar = enSec && panel > 0 && window.innerWidth - riel - lista - panel < LIBRE;
+      var ven = App.dom.ventana, vista = ven.parentNode, enSec = seccion && seccion !== 'oficina' && !esMovil();
+      var lista = app.classList.contains('lista-ver');
+      app.classList.remove('lista-plegada', 'panel-flotante');   // se mide la ventana entera, pegada al riel
+      var libre = vista.offsetWidth - (enSec ? ven.offsetWidth : 0);
+      var flota = enSec && libre >= LIBRE;
+      var plegar = enSec && !flota && app.classList.contains('con-detalle');
       app.classList.toggle('lista-plegada', plegar);
-      if (!plegar) app.classList.remove('lista-ver');
-      /* con oficina de sobra, el panel flota centrado como una tarjeta; la cámara centra en el hueco de su derecha */
-      var flota = panel > 0 && !plegar && window.innerWidth - riel - lista - panel >= FLOTA;
+      app.classList.toggle('lista-ver', plegar && lista);
       app.classList.toggle('panel-flotante', flota);
-      if (App.Oficina3D && App.Oficina3D.margen) App.Oficina3D.margen(flota ? der.offsetLeft + panel : panel);
+      if (App.Oficina3D && App.Oficina3D.margen) App.Oficina3D.margen(enSec ? ven.offsetLeft + ven.offsetWidth : 0);
     });
   }
   window.addEventListener('resize', function () { if (App.dom && App.dom.app) acomodar(); });
@@ -158,7 +160,8 @@ App.Nav = (function () {
     }[seccion] || ['edificio', '', ''];
     var accion = seccion === 'equipo' && eqTab === 'reuniones' ? h('button.btn.primario', { onclick: function () { App.Reunion.nueva(); } }, App.icono('reunion'), 'Llamar a reunión')
       : seccion === 'equipo' ? h('button.btn.primario', { onclick: function () { App.Contratar.abrir(); } }, App.icono('mas'), 'Contratar un agente') : null;
-    App.add(App.vaciar(der), h('div.nav-vacio', App.icono(txt[0]), h('b', txt[1]), h('p', txt[2]), accion));
+    App.add(App.vaciar(der), esMovil() ? null : h('button.btn.fantasma.icono.nav-vacio-cerrar', { title: 'Cerrar', onclick: App.cerrarVentana }, App.icono('cerrar')),
+      h('div.nav-vacio', App.icono(txt[0]), h('b', txt[1]), h('p', txt[2]), accion));
     marcarDetalle();
   }
 
