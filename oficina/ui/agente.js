@@ -7,8 +7,17 @@
   var actual = null, pestana = 'chat';
   var PESTANAS = ['perfil', 'permisos', 'notas', 'tareas', 'archivos'];
   var lado = 'detalles', ladoFiltro = '';   // la columna al costado de la charla (compu)
-  var visor = null;   // {caja}: un archivo abierto en esa columna (lado 'visor'), en vez de en una hoja flotante
-  function attrLado() { return lado === 'detalles' ? 'detalles' : lado === 'visor' ? 'visor' : 'ancho'; }
+  /* un archivo abierto al costado de la charla, en vez de en una hoja flotante: {caja, obj}. Si entra va como tercera
+     columna (charla · detalles · archivo); si no, ocupa el lugar de la columna de detalles */
+  var visor = null;
+  var VISOR_MIN = 680, OFICINA_MIN = 360;   // ancho mínimo del archivo y franja de oficina que tiene que quedar a la vista
+  function attrLado() { return lado === 'detalles' ? 'detalles' : 'ancho'; }
+  function pxVar(nombre, def) { return parseFloat(getComputedStyle(document.documentElement).getPropertyValue(nombre)) || def; }
+  function visorJunto() {
+    var charla = pxVar('--charla', 440), det = lado === 'detalles' ? 290 : 400;
+    var riel = App.dom.riel ? App.dom.riel.offsetWidth : 68, lista = pxVar('--lista', 284);
+    return window.innerWidth - riel - lista - (charla + det + VISOR_MIN) >= OFICINA_MIN;
+  }
   function esCompu() { return !window.matchMedia('(max-width: 720px)').matches; }
   /* ¿se está mostrando esa parte de la ficha? (como pantalla en el celular, o en la columna del costado en la compu) */
   function viendo(p) { return pestana === p || (pestana === 'chat' && lado === p && esCompu()); }
@@ -96,40 +105,56 @@
     pestana = p; if (App.Nav) App.Nav.alAbrir('agente'); pintar();
   }
   /* cambia lo que muestra la columna del costado sin rearmar la charla */
-  function verLado(cual) { lado = cual || 'detalles'; ladoFiltro = ''; if (lado !== 'visor') visor = null; pintarSoloLado(); }
+  function verLado(cual) {
+    lado = cual || 'detalles'; ladoFiltro = '';
+    if (visor && !visorJunto()) visor = null;   // el archivo tapaba la columna: se cierra para mostrar lo pedido
+    pintarSoloLado();
+  }
   /* Un archivo (página, imagen, documento) en la columna del costado, al lado de la charla. Devuelve lo mismo que App.hoja
      ({el, cuerpo, pie, cab, cerrar, titulo}) o null si no hay charla abierta en la compu: entonces va en una hoja. */
   function abrirVisor(op) {
     var der = App.dom.derecho;
-    if (!actual || !esCompu() || App.modoDerecho() !== 'agente' || !der.querySelector(':scope > aside.relacionado')) return null;
+    if (!actual || !esCompu() || App.modoDerecho() !== 'agente' || !der.querySelector(':scope > aside.relacionado:not(.lado-visor), :scope > aside.lado-visor')) return null;
     var cuerpo = h('div.hoja-cuerpo'), pie = h('div.hoja-pie'), tit = h('b', { title: op.titulo || '' }, op.titulo || '');
     var cerrada = false;
     function cerrarVisor() {
       if (cerrada) return; cerrada = true;
-      if (visor && visor.obj === obj) { visor = null; if (lado === 'visor') verLado('detalles'); }
+      if (visor && visor.obj === obj) { visor = null; pintarSoloLado(); }
       if (op.alCerrar) op.alCerrar();
     }
-    var cab = h('div.lat-cab', h('button.btn.fantasma.icono', { title: 'Volver a los detalles', onclick: cerrarVisor }, App.icono('atras')), tit,
+    var cab = h('div.lat-cab', h('button.btn.fantasma.icono', { title: 'Cerrar el archivo', onclick: cerrarVisor }, App.icono('atras')), tit,
       h('button.btn.fantasma.icono.lat-cerrar', { title: 'Cerrar la charla', onclick: App.cerrarDerecho }, App.icono('cerrar')));
     var caja = h('aside.relacionado.lado-visor', cab, cuerpo, op.sinPie ? null : pie);
     var obj = { el: caja, cuerpo: cuerpo, pie: pie, cab: cab, cerrar: cerrarVisor, titulo: function (t) { tit.textContent = t; tit.title = t; } };
     visor = { caja: caja, obj: obj };
-    lado = 'visor'; ladoFiltro = '';
     pintarSoloLado();
     return obj;
   }
   function pintarSoloLado() {
-    var a = App.agente(actual), der = App.dom.derecho, viejo = der.querySelector(':scope > aside.relacionado');
-    if (!a || !viejo || App.modoDerecho() !== 'agente') return;
-    viejo.replaceWith(columnaLado(a));
-    der.setAttribute('data-lado', attrLado());
+    var a = App.agente(actual), der = App.dom.derecho;
+    if (!a || !der.querySelector(':scope > aside.relacionado') || App.modoDerecho() !== 'agente') return;
+    ponerColumnas(a);
     if (App.Nav && App.Nav.acomodar) App.Nav.acomodar();   // cambió el ancho: ¿sigue flotando? y la cámara recentra
     var lp = der.querySelector('.agente-lapiz-btn'); if (lp) lp.setAttribute('aria-pressed', String(lado === 'perfil' || lado === 'permisos'));
   }
+  /* las columnas al costado de la charla: la de detalles y, si hay un archivo abierto, el visor (al lado o en su lugar) */
+  function ponerColumnas(a) {
+    var der = App.dom.derecho;
+    Array.prototype.forEach.call(der.querySelectorAll(':scope > aside.relacionado'), function (x) { x.remove(); });
+    var junto = visor && visorJunto();
+    if (!visor || junto) der.appendChild(columnaLado(a));
+    if (visor) der.appendChild(visor.caja);
+    der.setAttribute('data-lado', attrLado());
+    if (visor) der.setAttribute('data-visor', junto ? 'junto' : 'solo'); else der.removeAttribute('data-visor');
+  }
+  /* si cambia el ancho de la ventana, el archivo pasa de al lado a en lugar de los detalles (o al revés) */
+  window.addEventListener('resize', function () {
+    if (!visor || !actual || App.modoDerecho() !== 'agente') return;
+    var esta = App.dom.derecho.getAttribute('data-visor');
+    if (esta && esta !== (visorJunto() ? 'junto' : 'solo')) pintarSoloLado();
+  });
   /* la columna del costado: detalles, la ficha (perfil o permisos) o la lista completa de algo */
   function columnaLado(a) {
-    if (lado === 'visor' && visor) return visor.caja;
-    if (lado === 'visor') lado = 'detalles';
     var caja = h('aside.relacionado');
     /* cada cabecera de la columna termina con la cruz: así queda arriba a la derecha de todo el panel */
     var latCab = function () {
@@ -179,7 +204,7 @@
       (a.permisos || []).indexOf('coordinador') >= 0 ? h('span.insignia.coord', 'Coordinador/a') : null);
     var cerrarBtn = h('button.btn.fantasma.icono.cerrar-panel', { title: 'Cerrar', onclick: App.cerrarDerecho }, App.icono('cerrar'));
     var der = App.dom.derecho;
-    der.removeAttribute('data-lado');
+    der.removeAttribute('data-lado'); der.removeAttribute('data-visor');
     if (pestana === 'chat' && esCompu() && App.Nav && App.Nav.enSeccion()) {
       /* compu: la charla con tres botones (lápiz: su ficha al costado · pin: dónde está en la oficina · cerrar) y, al
          costado, la columna de detalles. Charla nueva y las otras charlas están en esa columna. */
@@ -197,8 +222,7 @@
           h('button.btn.chico.fantasma.sacar-tareas', { title: 'Convertir esta charla en tareas (para ' + a.nombre + ' o para otros)', onclick: function () { App.ChatTareas.abrir(a, sesiones[a.id]); } }, App.icono('reloj'), 'Sacar tareas')),
         cuerpo, pie);
       der.classList.add('con-relacionado');
-      der.setAttribute('data-lado', attrLado());
-      der.appendChild(columnaLado(a));
+      ponerColumnas(a);
       pintarChat(a, cuerpo, pie);
       return;
     }

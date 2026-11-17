@@ -715,7 +715,11 @@ button.adjunto:hover { background: var(--panel-2); }
 }
 
 /* ================= navegación (nav.js): riel · lista de la sección · vista ================= */
-:root { --riel: 68px; --lista: 284px; --ancho-lectura: 760px; }
+:root { --riel: 68px; --lista: 284px; --ancho-lectura: 760px; --charla: 440px; --escritorio: 720px; --escritorio-ancho: 1320px; }
+/* pantallas anchas (2K y más): los paneles se ensanchan para no quedar como una tira alta y angosta.
+   --charla: la charla · --escritorio: bandeja, archivos y trabajo · --escritorio-ancho: biblioteca, conocimiento, creador… */
+@media (min-width: 1900px) { :root { --charla: 520px; --escritorio: 860px; } }
+@media (min-width: 2400px) { :root { --charla: 600px; --escritorio: 960px; --escritorio-ancho: 1440px; } }
 .app { grid-template-columns: var(--riel) var(--lista) minmax(0, 1fr); }
 .app.en-oficina { grid-template-columns: var(--riel) 0 minmax(0, 1fr); }
 .app.en-oficina .lista-col { display: none; }
@@ -985,22 +989,28 @@ button.adjunto:hover { background: var(--panel-2); }
   .app.en-seccion .derecho:not(.abierto) { visibility: hidden; }
   .app.en-seccion .derecho[data-modo="vacio"] { width: 360px; }
   /* lo de escritorio (biblioteca, archivos, tareas, flujos…) necesita más ancho; la oficina conserva su franja */
-  .app.en-seccion:is([data-seccion="bandeja"], [data-seccion="archivos"], [data-seccion="trabajo"]) .derecho:not([data-modo="vacio"]) { width: min(720px, calc(100% - 240px)); min-width: min(440px, 100%); }
-  .app.en-seccion[data-seccion] .derecho.abierto:is([data-modo="biblioteca"], [data-modo="conocimiento"], [data-modo="creador"], [data-modo="flujos-editor"], [data-modo="deptos"], [data-modo="contratar"]) { width: max(640px, calc(100% - 300px)); max-width: 100%; }
+  .app.en-seccion:is([data-seccion="bandeja"], [data-seccion="archivos"], [data-seccion="trabajo"]) .derecho:not([data-modo="vacio"]) { width: min(var(--escritorio), calc(100% - 240px)); min-width: min(440px, 100%); }
+  .app.en-seccion[data-seccion] .derecho.abierto:is([data-modo="biblioteca"], [data-modo="conocimiento"], [data-modo="creador"], [data-modo="flujos-editor"], [data-modo="deptos"], [data-modo="contratar"]) { width: min(max(640px, calc(100% - 300px)), var(--escritorio-ancho)); max-width: 100%; }
   /* la charla con su columna al costado: detalles (angosta) o ficha / lista completa (ancha) */
-  .app.en-seccion .derecho.con-relacionado { display: grid; width: calc(440px + 290px); max-width: 100%; grid-template-columns: minmax(0, 1fr) 290px; grid-template-rows: auto auto minmax(0, 1fr) auto; }
-  .app.en-seccion .derecho.con-relacionado[data-lado="ancho"] { width: calc(440px + 400px); grid-template-columns: minmax(0, 1fr) 400px; }
+  .app.en-seccion .derecho.con-relacionado { --det: 290px; display: grid; width: calc(var(--charla) + var(--det)); max-width: 100%; grid-template-columns: minmax(0, 1fr) var(--det); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .app.en-seccion .derecho.con-relacionado[data-lado="ancho"] { --det: 400px; }
   .app.en-seccion .derecho.con-relacionado > :not(.relacionado) { grid-column: 1; }
   .app.en-seccion .derecho.con-relacionado .relacionado { display: flex; flex-direction: column; min-height: 0; grid-column: 2; grid-row: 1 / -1; border-left: 1px solid var(--linea); background: var(--panel-2); overflow: hidden; padding: 0; }
   .app.en-seccion .derecho.con-relacionado[data-lado="ancho"] .relacionado { background: var(--panel); }
-  /* un archivo abierto al costado de la charla: la columna se lleva el ancho que sobra */
-  .app.en-seccion .derecho.con-relacionado[data-lado="visor"] { width: calc(420px + 640px); grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); }
-  .app.en-seccion .derecho.con-relacionado[data-lado="visor"] .relacionado { background: var(--panel); }
+  /* un archivo abierto al costado de la charla: como tercera columna si entra (agente.js visorJunto) o en lugar de los detalles */
+  .app.en-seccion .derecho.con-relacionado[data-visor="solo"] { width: calc(var(--charla) + 640px); grid-template-columns: minmax(340px, var(--charla)) minmax(0, 1fr); }
+  .app.en-seccion .derecho.con-relacionado[data-visor="junto"] { width: calc(var(--charla) + var(--det) + 680px); grid-template-columns: minmax(340px, var(--charla)) var(--det) minmax(0, 1fr); }
+  .app.en-seccion .derecho.con-relacionado[data-visor="junto"] .lado-visor { grid-column: 3; }
+  .app.en-seccion .derecho.con-relacionado .lado-visor { background: var(--panel); }
+  /* con tres columnas la cruz de la charla queda solo arriba a la derecha del todo (en el visor) */
+  .app.en-seccion .derecho.con-relacionado[data-visor="junto"] .relacionado:not(.lado-visor) .lat-cerrar { display: none; }
   .app.en-seccion .derecho .der-cab, .app.en-seccion .derecho .pestanas, .app.en-seccion .derecho .der-cuerpo > *, .app.en-seccion .derecho .der-pie > * { max-width: none; }
   /* pantalla ancha: el panel flota centrado sobre la oficina como una tarjeta (nav.js acomodar decide cuándo).
      left + right + margin auto lo centran con el ancho que tenga cada modo. */
-  .app.en-seccion.panel-flotante .derecho { top: 14px; bottom: 14px; left: 14px; right: 14px; margin: 0 auto; max-width: calc(100% - 28px); border: 1px solid var(--linea);
+  .app.en-seccion.panel-flotante .derecho { top: 14px; bottom: 14px; left: 14px; right: 14px; margin: auto; max-width: calc(100% - 28px); border: 1px solid var(--linea);
     border-radius: 14px; overflow: hidden; box-shadow: var(--sombra-alta); }
+  /* en pantallas altas (2K, 4K) la tarjeta no se estira hasta abajo: tiene un alto máximo y queda centrada */
+  .app.en-seccion.panel-flotante .derecho { height: min(calc(100% - 28px), 1000px); }
   /* lista plegada */
   .app.lista-plegada { grid-template-columns: var(--riel) 0 minmax(0, 1fr); }
   .app.lista-plegada .lista-col { display: none; }
