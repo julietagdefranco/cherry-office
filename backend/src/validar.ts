@@ -95,6 +95,8 @@ export function esIdValido(s: string): boolean {
 export const Validar = {
   reservados: new Set(['general-purpose', 'explore', 'plan', 'statusline-setup', 'claude-code-guide', 'claude', 'persona', 'creador']),
   modelos: new Set(['sonnet', 'opus', 'haiku', 'inherit']),
+  /** `--effort` de Claude Code: cuánto piensa antes de responder. Más esfuerzo = más tokens (los de pensar se cobran como salida). */
+  esfuerzos: new Set(['low', 'medium', 'high', 'xhigh', 'max']),
 
   colorHex(s: string): boolean {
     return /^#[0-9a-fA-F]{6}$/.test(s)

@@ -12,6 +12,7 @@ import type { Oficinas } from './oficinas.js'
 import type { PermisosVivos } from './permisos-vivos.js'
 import { pedidoJSON, decisionesPermiso, type DecisionPermiso } from './permisos-vivos.js'
 import { argumentos, contexto, entorno, variableTokenMCP, type FuenteCatalogo } from './permisos.js'
+import { eleccionCharla } from './agentes.js'
 import { no405, type Resp, type RutaNucleo } from './router.js'
 import type { InfoClaude } from './rutas-oficinas.js'
 import type { Store } from './store.js'
@@ -165,6 +166,14 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const def = act.oficina.agentes.find((a) => a.id === agente)
     if (!def || msg === '' || largo(msg) > maxMensaje || !uuidValido(b.session)) return invalido
     const sid = b.session.toLowerCase()
+    // modelo y esfuerzo elegidos en la charla (pisan los del agente solo en este mensaje)
+    let eleccion: { modelo?: string; esfuerzo?: string }
+    try {
+      eleccion = eleccionCharla(b)
+    } catch (e) {
+      if (e instanceof ErrorAPI) return [e.status, { error: e.mensaje }]
+      throw e
+    }
 
     try {
       runner.verificar(act.carpeta)
@@ -200,6 +209,8 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
     // la persona está en el chat: lo que el agente no tiene permitido se le pregunta (tarjeta en la oficina)
     ctx.preguntar = true
+    if (eleccion.modelo !== undefined) ctx.modelo = eleccion.modelo
+    if (eleccion.esfuerzo !== undefined) ctx.esfuerzo = eleccion.esfuerzo
 
     let resultado: Resp
     try {
@@ -264,7 +275,8 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     } finally {
       store.registrarCosto({ oficina: carpeta, agente, origen: 'chat', ref: sid, costo: caja.valor })
     }
-    log.info(`chat agente=${agente} sid=${sid.slice(0, 8)} estado=${resultado[0]} seg=${((Date.now() - t0) / 1000).toFixed(1)}`)
+    log.info(`chat agente=${agente} sid=${sid.slice(0, 8)} estado=${resultado[0]} seg=${((Date.now() - t0) / 1000).toFixed(1)}`
+      + (ctx.modelo !== undefined ? ` modelo=${ctx.modelo}` : '') + (ctx.esfuerzo !== undefined ? ` esfuerzo=${ctx.esfuerzo}` : '') + caja.tokensLog())
     return resultado
   }
 

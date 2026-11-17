@@ -14,6 +14,7 @@ import { esObjeto, maxBody, objeto, type Obj } from './json.js'
 import { oficinaJSON, escribirAtomico } from './oficina.js'
 import { argumentos, variableTokenMCP, type ContextoOficina } from './permisos.js'
 import { creadorMD } from './plantillas.js'
+import { eleccionCharla } from './agentes.js'
 import { atrapar, no405, type Query, type Resp, type SubRouter } from './router.js'
 import { maxMensaje } from './rutas-chat.js'
 import { registrarModulo, type Servicios } from './servicios.js'
@@ -72,6 +73,7 @@ export class CreadorRouter implements SubRouter {
     if (msg === '' || largo(msg) > maxMensaje || !uuidValido(d.session)) throw new ErrorAPI(400, 'pedido inválido')
     const sid = d.session.toLowerCase()
     const carpeta = act.carpeta
+    const eleccion = eleccionCharla(d)
 
     try {
       s.runner.verificar(carpeta)
@@ -102,6 +104,8 @@ export class CreadorRouter implements SubRouter {
     }
     const mcpUrl = await s.mcp?.()?.url()
     const ctx = contextoCreador(carpeta, mcpUrl)
+    if (eleccion.modelo !== undefined) ctx.modelo = eleccion.modelo
+    if (eleccion.esfuerzo !== undefined) ctx.esfuerzo = eleccion.esfuerzo
     const p: Promise<void> = this.correr(carpeta, sid, msg, ctx).catch(() => {}).finally(() => this.enCurso.delete(p))
     this.enCurso.add(p)
     s.log.info(`creador chat sid=${sid.slice(0, 8)} en segundo plano`)

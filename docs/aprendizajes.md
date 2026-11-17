@@ -120,3 +120,8 @@ Comando: `-p --tools Read,Bash,Edit,Write --permission-mode manual --permission-
   + `--permission-prompt-tool mcp__hq__pedir_permiso` en las corridas con persona presente. La herramienta del servidor `hq` muestra la tarjeta (una vez, siempre para este agente, rechazar), no
   cuenta la espera dentro del timeout del turno y, si nadie responde, rechaza. Las corridas sin persona (tareas
   programadas, lectura por rol) pueden seguir en `dontAsk`.
+
+## Modelo y esfuerzo (`--model`, `--effort`)
+- **CONFIRMADO** (Claude Code 2.1.326). `--model` pisa el `model:` del frontmatter del agente (`--agent`): `system/init` informa el de `--model`.
+- **CONFIRMADO.** `--effort low|medium|high|xhigh|max` existe; un valor inválido solo avisa por stderr y usa el de por defecto. Sin `--effort`, la corrida usa el que la persona tenga en su Claude Code (puede ser alto): por eso la app deja elegirlo por agente y por charla.
+- **CONFIRMADO.** Un turno mínimo (`--agent`, `--tools Read,Glob,Grep`) ya carga ~4 mil tokens de prompt de sistema antes del mensaje; se le suman las instrucciones de la oficina, el CLAUDE.md, la memoria y los servidores MCP del `~/.claude` de la persona. En el `result`, `usage` trae `input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` y `output_tokens`: el log del chat los anota como `tokens=entrada/cache_leida/cache_escrita/salida`.

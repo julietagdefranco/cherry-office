@@ -267,6 +267,8 @@ export class ClaudeRunner {
   static readonly sinConectores = ['--permission-mode', 'dontAsk', '--disallowedTools', 'mcp__claude_ai_*']
   /** `--model` para un modelo de `Config.modelos`; `inherit` no pasa nada (queda el de Claude Code). */
   static argsModelo(m: string): string[] { return m === 'inherit' ? [] : ['--model', m] }
+  /** `--effort` (low…max); sin esfuerzo no pasa nada (queda el de Claude Code de la persona). */
+  static argsEsfuerzo(e?: string): string[] { return e !== undefined && e !== '' ? ['--effort', e] : [] }
 
   readonly actividad = new ActividadRegistro()
   /** Reciben el `rate_limit_info` de cada `rate_limit_event` de cualquier corrida (el medidor de uso). */
@@ -309,17 +311,17 @@ export class ClaudeRunner {
 
   /** `claude -p` SIN agente y SIN herramientas: borradores, síntesis, resúmenes. Devuelve el texto de `result`.
    *  Sin `modelo` usa el de los procesos internos (Ajustes › Modelos). */
-  async correrSinAgente(prompt: string, { timeout, cwd, modelo, obs }: { timeout?: number; cwd?: string; modelo?: string; obs?: Observador } = {}): Promise<string> {
+  async correrSinAgente(prompt: string, { timeout, cwd, modelo, esfuerzo, obs }: { timeout?: number; cwd?: string; modelo?: string; esfuerzo?: string; obs?: Observador } = {}): Promise<string> {
     this.verificar(cwd)
     const args = ['-p', ...ClaudeRunner.formatoSalida, '--tools', '', ...ClaudeRunner.sinConectores]
-    args.push(...ClaudeRunner.argsModelo(modelo ?? this.config.modelo('internos')))
+    args.push(...ClaudeRunner.argsModelo(modelo ?? this.config.modelo('internos')), ...ClaudeRunner.argsEsfuerzo(esfuerzo))
     return this.resultado([...args, '--', prompt], { timeout: timeout ?? this.config.timeout, cwd, obs })
   }
 
   /** Un turno de `agente` en una sesión nueva, solo con Read/Glob/Grep (reuniones, consultas). Sin carril.
    *  Con `preguntar` (reuniones, con la persona mirando): además las herramientas de sus reglas guardadas y las que puede
    *  pedir, en modo normal con `--permission-prompt-tool`, así lo que no tiene permitido se le pregunta a la persona. */
-  async turnoSoloLectura(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string; preguntar?: TurnoConPermiso }): Promise<string> {
+  async turnoSoloLectura(p: { agente: string; prompt: string; cwd: string; timeout?: number; dirsExtra?: string[]; obs?: Observador; instrucciones?: string; preguntar?: TurnoConPermiso; modelo?: string; esfuerzo?: string }): Promise<string> {
     this.verificar(p.cwd)
     const q = p.preguntar
     const herramientas = ['Read', 'Glob', 'Grep']
@@ -334,6 +336,9 @@ export class ClaudeRunner {
     if (q) a.push(...q.permitidas, q.herramientaPermiso)
     a.push('--disallowedTools', 'mcp__claude_ai_*')
     if (p.instrucciones) a.push('--append-system-prompt', p.instrucciones)
+    // sin modelo manda el del `.md` del agente
+    if (p.modelo !== undefined) a.push(...ClaudeRunner.argsModelo(p.modelo))
+    a.push(...ClaudeRunner.argsEsfuerzo(p.esfuerzo))
     return this.resultado([...a, '--', p.prompt], { timeout: p.timeout ?? this.config.timeout, cwd: p.cwd, obs: p.obs, envExtra: q?.env })
   }
 
@@ -472,7 +477,7 @@ export class ClaudeRunner {
     const caja = new CajaCosto()
     void (async () => {
       try {
-        const t = await this.correrSinAgente(ResumenTarea.prompt(msg), { timeout: ResumenTarea.timeout, cwd: p.oficina, modelo: this.config.modelo('resumenes'), obs: caja.observador() })
+        const t = await this.correrSinAgente(ResumenTarea.prompt(msg), { timeout: ResumenTarea.timeout, cwd: p.oficina, modelo: this.config.modelo('resumenes'), esfuerzo: 'low', obs: caja.observador() })
         const r = ResumenTarea.limpiar(t)
         if (!cancelado && r !== undefined) this.actividad.tarea(p.oficina, p.agente, p.token, r)
       } catch {

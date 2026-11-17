@@ -10,6 +10,55 @@
     { valor: 'haiku', titulo: 'Haiku', sub: 'Rápido y barato, para cosas simples.' },
     { valor: 'inherit', titulo: 'El de Claude Code', sub: 'El que tengas elegido en tu Claude Code.' },
   ];
+  /* Cuánto piensa antes de responder (`--effort`). Lo que piensa se cobra como texto escrito: más esfuerzo, más tokens.
+     '' = el que tengas en tu Claude Code. Una sola lista: la ficha del agente, el selector de cada charla y las reuniones. */
+  App.ESFUERZOS = [
+    { valor: '', titulo: 'El de Claude Code', sub: 'El que tengas elegido en tu Claude Code.' },
+    { valor: 'low', titulo: 'Bajo', sub: 'Responde rápido y gasta poco. Para charlas y pedidos simples.' },
+    { valor: 'medium', titulo: 'Medio', sub: 'Piensa un poco. Buen equilibrio para el día a día.' },
+    { valor: 'high', titulo: 'Alto', sub: 'Piensa más antes de responder. Gasta más.' },
+    { valor: 'xhigh', titulo: 'Muy alto', sub: 'Para problemas difíciles. Gasta bastante más.' },
+    { valor: 'max', titulo: 'Máximo', sub: 'Todo lo que pueda pensar. El que más gasta.' },
+  ];
+  App.tituloModelo = function (v) { var m = App.MODELOS.filter(function (x) { return x.valor === v; })[0]; return m ? m.titulo : 'Sonnet'; };
+  App.tituloEsfuerzo = function (v) { var m = App.ESFUERZOS.filter(function (x) { return x.valor === (v || ''); })[0]; return m ? m.titulo : ''; };
+
+  /* Selector de modelo y esfuerzo de una charla (como en Claude): un botón chico que abre un menú. Pisa los del agente
+     solo en esa charla. op: {modelo, esfuerzo (los de por defecto, del agente), valor: {modelo?, esfuerzo?}, alCambiar(v)}.
+     Devuelve el botón con .valor() -> {modelo?, esfuerzo?} (solo lo que difiere del de por defecto) y .poner(v). */
+  App.SelectorCharla = function (op) {
+    var v = Object.assign({}, op.valor || {});
+    var b = h('button.btn.chico.fantasma.selector-charla', { type: 'button', title: 'Modelo y esfuerzo de esta charla' });
+    function efectivo() { return { modelo: v.modelo || op.modelo || 'sonnet', esfuerzo: v.esfuerzo !== undefined ? v.esfuerzo : (op.esfuerzo || '') }; }
+    function pintar() {
+      var e = efectivo();
+      App.vaciar(b);
+      App.add(b, App.icono('bombilla'), h('span', App.tituloModelo(e.modelo) + (e.esfuerzo ? ' · ' + App.tituloEsfuerzo(e.esfuerzo) : '')));
+      b.classList.toggle('cambiado', !!(v.modelo || v.esfuerzo !== undefined));
+    }
+    function poner(nv) {
+      v = {};
+      if (nv.modelo && nv.modelo !== (op.modelo || 'sonnet')) v.modelo = nv.modelo;
+      if (nv.esfuerzo !== undefined && nv.esfuerzo !== (op.esfuerzo || '')) v.esfuerzo = nv.esfuerzo;
+      pintar();
+    }
+    b.addEventListener('click', function () {
+      var e = efectivo();
+      var marca = function (si) { return si ? 'ok' : null; };
+      var items = [{ titulo: 'Modelo' }].concat(App.MODELOS.map(function (m) {
+        return { texto: m.titulo + (m.valor === (op.modelo || 'sonnet') ? ' (el del agente)' : ''), nota: m.sub, icono: marca(e.modelo === m.valor),
+          accion: function () { poner({ modelo: m.valor, esfuerzo: e.esfuerzo }); if (op.alCambiar) op.alCambiar(b.valor()); } };
+      }), ['-', { titulo: 'Esfuerzo' }], App.ESFUERZOS.map(function (x) {
+        return { texto: x.titulo + (x.valor === (op.esfuerzo || '') && op.esfuerzo ? ' (el del agente)' : ''), nota: x.sub, icono: marca(e.esfuerzo === x.valor),
+          accion: function () { poner({ modelo: e.modelo, esfuerzo: x.valor }); if (op.alCambiar) op.alCambiar(b.valor()); } };
+      }));
+      App.menu(b, items);
+    });
+    b.valor = function () { var r = {}; if (v.modelo) r.modelo = v.modelo; if (v.esfuerzo !== undefined) r.esfuerzo = v.esfuerzo; return r; };
+    b.poner = function (nv) { v = {}; poner(Object.assign(efectivo(), nv || {})); };
+    pintar();
+    return b;
+  };
 
   /* ---------------- editor de minifig (agentes y tu perfil) ----------------
      avatar: objeto inicial; semilla(): de dónde salen los valores que falten. Devuelve {el, valor(), retratar()}. */
@@ -122,6 +171,8 @@
       opciones: deptos.map(function (x) { return { valor: x.id, titulo: x.nombre, color: x.color }; }) });
     var modelo = App.elegir({ etiqueta: 'Modelo', forma: 'lista', valor: d.modelo || 'sonnet',
       opciones: App.MODELOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; }) });
+    var esfuerzo = App.elegir({ etiqueta: 'Esfuerzo', forma: 'lista', valor: d.esfuerzo || '',
+      opciones: App.ESFUERZOS.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; }) });
     var desc = h('input.campo', { value: d.description || '', maxlength: 1000, placeholder: 'En una línea, para qué sirve' });
     var prompt = h('textarea.campo', { rows: 9, maxlength: 20000 }); prompt.value = d.prompt || '';
     var sabeItems = temas((d.sabeDe || []).join(', '));
@@ -147,6 +198,7 @@
         grupo('Cómo trabaja', [
           campo('Instrucciones', prompt, 'Cómo trabaja, qué entrega y cómo habla. Es el texto que recibe Claude.'),
           campo('Modelo', modelo, 'Cambia cuánto gasta y qué tan bien resuelve. Vale desde la próxima vez que trabaje.'),
+          campo('Esfuerzo', esfuerzo, 'Cuánto piensa antes de responder. Pensar también gasta tokens: para charlar, Bajo o Medio alcanza. En cada charla lo podés cambiar.'),
           campo('Sabe de', sabe, 'Hasta 12 temas. Sus colegas los usan para saber a quién preguntarle.'),
           campo('Pedidos sugeridos', pedidos, 'Hasta 3 frases que aparecen como botones al abrir su charla.')]),
         idFila));
@@ -155,7 +207,7 @@
       el: el,
       valor: function () {
         return {
-          id: id.value.trim() || d.id || '', nombre: nombre.value.trim(), rol: rol.value.trim(), departamento: dep.valor() || '', modelo: modelo.valor(),
+          id: id.value.trim() || d.id || '', nombre: nombre.value.trim(), rol: rol.value.trim(), departamento: dep.valor() || '', modelo: modelo.valor(), esfuerzo: esfuerzo.valor() || '',
           description: desc.value.trim() || rol.value.trim(), prompt: prompt.value.trim(),
           chips: chipsItems.map(function (c) { return c.trim(); }).filter(Boolean), avatar: ava.valor(), brief: d.brief || undefined,
           sabeDe: sabeItems.slice()

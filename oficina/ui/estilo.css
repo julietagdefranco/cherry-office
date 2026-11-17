@@ -213,6 +213,12 @@ select.campo { padding-right: 26px; }
 .redactar { display: flex; gap: 8px; align-items: flex-end; }
 .redactar textarea { min-height: 38px; max-height: 160px; resize: none; }
 .redactar .btn { height: 38px; }
+/* debajo del cuadro de texto de una charla: el selector de modelo y esfuerzo y la ayuda */
+.pie-charla { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+.pie-charla .ayuda { margin-top: 0; flex: 1; min-width: 160px; }
+.selector-charla { height: 26px; padding: 0 8px; font-size: 12px; gap: 5px; color: var(--tenue); }
+.selector-charla svg { width: 14px; height: 14px; }
+.selector-charla.cambiado { color: var(--texto); box-shadow: inset 0 0 0 1px var(--linea-fuerte); }
 .chat-intro { text-align: center; color: var(--suave); padding: 22px 18px 8px; }
 .chat-intro img { width: 96px; height: 96px; border-radius: 18px; margin: 0 auto 10px; display: block; }
 

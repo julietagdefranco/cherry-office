@@ -38,6 +38,10 @@ export type ContextoOficina = {
   anotarRechazos?: boolean
   /** Modo «todos los conectores» (preferencia de la app): el hijo espera a que se conecten aunque todavía no haya catálogo. */
   todosConectores?: boolean
+  /** Modelo de esta corrida (`--model`): pisa el del `.md` del agente. undefined = el del `.md`. */
+  modelo?: string
+  /** Esfuerzo de esta corrida (`--effort`). undefined = el de Claude Code de la persona. */
+  esfuerzo?: string
 }
 
 /** Un servidor MCP de la cuenta (catálogo de conectores de claude.ai). */
@@ -239,7 +243,13 @@ export function contexto(a: OficinaActiva, def: AgenteDef, { dirsExtra = [], act
     instrucciones: Instrucciones.para(a.oficina, agente, { conMCP: true, todos }), permitidas, vedadas,
     herramientasMCP: HerramientasMCPAgente.lista(a.oficina, agente), perfilMCP: Coordinador.perfil(a.oficina, agente),
     reglas: agente.reglas ?? [], preguntar: false, ...(todos ? { todosConectores: true } : {}),
+    ...(esfuerzoDe(agente) !== undefined ? { esfuerzo: esfuerzoDe(agente) } : {}),
   }
+}
+
+/** El esfuerzo guardado de un agente si es válido (oficina.json se puede editar a mano); undefined = el de Claude Code. */
+export function esfuerzoDe(a: AgenteDef): string | undefined {
+  return a.esfuerzo !== undefined && Validar.esfuerzos.has(a.esfuerzo) ? a.esfuerzo : undefined
 }
 
 /** Patrón de escritura de `archivos/entregables/<id>/` (crea la carpeta del agente). undefined si la oficina no tiene
@@ -329,6 +339,8 @@ export function argumentos(cfg: Config, ctx: ContextoOficina, p: { agente: strin
   a.push(...ctx.permitidas)
   if (ctx.vedadas.length > 0) a.push('--disallowedTools', ...ctx.vedadas)
   if (ctx.instrucciones) a.push('--append-system-prompt', ctx.instrucciones)
+  if (ctx.modelo !== undefined) a.push(...ClaudeRunner.argsModelo(ctx.modelo))
+  a.push(...ClaudeRunner.argsEsfuerzo(ctx.esfuerzo))
   return [...a, '--', p.mensaje]
 }
 
