@@ -470,7 +470,8 @@ App.Nav = (function () {
     }
     function verTodas(cual, n, texto) { return n > MAX_LADO ? h('button.lat-mas', { onclick: function () { App.Agente.verLado(cual); } }, (texto || 'Ver todas') + ' (' + n + ')', App.icono('flecha')) : null; }
     function cuenta(n) { return h('em', n == null ? '' : String(n)); }
-    var botonMas = function (titulo_, accion) { return h('button.btn.fantasma.icono.chico', { title: titulo_, onclick: accion }, App.icono('mas')); };
+    /* «nuevo» de cada sección: con borde y texto (no un «+» suelto), todos iguales */
+    var botonMas = function (texto, titulo_, accion) { return h('button.btn.chico.lat-nueva', { title: titulo_, onclick: accion }, App.icono('mas'), texto); };
 
     /* charlas */
     var charlas = h('div'), charlasVer = h('div'), charlasN = cuenta(null);
@@ -488,11 +489,11 @@ App.Nav = (function () {
       if (v) charlasVer.appendChild(v);
     }
     if (sesiones) pintarCharlas_(); else cargarSesiones().then(pintarCharlas_);
-    caja.appendChild(seccion_('Charlas', charlasN, botonMas('Nueva charla con ' + a.nombre, function () { App.Agente.nueva(id); }), charlas, charlasVer));
+    caja.appendChild(seccion_('Charlas', charlasN, botonMas('Nueva charla', 'Empezar de cero con ' + a.nombre + '. Esta charla queda guardada en la lista.', function () { App.Agente.nueva(id); }), charlas, charlasVer));
 
     /* tareas programadas */
     var tareas = h('div', h('div.lat-vacio', '…')), tareasN = cuenta(null), tareasVer = h('div');
-    caja.appendChild(seccion_('Tareas', tareasN, botonMas('Nueva tarea para ' + a.nombre, function () { App.Agente.nuevaTarea(id, {}); }), tareas, tareasVer));
+    caja.appendChild(seccion_('Tareas', tareasN, botonMas('Nueva tarea', 'Nueva tarea para ' + a.nombre, function () { App.Agente.nuevaTarea(id, {}); }), tareas, tareasVer));
     api().get('/api/tareas').then(function (r) {
       App.vaciar(tareas);
       var ts = (r.tareas || []).filter(function (t) { return t.agente === id; });
