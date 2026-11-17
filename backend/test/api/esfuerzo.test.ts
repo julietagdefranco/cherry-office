@@ -71,7 +71,7 @@ describe('Consumo de IA (Ajustes y charla)', () => {
 
   test('por defecto: skills resumidas, colegas, memoria completa y MCP locales', async () => {
     const f = await fix()
-    expect((await f.get('/api/preferencias')).obj.ia).toEqual({ esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true, carteles: true })
+    expect((await f.get('/api/preferencias')).obj.ia).toEqual({ esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true })
     await chatear(f)
     const a = corridaDe(f, 'sofia')
     expect(herramientas(a).split(',')).toContain('Skill')
@@ -84,7 +84,7 @@ describe('Consumo de IA (Ajustes y charla)', () => {
     const f = await fix()
     const r = await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { skills: 'ninguna', memoria: 'liviana', colegas: false, esfuerzo: 'low', mcpLocales: false } } })
     expect(r.status, JSON.stringify(r.obj)).toBe(200)
-    expect(r.obj.ia).toEqual({ esfuerzo: 'low', skills: 'ninguna', memoria: 'liviana', colegas: false, mcpLocales: false, carteles: true })
+    expect(r.obj.ia).toEqual({ esfuerzo: 'low', skills: 'ninguna', memoria: 'liviana', colegas: false, mcpLocales: false })
 
     await chatear(f)
     const a = corridaDe(f, 'sofia')
@@ -146,21 +146,6 @@ describe('Consumo de IA (Ajustes y charla)', () => {
     expect(herramientas(a).split(',')).toContain('Skill')
     expect(JSON.parse(Sandbox.valor(a, '--settings')!)).toEqual({ skillOverrides: { docx: 'off', xlsx: 'off' } })
     expect((await f.patch('/api/agentes/sofia', { skills: 'pdf' })).status).toBe(400)
-  })
-
-  test('carteles: con un mensaje largo hay resumen (sin agente, prompt corto); apagados, no', async () => {
-    const f = await fix()
-    const largo = 'Necesito que me armes el calendario de contenidos de diciembre'
-    await chatear(f, { message: largo })
-    const resumen = () => f.sb.llamadas.filter((a) => (a.at(-1) ?? '').includes('en 3 a 6 palabras'))
-    expect(await esperar(() => resumen().length === 1)).toBe(true)
-    const r = resumen()[0]!
-    expect(Sandbox.valor(r, '--system-prompt')).toContain('asistente de una oficina')
-    expect(r).toContain('--strict-mcp-config')
-    await llamar(f.b, 'PUT', '/api/preferencias', { body: { ia: { carteles: false } } })
-    await chatear(f, { message: largo + ' y enero' })
-    await new Promise((ok) => setTimeout(ok, 300))
-    expect(resumen().length).toBe(1)
   })
 })
 

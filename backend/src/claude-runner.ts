@@ -17,9 +17,8 @@ import { ClaudePathResolver, childEnvironment } from './claude-locator.js'
 import type { Config } from './config.js'
 import { esObjeto, type Obj } from './json.js'
 import type { HQLog } from './log.js'
-import type { Store } from './store.js'
-import { CajaCosto, CortadorLineas, parsearEvento, type Observador } from './stream.js'
-import { largo, prefijo } from './validar.js'
+import { CortadorLineas, parsearEvento, type Observador } from './stream.js'
+import { largo } from './validar.js'
 import { CatalogoSkills } from './skills.js'
 
 const esWindows = process.platform === 'win32'
@@ -504,27 +503,6 @@ export class ClaudeRunner {
     while (Date.now() < fin && vivos.some((p) => !p.termino)) await new Promise((r) => setTimeout(r, 25))
     this.log.info(`shutdown: ${vivos.length} proceso(s) terminados`)
   }
-
-  // MARK: resumen de la tarea (cartel sobre la cabeza)
-
-  /** Lanza el resumen en segundo plano y lo vuelca en la actividad. Devuelve con qué cancelarlo, o undefined si el
-   *  mensaje es corto. El costo se registra con origen "resumen". */
-  resumirTarea(msg: string, p: { oficina: string; agente: string; token: string; store: Store }): { cancelar(): void } | undefined {
-    if (!ResumenTarea.haceFalta(msg) || !this.config.iaEfectiva.carteles) return undefined
-    let cancelado = false
-    const caja = new CajaCosto()
-    void (async () => {
-      try {
-        const t = await this.correrSinAgente(ResumenTarea.prompt(msg), { timeout: ResumenTarea.timeout, cwd: p.oficina, modelo: this.config.modelo('resumenes'), esfuerzo: 'low', obs: caja.observador() })
-        const r = ResumenTarea.limpiar(t)
-        if (!cancelado && r !== undefined) this.actividad.tarea(p.oficina, p.agente, p.token, r)
-      } catch {
-      } finally {
-        p.store.registrarCosto({ oficina: p.oficina, agente: p.agente, origen: 'resumen', costo: caja.valor })
-      }
-    })()
-    return { cancelar: () => { cancelado = true } }
-  }
 }
 
 /** Los nombres de `skills` de una línea `{"type":"system","subtype":"init", ...}`, o undefined. */
@@ -590,27 +568,4 @@ export function parsearJSON(s: string): Obj | undefined {
     if (o) return o
   }
   return undefined
-}
-
-// MARK: - resumen de la tarea
-
-export const ResumenTarea = {
-  /** Mensajes de hasta este largo se muestran tal cual. */
-  minimo: 40,
-  timeout: 20,
-  haceFalta(msg: string) { return largo(msg.trim()) > this.minimo },
-  prompt(msg: string) {
-    const m = largo(msg) > 2000 ? prefijo(msg, 2000) + '…' : msg
-    return `Resumí en 3 a 6 palabras, en español, qué le están pidiendo a la persona en este mensaje. Empezá con un verbo en gerundio (por ejemplo «Armando el calendario de reels»). Respondé solo con el resumen, sin comillas ni punto final.
-
-Mensaje:
-${m}`
-  },
-  /** Primera línea, sin comillas ni punto final, máx. 48 caracteres. Vacío -> undefined. */
-  limpiar(s: string): string | undefined {
-    let t = s.split('\n').find((l) => l !== '') ?? ''
-    t = t.replace(/^[\s"'«»“”*]+|[\s"'«»“”*]+$/gu, '')
-    t = t.replace(/\.+$/, '')
-    return t === '' ? undefined : ActividadRegistro.recortar(t)
-  },
 }

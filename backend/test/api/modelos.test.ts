@@ -10,10 +10,10 @@ const fix = () => Fix.crear({ deps: ['Dirección'], agentes: [{ id: 'marce', dep
 const borrador = (f: Fix) => f.post('/api/agentes/borrador', { descripcion: 'alguien que mida', departamento: 'direccion' })
 
 describe('Modelos de los procesos internos', () => {
-  test('por defecto: sonnet, sonnet y haiku; el borrador corre con sonnet', async () => {
+  test('por defecto: sonnet y sonnet; el borrador corre con sonnet', async () => {
     const f = await fix()
-    expect((await llamar(f.b, 'GET', '/api/preferencias')).obj.modelos).toEqual({ creador: 'sonnet', internos: 'sonnet', resumenes: 'haiku' })
-    expect((await llamar(f.b, 'GET', '/api/estado')).obj.modelos).toEqual({ creador: 'sonnet', internos: 'sonnet', resumenes: 'haiku' })
+    expect((await llamar(f.b, 'GET', '/api/preferencias')).obj.modelos).toEqual({ creador: 'sonnet', internos: 'sonnet' })
+    expect((await llamar(f.b, 'GET', '/api/estado')).obj.modelos).toEqual({ creador: 'sonnet', internos: 'sonnet' })
     f.sb.modo('borrador', 'vacio')
     await borrador(f)
     expect(Sandbox.valor(f.sb.llamadas.at(-1)!, '--model')).toBe('sonnet')
@@ -30,7 +30,7 @@ describe('Modelos de los procesos internos', () => {
     const f = await fix()
     const r = await llamar(f.b, 'PUT', '/api/preferencias', { body: { modelos: { internos: 'opus' } } })
     expect(r.status).toBe(200)
-    expect(r.obj.modelos).toEqual({ creador: 'sonnet', internos: 'opus', resumenes: 'haiku' })
+    expect(r.obj.modelos).toEqual({ creador: 'sonnet', internos: 'opus' })
     f.sb.modo('borrador', 'vacio')
     await borrador(f)
     expect(Sandbox.valor(f.sb.llamadas.at(-1)!, '--model')).toBe('opus')

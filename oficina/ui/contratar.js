@@ -42,12 +42,9 @@
     { clave: 'mcpLocales', titulo: 'Servidores MCP de tu Claude Code', completo: true,
       sub: 'Los MCP que instalaste en Claude Code (no los conectores de claude.ai, que se asignan por agente). Cada uno suma sus herramientas en cada paso.',
       opciones: [{ valor: true, titulo: 'Usarlos' }, { valor: false, titulo: 'Solo los de la oficina' }] },
-    { clave: 'carteles', titulo: 'Carteles con IA', completo: true, soloAjustes: true,
-      sub: 'La frase corta sobre la cabeza de cada agente mientras trabaja («Armando el calendario…»). Es una llamada chica a Haiku por mensaje; apagado, el cartel muestra el comienzo del mensaje.',
-      opciones: [{ valor: true, titulo: 'Con IA' }, { valor: false, titulo: 'El comienzo del mensaje' }] },
   ];
   /* lo de Ajustes › Consumo de IA, con los valores de siempre si todavía no llegó el estado */
-  App.iaApp = function () { return Object.assign({ esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true, carteles: true }, (App.E.estado && App.E.estado.ia) || {}); };
+  App.iaApp = function () { return Object.assign({ esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true }, (App.E.estado && App.E.estado.ia) || {}); };
   App.opcionIA = function (clave) { return App.OPCIONES_IA.filter(function (o) { return o.clave === clave; })[0]; };
   App.tituloOpcionIA = function (o, v) { var x = o.opciones.filter(function (y) { return y.valor === v; })[0]; return x ? x.titulo : String(v); };
 

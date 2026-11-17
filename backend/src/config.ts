@@ -28,9 +28,9 @@ export const esConectoresAgentes = (v: unknown): v is ConectoresAgentes => v ===
 
 /** Modelos de los procesos que no son un agente de la oficina (clave `modelos` de config.json, toda la app).
  *  `creador`: el Creador de la recepción; `internos`: borradores de agente, fichas e imágenes de la biblioteca y síntesis
- *  de reuniones; `resumenes`: el cartel corto de lo que está haciendo un agente. `inherit` = el de Claude Code. */
-export type ClaveModelo = 'creador' | 'internos' | 'resumenes'
-export const modelosPorDefecto: Record<ClaveModelo, string> = { creador: 'sonnet', internos: 'sonnet', resumenes: 'haiku' }
+ *  de reuniones. `inherit` = el de Claude Code. (Hasta la 1.4 había `resumenes`, para los carteles: ya no usan IA.) */
+export type ClaveModelo = 'creador' | 'internos'
+export const modelosPorDefecto: Record<ClaveModelo, string> = { creador: 'sonnet', internos: 'sonnet' }
 export const clavesModelo = Object.keys(modelosPorDefecto) as ClaveModelo[]
 export const modelosValidos = Validar.modelos
 
@@ -41,10 +41,9 @@ export const esMemoriaIA = (v: unknown): v is MemoriaIA => v === 'completa' || v
 /** Consumo de IA por defecto de toda la app (clave `ia` de config.json). Los pisan el agente (esfuerzo) y cada charla o
  *  reunión nueva. `esfuerzo` '' = el de Claude Code; `skills` = cómo ven las skills de la persona (skills.ts); `colegas` =
  *  consultar y pedirle cosas a otros agentes; `mcpLocales` = los servidores MCP del Claude Code de la persona (apagado:
- *  `--strict-mcp-config`, solo el de la oficina); `carteles` = la frase corta de lo que hace cada agente (una llamada a
- *  Haiku por mensaje; apagado, el cartel muestra el comienzo del mensaje). */
-export type PreferenciasIA = { esfuerzo: string; skills: ModoSkills; memoria: MemoriaIA; colegas: boolean; mcpLocales: boolean; carteles: boolean }
-export const iaPorDefecto: PreferenciasIA = { esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true, carteles: true }
+ *  `--strict-mcp-config`, solo el de la oficina). */
+export type PreferenciasIA = { esfuerzo: string; skills: ModoSkills; memoria: MemoriaIA; colegas: boolean; mcpLocales: boolean }
+export const iaPorDefecto: PreferenciasIA = { esfuerzo: '', skills: 'resumidas', memoria: 'completa', colegas: true, mcpLocales: true }
 
 export class Config {
   proyecto: string
@@ -174,7 +173,6 @@ export class Config {
       const sk = modoSkillsDe(v.skills)
       if (sk) this.ia.skills = sk
       if (typeof v.mcpLocales === 'boolean') this.ia.mcpLocales = v.mcpLocales
-      if (typeof v.carteles === 'boolean') this.ia.carteles = v.carteles
       if (esMemoriaIA(v.memoria)) this.ia.memoria = v.memoria
       if (typeof v.colegas === 'boolean') this.ia.colegas = v.colegas
     }

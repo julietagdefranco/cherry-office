@@ -10,7 +10,7 @@ export type EstadoAgente = {
   estado: string
   herramienta?: string
   objetivo?: string
-  /** Resumen corto del pedido (Haiku) o el pedido recortado. */
+  /** Qué es la corrida, fijo: «Respondiéndote», el tema de la reunión, el nombre de la tarea… */
   tarea?: string
   /** chat | reunion | biblioteca | tarea | consulta | creador */
   origen: string

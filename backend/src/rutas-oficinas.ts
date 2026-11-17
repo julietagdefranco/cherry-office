@@ -28,7 +28,7 @@ export function misionPatch(d: Obj): string | undefined {
   return Validar.texto(v, 'mision', ValidarAgenteExtra.maxMision, false) ?? ''
 }
 
-/** `modelos` de PUT /api/preferencias: `{creador?, internos?, resumenes?}` con sonnet, opus, haiku o inherit. */
+/** `modelos` de PUT /api/preferencias: `{creador?, internos?}` con sonnet, opus, haiku o inherit. */
 function modelosPedidos(v: unknown): Partial<Record<ClaveModelo, string>> {
   if (!esObjeto(v)) throw new ErrorAPI(400, '«modelos» tiene que ser un objeto.')
   const r: Partial<Record<ClaveModelo, string>> = {}
@@ -48,7 +48,7 @@ function iaPedida(v: unknown): Partial<PreferenciasIA> {
     if (k === 'esfuerzo') {
       if (typeof x !== 'string' || (x !== '' && !Validar.esfuerzos.has(x))) throw new ErrorAPI(400, '«ia.esfuerzo» tiene que ser "", low, medium, high, xhigh o max.')
       r.esfuerzo = x
-    } else if (k === 'colegas' || k === 'mcpLocales' || k === 'carteles') {
+    } else if (k === 'colegas' || k === 'mcpLocales') {
       if (typeof x !== 'boolean') throw new ErrorAPI(400, `«ia.${k}» tiene que ser verdadero o falso.`)
       r[k] = x
     } else if (k === 'skills') {
@@ -58,7 +58,7 @@ function iaPedida(v: unknown): Partial<PreferenciasIA> {
     } else if (k === 'memoria') {
       if (!esMemoriaIA(x)) throw new ErrorAPI(400, '«ia.memoria» tiene que ser "completa" o "liviana".')
       r.memoria = x
-    } else throw new ErrorAPI(400, `«ia.${k}» no existe (esfuerzo, skills, memoria, colegas, mcpLocales, carteles).`)
+    } else throw new ErrorAPI(400, `«ia.${k}» no existe (esfuerzo, skills, memoria, colegas, mcpLocales).`)
   }
   return r
 }

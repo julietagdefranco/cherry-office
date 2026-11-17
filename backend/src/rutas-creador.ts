@@ -128,7 +128,7 @@ export class CreadorRouter implements SubRouter {
           if (ctx.mcpUrl === undefined) return { error: 'El servidor interno de la oficina no está disponible: el Creador no puede armar tarjetas.' }
           try {
             const activa = store.estaActiva(sid)
-            const texto = await runner.actividad.seguir({ oficina: carpeta, agente: Creador.idAgente, origen: 'creador', tarea: msg, extra: caja.observador() },
+            const texto = await runner.actividad.seguir({ oficina: carpeta, agente: Creador.idAgente, origen: 'creador', tarea: 'Armando la oficina', extra: caja.observador() },
               (obs) => runner.ejecutarChat({ agente: Creador.idAgente, mensaje: msg, sid, activa, carpeta, obs, envExtra, armar: (p) => argumentos(config, ctx, p) }))
             try { store.marcarActiva(sid) } catch {}
             return { texto: texto === '' ? '(sin respuesta)' : texto }

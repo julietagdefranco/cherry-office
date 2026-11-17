@@ -273,7 +273,6 @@ App.Ajustes = (function () {
   var PROCESOS = [
     { clave: 'creador', titulo: 'Creador', bajada: 'El de la recepción, que arma y cambia la oficina charlando.' },
     { clave: 'internos', titulo: 'Tareas de fondo', bajada: 'Borradores de agentes nuevos, fichas e imágenes de la biblioteca y resúmenes de reuniones.' },
-    { clave: 'resumenes', titulo: 'Carteles', bajada: 'La frase corta de lo que está haciendo cada agente.' },
   ];
   function modelos(crear) {
     var hj = crear({ titulo: 'Modelos' });

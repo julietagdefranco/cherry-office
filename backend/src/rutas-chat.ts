@@ -221,18 +221,9 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           store.asegurarSesion(sid, agente, carpeta)
           store.agregar(sid, 'u', mensaje)
           const activa = store.estaActiva(sid)
-          const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: msg, extra: caja.observador(escritos.observador(enVivo.observador())) },
-            async (obs, token) => {
-              const resumen = runner.resumirTarea(msg, { oficina: carpeta, agente, token, store })
-              try {
-                return await runner.ejecutarChat({
-                  agente, mensaje, sid, activa, carpeta, obs, envExtra,
-                  armar: (p) => argumentos(config, ctx, p),
-                })
-              } finally {
-                resumen?.cancelar()
-              }
-            })
+          // el cartel: fijo arriba («Respondiéndote») y abajo lo que va haciendo en vivo (sin IA)
+          const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: 'Respondiéndote', extra: caja.observador(escritos.observador(enVivo.observador())) },
+            (obs) => runner.ejecutarChat({ agente, mensaje, sid, activa, carpeta, obs, envExtra, armar: (p) => argumentos(config, ctx, p) }))
           store.marcarActiva(sid)
           const guardado = texto === '' ? '(sin respuesta)' : texto
           store.agregar(sid, 'a', guardado)
