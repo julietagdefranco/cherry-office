@@ -72,7 +72,7 @@
   /* `op.vista`: lo que se dibuja, si no es el código mismo (una página de la oficina empaquetada con su CSS e imágenes) */
   function verArtefacto(op) {
     var tipo = op.tipo, codigo = op.codigo || '', vista = op.vista || codigo;
-    var hj = App.hoja({ titulo: op.titulo || tituloDe(tipo, codigo), ancho: 1040, alto: '90vh' });
+    var hj = App.visor({ titulo: op.titulo || tituloDe(tipo, codigo), ancho: 1040, alto: '90vh' });
     hj.el.classList.add('hoja-artefacto');
     var verCodigo = false;
     function pintar() {
@@ -93,7 +93,7 @@
 
   /* imagen en grande */
   function verImagen(src, titulo) {
-    var hj = App.hoja({ titulo: titulo || 'Imagen', ancho: 1000, alto: '88vh' });
+    var hj = App.visor({ titulo: titulo || 'Imagen', ancho: 1000, alto: '88vh' });
     hj.el.classList.add('hoja-imagen');
     hj.cuerpo.appendChild(h('img.imagen-grande', { src: src, alt: titulo || '' }));
     App.add(hj.pie, h('button.btn.primario', { onclick: hj.cerrar }, 'Cerrar'));

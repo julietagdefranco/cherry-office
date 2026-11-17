@@ -208,6 +208,11 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     return obj;
   };
   App.hojaAbierta = function () { return pila.length > 0; };
+  /* Para ver un archivo: al costado de la charla si hay una abierta (compu, sin otra hoja encima); si no, en una hoja */
+  App.visor = function (op) {
+    var v = !pila.length && App.Agente && App.Agente.abrirVisor ? App.Agente.abrirVisor(op) : null;
+    return v || App.hoja(op);
+  };
   /* Lo mismo que una hoja ({cuerpo, pie, cab, cerrar, titulo, el}) pero pintado en el panel principal, con su modo
      (p. ej. 'biblioteca'): para las pantallas que antes eran ventanas y ahora son una sección. */
   /* Cabecera única de los paneles: [volver] icono · título y bajada · acciones · [×].
@@ -724,7 +729,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
   App.esMarkdown = function (nombre) { return /\.(md|markdown|mdown|mkd)$/i.test(nombre || ''); };
   App.verDocumento = function (op) {
     var md = op.markdown !== false && App.esMarkdown(op.nombre), crudo = !md;
-    var hj = App.hoja({ titulo: op.titulo || op.nombre || 'Documento', ancho: 820, alto: '86vh' });
+    var hj = App.visor({ titulo: op.titulo || op.nombre || 'Documento', ancho: 820, alto: '86vh' });
     hj.el.classList.add('hoja-doc');
     var vista = h('div.md-doc');
     function pintar() {
@@ -754,19 +759,40 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
       return new TextDecoder('utf-8').decode(arr);
     } catch (e) { return null; }
   }
-  /* abre un .md de la oficina (ruta relativa) en el visor */
-  App.abrirMarkdownOficina = function (rel) {
+  /* abre un archivo de la oficina (ruta relativa) con el visor que le toque: el mismo del chat para todo */
+  App.abrirArchivoOficina = function (rel) {
+    if (App.ChatRico) return App.ChatRico.abrirArchivo(rel);
     return App.api.get('/api/oficina/archivo', { ruta: rel }).then(App.abrirContenido).catch(App.fallo);
   };
+  App.abrirMarkdownOficina = App.abrirArchivoOficina;
 
-  /* abre un {nombre, mime, base64 | texto, ruta} devuelto por el backend */
+  /* abre un {nombre, mime, base64 | texto, ruta} devuelto por el backend, con el mismo visor que el chat:
+     markdown formateado, imágenes en grande, HTML/SVG/mermaid dibujados y el resto del texto como código.
+     Solo lo que la app no sabe mostrar (PDF, Word…) va a otra app o al navegador. */
+  var EXT_TEXTO = /\.(txt|json|csv|tsv|log|xml|ya?ml|js|mjs|cjs|ts|tsx|jsx|css|py|sh|sql|toml|ini|env)$/i;
+  var EXT_IMAGEN = /\.(png|jpe?g|gif|webp)$/i;
+  var EXT_ARTEFACTO = { html: 'html', htm: 'html', svg: 'svg', mmd: 'mermaid', mermaid: 'mermaid' };
   App.abrirContenido = function (c) {
-    if (App.esMarkdown(c.nombre)) {
+    var nombre = c.nombre || '', m = /\.([a-z0-9]+)$/i.exec(nombre), ext = m ? m[1].toLowerCase() : '';
+    var CR = App.ChatRico;
+    if (App.esMarkdown(nombre)) {
       var t = textoDe(c);
-      if (t !== null) { App.verDocumento({ nombre: c.nombre, texto: t, ruta: c.ruta, truncado: c.truncado }); return; }
+      if (t !== null) { App.verDocumento({ nombre: nombre, texto: t, ruta: c.ruta, truncado: c.truncado }); return; }
+    }
+    if (CR && EXT_IMAGEN.test(nombre) && c.base64) { CR.verImagen('data:' + (c.mime || 'image/' + ext) + ';base64,' + c.base64, nombre); return; }
+    if (CR && EXT_ARTEFACTO[ext]) {
+      // una página de la oficina se vuelve a pedir por su ruta para dibujarla con su CSS, JS e imágenes
+      var rel = !c.rel && EXT_ARTEFACTO[ext] === 'html' && c.ruta ? CR.relOficina(c.ruta) : null;
+      if (rel) { CR.abrirArchivo(rel); return; }
+      var cod = textoDe(c);
+      if (cod !== null) { CR.verArtefacto({ tipo: EXT_ARTEFACTO[ext], codigo: cod, titulo: nombre, ruta: c.ruta }); return; }
+    }
+    if (typeof c.texto === 'string' || EXT_TEXTO.test(nombre)) {
+      var tx = textoDe(c);
+      if (tx !== null) { App.verDocumento({ nombre: nombre, texto: tx, ruta: c.ruta, truncado: c.truncado, markdown: false }); return; }
     }
     if (App.nativo.hay && c.ruta) { App.nativo.abrir(c.ruta); return; }
-    if (typeof c.texto === 'string') { App.verDocumento({ nombre: c.nombre, texto: c.texto, ruta: c.ruta, truncado: c.truncado, markdown: false }); return; }
+    if (!c.base64 && c.sinVista) { App.aviso('La app no sabe mostrar este tipo de archivo. Está en: ' + (c.ruta || ''), true); return; }
     if (!c.base64) { App.aviso('El archivo es muy grande para abrirlo desde el navegador. Está en: ' + (c.ruta || ''), true); return; }
     var bin = atob(c.base64), arr = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);

@@ -108,9 +108,7 @@
       d.archivos.forEach(function (a) {
         lista.appendChild(h('div.carpeta', { title: a.rel, onclick: function () {
           if (a.esCarpeta) App.Carpeta.abrir(a.rel);
-          else if (App.esMarkdown(a.rel)) App.abrirMarkdownOficina(a.rel);
-          else if (App.nativo.hay) App.nativo.abrir(E.carpeta.replace(/\/$/, '') + '/' + a.rel);
-          else api.get('/api/oficina/archivo', { ruta: a.rel }).then(App.abrirContenido).catch(App.fallo);
+          else App.abrirArchivoOficina(a.rel);
         } }, App.icono(a.esCarpeta ? 'carpeta' : 'libro'), h('span', { style: { flex: 1 } }, a.nombre), a.esCarpeta ? App.icono('flecha') : h('small', { style: { color: 'var(--tenue)' } }, App.tam(a.tam))));
       });
     }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });

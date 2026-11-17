@@ -993,6 +993,9 @@ button.adjunto:hover { background: var(--panel-2); }
   .app.en-seccion .derecho.con-relacionado > :not(.relacionado) { grid-column: 1; }
   .app.en-seccion .derecho.con-relacionado .relacionado { display: flex; flex-direction: column; min-height: 0; grid-column: 2; grid-row: 1 / -1; border-left: 1px solid var(--linea); background: var(--panel-2); overflow: hidden; padding: 0; }
   .app.en-seccion .derecho.con-relacionado[data-lado="ancho"] .relacionado { background: var(--panel); }
+  /* un archivo abierto al costado de la charla: la columna se lleva el ancho que sobra */
+  .app.en-seccion .derecho.con-relacionado[data-lado="visor"] { width: calc(420px + 640px); grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); }
+  .app.en-seccion .derecho.con-relacionado[data-lado="visor"] .relacionado { background: var(--panel); }
   .app.en-seccion .derecho .der-cab, .app.en-seccion .derecho .pestanas, .app.en-seccion .derecho .der-cuerpo > *, .app.en-seccion .derecho .der-pie > * { max-width: none; }
   /* pantalla ancha: el panel flota centrado sobre la oficina como una tarjeta (nav.js acomodar decide cuándo).
      left + right + margin auto lo centran con el ancho que tenga cada modo. */
@@ -1052,3 +1055,10 @@ button.adjunto:hover { background: var(--panel-2); }
 .pin-mapa { position: absolute; left: 0; top: 0; pointer-events: none; margin: -30px 0 0 -15px; z-index: 6; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .35)); }
 .pin-mapa svg { display: block; animation: pin-cae .45s cubic-bezier(.3, 1.6, .5, 1); }
 @keyframes pin-cae { from { transform: translateY(-40px); opacity: 0; } }
+
+/* visor de archivos en la columna del costado (mismo contenido que la hoja: .hoja-cuerpo y .hoja-pie) */
+.lado-visor .lat-cab b { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lado-visor > .hoja-cuerpo { flex: 1; min-height: 0; overflow: auto; }
+.lado-visor > .hoja-pie { flex: none; flex-wrap: wrap; padding: 10px 14px; }
+.lado-visor > .hoja-pie .btn.primario { display: none; }
+.lado-visor.hoja-doc > .hoja-cuerpo { padding: 6px 20px 20px; }
