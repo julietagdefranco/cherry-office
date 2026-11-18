@@ -34,6 +34,9 @@
 .artefacto-sub { font-size: 12px; color: var(--suave); }
 
 /* visor de artefactos e imágenes */
+/* cabecera compacta con línea, a juego con el pie: el contenido (iframe, imagen) arranca pegado y no hay aire que la disimule */
+.hoja-artefacto .hoja-cab, .hoja-imagen .hoja-cab { padding: 8px 10px 8px 18px; border-bottom: 1px solid var(--linea); }
+.hoja-artefacto .hoja-cab h2, .hoja-imagen .hoja-cab h2 { font-size: 14px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hoja-artefacto .hoja-cuerpo { padding: 0; display: flex; overflow: hidden; }
 .artefacto-marco { flex: 1; width: 100%; border: 0; background: #fff; }
 .artefacto-codigo { flex: 1; margin: 0; padding: 14px 18px; overflow: auto; font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre; background: var(--panel-2); }

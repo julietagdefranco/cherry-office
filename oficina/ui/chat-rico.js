@@ -95,7 +95,7 @@
     return f;
   }
   function copiar(texto) {
-    (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
+    App.copiarTexto(texto);
   }
 
   /* nombre para bajar un artefacto del chat que no es un archivo: «Página.html», «Gráfico.svg» */

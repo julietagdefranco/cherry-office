@@ -10,7 +10,7 @@ App.ChatTareas = (function () {
   function mananaISO() { var d = new Date(); d.setDate(d.getDate() + 1); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function zonaSistema() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; } }
   function copiar(texto) {
-    (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
+    App.copiarTexto(texto);
   }
 
   /* a: agente de la charla; sid: sesión. */

@@ -46,6 +46,11 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     abrir: function (ruta) { if (puente) puente.postMessage({ accion: 'abrir', ruta: ruta }); },
     revelar: function (ruta) { if (puente) puente.postMessage({ accion: 'revelar', ruta: ruta }); },
     acerca: function () { if (puente) puente.postMessage({ accion: 'acerca' }); },
+    /* texto al portapapeles del sistema; resuelve true si la app lo copió (si no hay app o es una versión vieja, otra cosa) */
+    copiar: function (texto) {
+      if (!puente) return Promise.resolve(false);
+      try { return Promise.resolve(puente.postMessage({ accion: 'copiar', texto: texto })); } catch (e) { return Promise.resolve(false); }
+    },
     /* número en el ícono del Dock o de la barra de tareas (avisos pendientes); 0 lo saca */
     insignia: function (n) { if (puente) puente.postMessage({ accion: 'insignia', n: n | 0 }); },
     /* selector de un .zip (importar una oficina); undefined si no hay app nativa o falla, null si se cancela */
@@ -585,8 +590,21 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
 
   /* clic derecho sobre un mensaje del chat (tuyo o del agente): copiar la selección o el mensaje entero.
      El texto del mensaje sale de data-texto (el original, con su markdown) si lo hay; si no, del texto visible. */
+  /* Copiar al portapapeles. En la app de escritorio la página corre en hq://app y Chromium rechaza navigator.clipboard
+     ahí, así que primero va por el portapapeles nativo (Electron); en el navegador, por la API y si no, execCommand. */
+  function copiarViejo(texto) {
+    var ta = h('textarea', { style: { position: 'fixed', top: '-1000px', opacity: '0' } });
+    ta.value = texto; document.body.appendChild(ta); ta.select();
+    var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    return ok ? Promise.resolve() : Promise.reject(new Error('copy'));
+  }
   App.copiarTexto = function (texto) {
-    (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
+    texto = texto == null ? '' : String(texto);
+    var nativo = App.nativo.copiar(texto).then(function (ok) { if (ok !== true) throw new Error('nativo'); });
+    nativo.catch(function () { return navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject(); })
+      .catch(function () { return copiarViejo(texto); })
+      .then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
   };
   document.addEventListener('contextmenu', function (e) {
     var msg = e.target.closest && e.target.closest('.msg');
@@ -778,7 +796,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     hj.cuerpo.appendChild(vista);
     App.add(hj.pie, alternar,
       h('button.btn', { onclick: function () {
-        (navigator.clipboard ? navigator.clipboard.writeText(op.texto || '') : Promise.reject()).then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
+        App.copiarTexto(op.texto || '');
       } }, 'Copiar'),
       App.botonDescargar({ nombre: op.nombre || op.titulo, rel: op.rel, texto: op.texto, truncado: op.truncado, mime: md ? 'text/markdown' : null }),
       App.nativo.hay && op.ruta ? h('button.btn', { onclick: function () { App.nativo.abrir(op.ruta); } }, App.icono('abrir'), 'Abrir con otra app') : null,

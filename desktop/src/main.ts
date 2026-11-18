@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, shell, Tray,
+  app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, protocol, shell, Tray,
   type IpcMainInvokeEvent, type MenuItemConstructorOptions,
 } from 'electron'
 import { createBackend, type Backend } from '../../backend/src/backend.js'
@@ -195,6 +195,10 @@ async function mensaje(ev: IpcMainInvokeEvent, m: unknown): Promise<unknown> {
       return null
     case 'borrarOficina':
       return borrarOficina(typeof o.carpeta === 'string' ? o.carpeta : undefined)
+    case 'copiar':
+      if (typeof o.texto !== 'string' || o.texto.length > 20_000_000) return false
+      clipboard.writeText(o.texto)
+      return true
     case 'insignia':
       insignia(typeof o.n === 'number' ? Math.max(0, Math.floor(o.n)) : 0)
       return null
