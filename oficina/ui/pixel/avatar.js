@@ -5,11 +5,11 @@
 window.App = window.App || {};
 App.Pixel = (function () {
   'use strict';
-  var PELOS = ['corto', 'peinado', 'alto', 'bob', 'largo', 'coletas', 'cola', 'rodete', 'pelado'];
+  var PELOS = ['corto', 'peinado', 'alto', 'bob', 'largo', 'coletas', 'cola', 'rodete', 'pelado', 'rapado'];
   var ARRIBAS = ['remera', 'polo', 'camisa', 'campera', 'traje', 'buzo', 'musculosa', 'jardinero', 'vestido'];
   var ABAJOS = ['pantalon', 'short', 'pollera'];
   var ACCES = ['ninguno', 'gorra', 'vincha'];
-  var NOMBRE = { corto: 'Corto', peinado: 'Peinado al costado', alto: 'Parado', bob: 'Bob', largo: 'Largo', coletas: 'Colitas', cola: 'Cola de caballo', rodete: 'Rodete', pelado: 'Pelado',
+  var NOMBRE = { corto: 'Corto', peinado: 'Peinado al costado', alto: 'Parado', bob: 'Bob', largo: 'Largo', coletas: 'Colitas', cola: 'Cola de caballo', rodete: 'Rodete', pelado: 'Pelado con costados', rapado: 'Rapado',
     remera: 'Remera', polo: 'Chomba', camisa: 'Camisa', campera: 'Campera', traje: 'Traje', buzo: 'Buzo', musculosa: 'Musculosa', jardinero: 'Jardinero', vestido: 'Vestido',
     pantalon: 'Pantalón', short: 'Short', pollera: 'Pollera', ninguno: 'Nada', gorra: 'Gorra', vincha: 'Vincha' };
   var PIEL = ['#ffe1c4', '#f7d2a8', '#e0a77f', '#c08a5f', '#8a5a3c', '#5a3a26'];

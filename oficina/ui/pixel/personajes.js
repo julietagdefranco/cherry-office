@@ -151,6 +151,14 @@
         '...dk.........',
         '...ds.........',
         '...dk.........'],
+      rapado: [-42,
+        '....wwwsss....',
+        '...wwssssss...',
+        '...wsssssss...',
+        '..............',
+        '....k.........',
+        '....s.........',
+        '....k.........'],
     },
     ne: {
       corto: [-43,
@@ -247,6 +255,13 @@
         '..dhhhhhdkk...',
         '...ddddd......'],
       pelado: [-42,
+        '....wwsss.....',
+        '...wwssssss...',
+        '...wsssssss...',
+        '..........k...',
+        '.........sk...',
+        '.........kk...'],
+      rapado: [-42,
         '....wwsss.....',
         '...wwssssss...',
         '...wsssssss...',
@@ -591,7 +606,7 @@
       if (capa === 'atras') { MAP(PELO[pose][estilo], pal, 'atras'); OX = 0; OY = 0; return; }
       MAP(CAB[pose], pal, 'frente');
       MAP(PELO[pose][estilo], pal, 'frente');
-      if (c.band) { R(-5, -40, 9, 1, c.band); P(3, -40, shade(c.band, .76)); P(-5, -40, shade(c.band, .76)); if (estilo === 'pelado') R(-4, -40, 8, 1, c.band); }
+      if (c.band) { R(-5, -40, 9, 1, c.band); P(3, -40, shade(c.band, .76)); P(-5, -40, shade(c.band, .76)); if (estilo === 'pelado' || estilo === 'rapado') R(-4, -40, 8, 1, c.band); }
       if (c.cap) {
         const K = T3(c.cap);
         R(-3, -44, 6, 1, K.M); R(-4, -43, 8, 2, K.M); R(-5, -41, 9, 1, K.M); P(-3, -44, K.L); R(-3, -43, 2, 1, K.L); R(3, -43, 1, 3, K.D);
