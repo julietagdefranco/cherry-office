@@ -957,6 +957,8 @@ button.adjunto:hover { background: var(--panel-2); }
 .desliz-nombre.sel { color: var(--texto); font-weight: 600; }
 .desliz-apartes { display: flex; gap: 6px; padding-top: 1px; }
 .elegir-desliz.aparte .desliz-barra { opacity: .45; }
+/* control dejado de lado por otra opción (p. ej. el tipo de reunión cuando se prende el panel de revisión) */
+.atenuado { opacity: .4; pointer-events: none; }
 .desliz-sub { margin-top: 6px; padding: 6px 10px; border-radius: var(--radio-chico); background: var(--panel-2); color: var(--suave); font-size: 12px; line-height: 1.4; }
 .desliz-sub b { color: var(--texto); font-weight: 600; }
 /* interruptor: pastilla con una bola que va de un lado al otro */

@@ -57,21 +57,23 @@
       grilla.appendChild(b);
       if (Array.isArray(con) && con.indexOf(a.id) >= 0) { elegidos.push(a.id); b.classList.add('sel'); }
     });
-    var rondas = App.elegir({ etiqueta: 'Rondas', valor: 1, forma: 'chips',
+    var rondas = App.elegir({ etiqueta: 'Rondas', valor: 1, forma: 'deslizador',
       opciones: [1, 2, 3].map(function (n) { return { valor: n, titulo: n === 1 ? 'Una ronda' : n + ' rondas' }; }) });
     var docs = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } }), docsSel = [];
     var err = h('div.error-txt');
     /* patrón, líder o bandos según el patrón, y archivo de salida */
     var bando = {}, editoSalida = false, lider = null;
     var patron = App.elegir({ etiqueta: 'Tipo de reunión', forma: 'lista', valor: PATRONES[0].id, alCambiar: function () { extras(); },
-      opciones: PATRONES.map(function (p) { return { valor: p.id, titulo: p.nombre, sub: p.txt }; }) });
+      opciones: PATRONES.filter(function (p) { return p.id !== 'revision'; }).map(function (p) { return { valor: p.id, titulo: p.nombre, sub: p.txt }; }) });
     var liderCaja = h('div'), liderFila = h('div.fila-campo.oculto', h('label.etiqueta-campo', 'Líder'), h('div.ayuda', 'Abre y encuadra la reunión, y la cierra con su posición.'), liderCaja);
     var bandosCaja = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } });
     var bandosFila = h('div.fila-campo.oculto', h('label.etiqueta-campo', 'Bandos'),
       h('div.ayuda', 'A defiende la propuesta del tema; B la critica. Tiene que haber al menos uno en cada bando.'), bandosCaja);
     var salida = h('input.campo', { type: 'text', maxlength: 200, value: salidaSugerida(''), oninput: function () { editoSalida = true; } });
     function extras() {
-      var p = patron.valor();
+      var rev = revisar.valor();
+      tipoFila.classList.toggle('atenuado', rev);
+      var p = rev ? '' : patron.valor();
       liderFila.classList.toggle('oculto', p !== 'lider');
       bandosFila.classList.toggle('oculto', p !== 'redblue');
       if (lider && elegidos.indexOf(lider) < 0) lider = null;
@@ -95,23 +97,32 @@
     var docsAviso = h('div.ayuda.oculto');
     /* modelo y esfuerzo de toda la reunión: por defecto, los de cada agente. Cada turno lee lo dicho hasta ahí, así que
        una reunión larga con mucho esfuerzo gasta bastante */
-    var modeloReu = App.elegir({ etiqueta: 'Modelo', forma: 'chips', valor: '',
-      opciones: [{ valor: '', titulo: 'El de cada agente' }].concat(App.MODELOS.filter(function (m) { return m.valor !== 'inherit'; }).map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; })) });
-    var memoriaReu = App.elegir({ etiqueta: 'Memoria', forma: 'chips', valor: App.iaApp().memoria,
+    var modeloReu = App.elegir({ etiqueta: 'Modelo', forma: 'deslizador', valor: '',
+      opciones: [{ valor: '', titulo: 'El de cada agente', aparte: true }].concat(App.MODELO_ESCALA.map(function (v) { var m = App.MODELOS.filter(function (x) { return x.valor === v; })[0]; return { valor: m.valor, titulo: m.titulo, sub: m.sub }; })) });
+    var memoriaReu = App.elegir({ etiqueta: 'Memoria', forma: 'interruptor', valor: App.iaApp().memoria,
       opciones: App.opcionIA('memoria').opciones.map(function (x) { return { valor: x.valor, titulo: x.titulo }; }) });
-    var esfuerzoReu = App.elegir({ etiqueta: 'Esfuerzo', forma: 'chips', valor: '',
-      opciones: [{ valor: '', titulo: 'El de cada agente' }].concat(App.ESFUERZOS.filter(function (m) { return m.valor !== ''; }).map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; })) });
+    var esfuerzoReu = App.elegir({ etiqueta: 'Esfuerzo', forma: 'deslizador', valor: '',
+      opciones: App.ESFUERZOS.map(function (m) { return { valor: m.valor, titulo: m.valor === '' ? 'El de cada agente' : m.titulo, sub: m.sub, aparte: m.valor === '' }; }) });
+    /* Panel de revisión: no es una forma de hablar sino un propósito; prendido, la reunión revisa los documentos
+       adjuntos (manda patron 'revision') y deja de lado el tipo de reunión. */
+    var revisar = App.elegir({ etiqueta: 'Panel de revisión', forma: 'interruptor', valor: false,
+      opciones: [{ valor: true, titulo: 'Cada uno revisa los documentos' }, { valor: false, titulo: 'Reunión normal' }], alCambiar: function () { extras(); } });
+    var tipoFila = h('div.fila-campo', h('label.etiqueta-campo', 'Tipo de reunión'), patron);
     App.add(hj.cuerpo,
       h('div.fila-campo', h('label.etiqueta-campo', 'Título'), h('div.ayuda', 'Un nombre corto para la reunión.'), titulo),
       h('div.fila-campo', h('label.etiqueta-campo', 'Descripción'), h('div.ayuda', 'Opcional. Acá va el detalle: lo leen todos antes de opinar.'), tema),
       h('div.fila-campo', h('label.etiqueta-campo', 'Quiénes participan'), h('div.ayuda', 'Entre 2 y 10.'), grilla),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Tipo de reunión'), patron),
-      liderFila, bandosFila,
+      h('div.aj-subtit', 'Cómo se habla'),
+      tipoFila, liderFila, bandosFila,
       h('div.fila-campo', h('label.etiqueta-campo', 'Rondas'), h('div.ayuda', 'En cada ronda habla cada uno una vez. Después podés pedir otra.'), rondas),
+      h('div.aj-subtit', 'Cuánto gasta'),
       h('div.fila-campo', h('label.etiqueta-campo', 'Modelo'), modeloReu),
       h('div.fila-campo', h('label.etiqueta-campo', 'Esfuerzo'), h('div.ayuda', 'Cuánto piensa cada uno antes de hablar. Más esfuerzo, más tokens.'), esfuerzoReu),
       h('div.fila-campo', h('label.etiqueta-campo', 'Memoria de la oficina'), h('div.ayuda', 'Si cada uno lee el contexto y las decisiones antes de hablar. «Solo si hace falta» gasta menos.'), memoriaReu),
-      h('div.fila-campo', h('label.etiqueta-campo', 'Documentos de la biblioteca (opcional)'), h('div.ayuda', 'Los participantes los leen antes de opinar.'), docs, docsAviso),
+      h('div.aj-subtit', 'Documentos de la biblioteca (opcional)'),
+      h('div.fila-campo', h('div.ayuda', { style: { marginTop: 0 } }, 'Los participantes los leen antes de opinar.'), docs, docsAviso),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Panel de revisión'),
+        h('div.ayuda', { style: { marginTop: 0, marginBottom: '6px' } }, 'Cada uno revisa los documentos adjuntos desde su rol: hallazgos, riesgos y cambios. Toma el lugar del tipo de reunión.'), revisar),
       h('div.fila-campo', h('label.etiqueta-campo', 'Dónde queda el acta'),
         h('div.ayuda', 'Al cerrar se guarda un resumen en Entregables › Reuniones.'),
         h('details.avanzado', h('summary', 'Opciones avanzadas'),
@@ -134,7 +145,7 @@
         err.textContent = '';
         if (!titulo.value.trim()) { err.textContent = 'Escribí un título.'; return; }
         if (elegidos.length < 2) { err.textContent = 'Elegí al menos dos participantes.'; return; }
-        var pat = patron.valor();
+        var pat = revisar.valor() ? 'revision' : patron.valor();
         var cuerpo = { titulo: titulo.value.trim(), tema: tema.value.trim() || undefined, agentes: elegidos, rondas: +rondas.valor(), documentos: docsSel.length ? docsSel : undefined, patron: pat };
         if (pat === 'lider') {
           if (!lider) { err.textContent = 'Elegí quién lidera.'; return; }
