@@ -41,10 +41,13 @@ export class Store {
     Store.migrarEsquema(this.db)
   }
 
-  /** v2: `sesiones.oficina` ('' = chats anteriores a las oficinas). v3: `costos`. */
+  /** v2: `sesiones.oficina` ('' = chats anteriores a las oficinas). v3: `costos`. v4: `sesiones.ctx_usados` y
+   *  `ctx_ventana` (cuánto contexto ocupa la charla, del último turno; 0 = no se sabe). */
   private static migrarEsquema(db: SQLiteDB) {
     const cols = db.query('PRAGMA table_info(sesiones)').map((f) => txt(f.name))
     if (!cols.includes('oficina')) db.exec("ALTER TABLE sesiones ADD COLUMN oficina TEXT NOT NULL DEFAULT ''")
+    if (!cols.includes('ctx_usados')) db.exec('ALTER TABLE sesiones ADD COLUMN ctx_usados INTEGER NOT NULL DEFAULT 0')
+    if (!cols.includes('ctx_ventana')) db.exec('ALTER TABLE sesiones ADD COLUMN ctx_ventana INTEGER NOT NULL DEFAULT 0')
     db.exec('CREATE INDEX IF NOT EXISTS sesiones_oficina ON sesiones(oficina, agente)')
     db.exec(`
     CREATE TABLE IF NOT EXISTS costos (
@@ -145,6 +148,20 @@ export class Store {
   }
 
   marcarActiva(sid: string) { this.db.run('UPDATE sesiones SET activa=1 WHERE id=?', [sid]) }
+
+  /** Guarda cuánto contexto ocupa la charla tras su último turno. Sin ventana nueva, se queda la anterior. */
+  fijarContexto(sid: string, u: { usados: number; ventana?: number }) {
+    this.db.run('UPDATE sesiones SET ctx_usados=?, ctx_ventana=COALESCE(NULLIF(?,0),ctx_ventana) WHERE id=?', [Math.round(u.usados), Math.round(u.ventana ?? 0), sid])
+  }
+
+  /** Cuánto contexto ocupa la charla (lo del último turno), o undefined si todavía no se sabe. */
+  contexto(sid: string): { usados: number; ventana?: number } | undefined {
+    const f = this.db.query('SELECT ctx_usados, ctx_ventana FROM sesiones WHERE id=?', [sid])[0]
+    const usados = num(f?.ctx_usados)
+    if (!(usados > 0)) return undefined
+    const ventana = num(f?.ctx_ventana)
+    return ventana > 0 ? { usados, ventana } : { usados }
+  }
 
   /** Sesión más reciente del agente que tenga mensajes, o undefined. */
   ultimaSesion(agente: string, oficina = ''): string | undefined {

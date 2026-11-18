@@ -16,7 +16,11 @@ export type EventoClaude =
   | { tipo: 'archivo'; ruta: string }
   /** Un bloque de texto de la respuesta. `contenido` solo lo lee el chat en vivo; nunca va a /api/actividad. */
   | { tipo: 'texto'; contenido?: string }
-  | { tipo: 'resultado'; costo?: number; error: boolean; tokens?: Tokens }
+  | { tipo: 'resultado'; costo?: number; error: boolean; tokens?: Tokens; ventanas?: Record<string, number> }
+  /** Tamaño del contexto tras una llamada al modelo del agente principal (no de subagentes): lo que entró como entrada
+   *  (sin caché + leído + escrito en la caché). Es lo que ocupa la charla, a diferencia de `resultado.tokens`, que suma
+   *  todas las llamadas del turno. */
+  | { tipo: 'contexto'; usados: number; modelo?: string }
 
 /** Recibe los eventos de una corrida, en orden. */
 export type Observador = (e: EventoClaude) => void
@@ -39,7 +43,8 @@ export function parsearEvento(linea: string): EventoClaude[] {
     case 'assistant': {
       const msg = esObjeto(o.message) ? o.message : {}
       const bloques = Array.isArray(msg.content) ? msg.content.filter(esObjeto) : []
-      return bloques.flatMap((b): EventoClaude[] => {
+      const ctx = o.parent_tool_use_id == null ? contextoDe(msg) : undefined
+      const evs = bloques.flatMap((b): EventoClaude[] => {
         if (b.type === 'thinking') return [{ tipo: 'pensando' }]
         if (b.type === 'text') return [typeof b.text === 'string' && b.text !== '' ? { tipo: 'texto', contenido: b.text } : { tipo: 'texto' }]
         if (b.type !== 'tool_use' || typeof b.name !== 'string') return []
@@ -52,9 +57,14 @@ export function parsearEvento(linea: string): EventoClaude[] {
         if (escritoras.has(b.name) && p !== '') out.push({ tipo: 'archivo', ruta: p })
         return out
       })
+      return ctx ? [ctx, ...evs] : evs
     }
-    case 'result':
-      return [{ tipo: 'resultado', costo: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : undefined, error: o.is_error === true, tokens: tokensDe(o.usage) }]
+    case 'result': {
+      const r: EventoClaude = { tipo: 'resultado', costo: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : undefined, error: o.is_error === true, tokens: tokensDe(o.usage) }
+      const v = ventanasDe(o.modelUsage)
+      if (v) r.ventanas = v
+      return [r]
+    }
     default:
       return []
   }
@@ -137,6 +147,50 @@ function tokensDe(u: unknown): Tokens | undefined {
   if (!esObjeto(u)) return undefined
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
   return { entrada: n(u.input_tokens), cacheLeida: n(u.cache_read_input_tokens), cacheEscrita: n(u.cache_creation_input_tokens), salida: n(u.output_tokens) }
+}
+
+/** `usage` de un mensaje `assistant` → tokens de entrada que ocupó (undefined si no lo trae o es 0). */
+function contextoDe(msg: Record<string, unknown>): EventoClaude | undefined {
+  const t = tokensDe(msg.usage)
+  if (!t) return undefined
+  const usados = t.entrada + t.cacheLeida + t.cacheEscrita
+  if (!(usados > 0)) return undefined
+  return typeof msg.model === 'string' && msg.model !== '' ? { tipo: 'contexto', usados, modelo: msg.model } : { tipo: 'contexto', usados }
+}
+
+/** `modelUsage` del `result` → ventana de contexto de cada modelo (`contextWindow`). */
+function ventanasDe(mu: unknown): Record<string, number> | undefined {
+  if (!esObjeto(mu)) return undefined
+  const out: Record<string, number> = {}
+  for (const [m, u] of Object.entries(mu)) if (esObjeto(u) && typeof u.contextWindow === 'number' && u.contextWindow > 0) out[m] = u.contextWindow
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/** Cuánto ocupa una charla: el contexto de la última llamada del agente y la ventana de su modelo. */
+export type UsoContexto = { usados: number; ventana?: number }
+
+/** Junta el último `contexto` del turno y, con el `resultado`, la ventana del modelo que lo usó. */
+export class CajaContexto {
+  private usados?: number
+  private modelo?: string
+  private ventana?: number
+  get valor(): UsoContexto | undefined {
+    if (this.usados === undefined) return undefined
+    return this.ventana !== undefined ? { usados: this.usados, ventana: this.ventana } : { usados: this.usados }
+  }
+  observador(siguiente?: Observador): Observador {
+    return (e) => {
+      if (e.tipo === 'contexto') {
+        this.usados = e.usados
+        if (e.modelo !== undefined) this.modelo = e.modelo
+      } else if (e.tipo === 'resultado' && e.ventanas) {
+        const vs = Object.values(e.ventanas)
+        // la del modelo del agente; si no aparece con ese nombre, la más grande (los subagentes suelen ser modelos chicos)
+        this.ventana = (this.modelo !== undefined ? e.ventanas[this.modelo] : undefined) ?? Math.max(...vs)
+      }
+      siguiente?.(e)
+    }
+  }
 }
 
 export class CajaCosto {

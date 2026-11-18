@@ -239,6 +239,13 @@
     });
     return fila;
   }
+  /* chip de contexto de la charla (contexto.js): el desglose se pide con lo elegido en la charla (modelo, esfuerzo…) */
+  function chipContexto(a) {
+    return App.ChipContexto.chip(a.id, function () {
+      var s = sesiones[a.id];
+      return s ? Object.assign({ agent: a.id, session: s }, eleccionDe(s)) : null;
+    });
+  }
   function pintar() {
     var a = App.agente(actual); if (!a) { cerrar(); return; }
     var d = App.depto(a.departamento);
@@ -261,7 +268,7 @@
             h('button.btn.fantasma.icono', { title: 'Ver dónde está ' + a.nombre + ' en la oficina', onclick: function () {
               if (App.Oficina3D.marcar) App.Oficina3D.marcar(a.id); else if (App.Oficina3D.enfocarAgente) App.Oficina3D.enfocarAgente(a.id); } }, App.icono('pin')),
             /* cerrar no va acá: queda arriba a la derecha del todo, en la cabecera de la columna del costado */)),
-        h('div.charla-barra', h('b.charla-tit', App.Nav.tituloCharla ? App.Nav.tituloCharla(a.id) : ''),
+        h('div.charla-barra', h('b.charla-tit', App.Nav.tituloCharla ? App.Nav.tituloCharla(a.id) : ''), chipContexto(a),
           h('button.btn.chico.fantasma.sacar-tareas', { title: 'Convertir esta charla en tareas (para ' + a.nombre + ' o para otros)', onclick: function () { App.ChatTareas.abrir(a, sesiones[a.id]); } }, App.icono('reloj'), 'Sacar tareas')),
         cuerpo, pie);
       der.classList.add('con-relacionado');
@@ -280,7 +287,7 @@
           h('button.agente-toque', { title: 'Detalles de ' + a.nombre + ': charlas, tareas, archivos, notas, perfil y permisos', onclick: verDet },
             App.retratoImg(a, 'retrato', 120),
             h('span.der-tit', h('span.agente-nombre', h('h2', a.nombre), App.icono('flecha')), sub, pista)),
-          h('div.der-acciones',
+          h('div.der-acciones', chipContexto(a),
             h('button.btn.chico.sacar-tareas', { title: 'Convertir esta charla en tareas (para ' + a.nombre + ' o para otros)', onclick: function () { App.ChatTareas.abrir(a, sesiones[a.id]); } }, App.icono('reloj'), 'Sacar tareas')),
           cerrarBtn),
         filaCuentas(a),
@@ -292,7 +299,7 @@
             App.retratoImg(a, 'retrato', 120), h('span.agente-lapiz', App.icono('lapiz'))),
           h('div.der-tit', h('h2', a.nombre), sub),
           /* con texto: un ícono solo no dice qué hace. La charla actual no se pierde: queda en la lista de Charlas */
-          h('div.der-acciones',
+          h('div.der-acciones', chipContexto(a),
             h('button.btn.chico.sacar-tareas', { title: 'Convertir esta charla en tareas (para ' + a.nombre + ' o para otros)', onclick: function () { App.ChatTareas.abrir(a, sesiones[a.id]); } }, App.icono('reloj'), 'Sacar tareas'),
             h('button.btn.chico', { title: 'Empezar de cero con ' + a.nombre + '. Esta charla queda guardada en Charlas.', onclick: function () { nueva(a.id); } }, App.icono('mas'), 'Nueva charla')),
           cerrarBtn),
@@ -394,7 +401,7 @@
         sesiones[a.id] = App.uuid();
         guardarEleccion(sesiones[a.id], eleccionDe('nueva:' + a.id)); guardarEleccion('nueva:' + a.id, null);
       }
-      var id = a.id, nombres = adj.nombres(), leidos = [], eleccion = selector.valor();
+      var id = a.id, nombres = adj.nombres(), leidos = [], eleccion = selector.valor(), cuerpoSesion = sesiones[a.id];
       ocupado(id, true);
       delete vivos[id];
       seguirVivo(id);
@@ -412,6 +419,7 @@
       }).then(function (r) {
         if (App.Actividad) App.Actividad.ya();
         (chats[id] = chats[id] || []).push({ r: 'a', t: r.reply || '(sin respuesta)', pasos: r.pasos });
+        if (r.contexto && sesiones[id] === cuerpoSesion) App.ChipContexto.fijar(id, r.contexto);
         adj.guardarEnBiblioteca(leidos);
       }).catch(function (e) {
         (chats[id] = chats[id] || []).push({ r: 'a', t: 'No pude responder: ' + e.message, e: true });
@@ -429,6 +437,7 @@
       api.get('/api/historial', { agent: a.id }).then(function (r) {
         if (r.session) sesiones[a.id] = r.session;
         chats[a.id] = (r.msgs || []).map(function (m) { return { r: m.r, t: m.t, e: !!m.e }; });
+        App.ChipContexto.fijar(a.id, r.contexto);
         if (App.Nav) App.Nav.pintarLista();    // ya se sabe qué charla es: se marca en la lista
         return cargarConsultas(a.id).then(function () { if (actual === a.id && pestana === 'chat') render(); });
       }).catch(function () { chats[a.id] = []; render(); });
@@ -903,6 +912,7 @@
   function nueva(id) {
     if (!App.agente(id)) return;
     sesiones[id] = App.uuid(); chats[id] = []; delete borradores[id];
+    App.ChipContexto.fijar(id, null);
     ladoMovil = false;
     sesionFija = sesiones[id];
     if (actual === id && App.modoDerecho() === 'agente') { pestana = 'chat'; pintar(); App.abrirDerecho('agente'); }
@@ -914,6 +924,7 @@
     api.get('/api/historial', { agent: a.id, session: sid }).then(function (r) {
       sesiones[a.id] = sid;
       chats[a.id] = (r.msgs || []).map(function (m) { return { r: m.r, t: m.t, e: !!m.e }; });
+      App.ChipContexto.fijar(a.id, r.contexto);
       pestana = 'chat';
       pintar();
       if (App.Nav) App.Nav.pintarLista();

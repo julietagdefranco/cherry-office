@@ -141,6 +141,31 @@ select.campo { padding-right: 26px; }
 .uso-nota { font-size: 12px; color: var(--tenue); margin-top: 4px; }
 .uso-nota.mal { color: var(--aviso); }
 .uso-pie { font-size: 11.5px; color: var(--tenue); margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--linea); }
+/* chip de contexto de la charla (contexto.js) */
+.ctx-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 1px solid var(--linea); border-radius: 999px;
+  background: var(--panel); color: var(--suave); font-size: 11.5px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.ctx-chip:hover { border-color: var(--linea-fuerte); color: var(--texto); }
+.ctx-chip[hidden] { display: none; }
+.ctx-barra { width: 26px; height: 4px; border-radius: 2px; background: var(--linea); overflow: hidden; }
+.ctx-barra i { display: block; height: 100%; background: var(--suave); }
+.ctx-chip.cerca { color: var(--aviso); border-color: color-mix(in srgb, var(--aviso) 45%, transparent); }
+.ctx-chip.cerca .ctx-barra i { background: var(--aviso); }
+.ctx-chip.limite { color: var(--peligro); border-color: color-mix(in srgb, var(--peligro) 45%, transparent); }
+.ctx-chip.limite .ctx-barra i { background: var(--peligro); }
+.ctx-pop { width: 260px; padding: 12px 14px; }
+.ctx-tit { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.ctx-tit span { font-size: 12px; color: var(--suave); font-variant-numeric: tabular-nums; }
+.ctx-apilada { display: flex; height: 6px; border-radius: 3px; background: var(--linea); overflow: hidden; }
+.ctx-apilada i { display: block; height: 100%; transition: width .4s; }
+.ctx-filas { margin-top: 10px; }
+.ctx-fila { display: grid; grid-template-columns: 10px 1fr 44px 40px; gap: 8px; align-items: center; font-size: 12.5px; padding: 2px 0; }
+.ctx-fila.libre { color: var(--tenue); }
+.ctx-punto { width: 8px; height: 8px; border-radius: 2px; border: 1px solid var(--linea-fuerte); box-sizing: border-box; }
+.ctx-fila:not(.libre) .ctx-punto { border: 0; }
+.ctx-n { text-align: right; color: var(--suave); font-variant-numeric: tabular-nums; }
+.ctx-pop .vacio.cargando { padding: 12px 0 4px; }
+.ctx-error { font-size: 12px; color: var(--peligro); margin-top: 10px; }
+.ctx-pie { font-size: 11.5px; color: var(--tenue); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--linea); }
 .pista { position: absolute; left: 14px; bottom: 12px; font-size: 11px; color: var(--tenue); z-index: 5; pointer-events: none; }
 .aviso-reunion { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 6px 0 14px;
   background: var(--panel); border: 1px solid var(--linea); border-radius: 17px; box-shadow: var(--sombra); font-weight: 500; }

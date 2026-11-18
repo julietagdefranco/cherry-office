@@ -434,6 +434,24 @@ export class ClaudeRunner {
     return { texto: r.json === undefined ? r.res.stdout.trim() : '', denegados }
   }
 
+  /** `/context` de una charla: el informe en markdown de Claude Code (modelo, total y uso por categoría). Es un comando
+   *  local (no llama a la API ni cuesta). Va con los mismos argumentos del chat, para que cuente las mismas herramientas y
+   *  servidores MCP, y con `--no-session-persistence`: sin eso, `--resume` le agrega el comando y su salida a la sesión, y
+   *  el agente los cargaría en el contexto del próximo turno. No toma el carril: solo lee la sesión. */
+  async contextoChat(p: { agente: string; sid: string; carpeta?: string; armar: ArmarArgumentos; envExtra?: Record<string, string> }): Promise<string> {
+    this.verificar(p.carpeta)
+    const a = p.armar({ agente: p.agente, mensaje: '/context', sid: p.sid, flag: '--resume' })
+    const fin = a.lastIndexOf('--')
+    const args = fin >= 0 ? [...a.slice(0, fin), '--no-session-persistence', ...a.slice(fin)] : [...a, '--no-session-persistence']
+    const res = await this.lanzar(args, { timeout: 60, cwd: p.carpeta, envExtra: p.envExtra ?? {} })
+    if (res.timedOut) throw new ClaudeError('timeout')
+    if (this.cerrado) throw new ClaudeError('cerrando')
+    const c = corrida(res)
+    if (c.error !== undefined) throw ClaudeError.clasificar(c.error)
+    const r = c.json?.result
+    return typeof r === 'string' ? r : ''
+  }
+
   // MARK: auth
 
   /** `claude auth status`: true = sesión iniciada, false = no, undefined = no se pudo saber. */

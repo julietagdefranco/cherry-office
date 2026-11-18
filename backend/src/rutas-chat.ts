@@ -17,7 +17,8 @@ import { no405, type Resp, type RutaNucleo } from './router.js'
 import type { InfoClaude } from './rutas-oficinas.js'
 import type { Store } from './store.js'
 import path from 'node:path'
-import { CajaArchivos, CajaCosto, CajaVivo, type PasoVivo } from './stream.js'
+import { CajaArchivos, CajaContexto, CajaCosto, CajaVivo, type PasoVivo } from './stream.js'
+import { parsearContexto } from './contexto.js'
 import { enCarpetaTrabajo } from './trabajo.js'
 import type { Oficina } from './oficina.js'
 import { largo, uuidValido } from './validar.js'
@@ -120,7 +121,8 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const sidRaw = q.session
     if (sidRaw === undefined) {
       const ult = store.ultimaSesion(agente, act.carpeta)
-      return [200, { session: ult ?? null, msgs: lista(ult ? store.mensajes(ult) : []) }]
+      const c = ult ? store.contexto(ult) : undefined
+      return [200, { session: ult ?? null, msgs: lista(ult ? store.mensajes(ult) : []), ...(c ? { contexto: c } : {}) }]
     }
     if (!uuidValido(sidRaw)) return invalido
     const sid = sidRaw.toLowerCase()
@@ -128,7 +130,8 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (dueno !== undefined && dueno !== agente) return [200, { msgs: [] }]
     const of = store.oficinaDe(sid)
     if (of !== undefined && of !== act.carpeta) return [200, { msgs: [] }]
-    return [200, { msgs: lista(store.mensajes(sid)) }]
+    const c = store.contexto(sid)
+    return [200, { msgs: lista(store.mensajes(sid)), ...(c ? { contexto: c } : {}) }]
   }
 
   /** `GET /api/sesiones?agent=`: las charlas guardadas de la oficina (todas o las de un agente), la más reciente
@@ -210,6 +213,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const caja = new CajaCosto()
     const escritos = new CajaArchivos()
     const enVivo = new CajaVivo()
+    const uso = new CajaContexto()
     const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: d.catalogo?.(), config })
     // consultas a colegas: el token vive lo que dura este chat. Si el servidor MCP no arrancó, el chat sale igual.
     const mcp = d.mcp?.()
@@ -230,7 +234,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           store.agregar(sid, 'u', mensaje)
           const activa = store.estaActiva(sid)
           // el cartel: fijo arriba («Respondiéndote») y abajo lo que va haciendo en vivo (sin IA)
-          const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: 'Respondiéndote', extra: caja.observador(escritos.observador(enVivo.observador())) },
+          const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: 'Respondiéndote', extra: caja.observador(escritos.observador(uso.observador(enVivo.observador()))) },
             (obs) => runner.ejecutarChat({ agente, mensaje, sid, activa, carpeta, obs, envExtra, armar: (p) => argumentos(config, ctx, p) }))
           store.marcarActiva(sid)
           const guardado = texto === '' ? '(sin respuesta)' : texto
@@ -240,6 +244,12 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           // un chat que dejó archivos en archivos/entregables/ cuenta como entrega para revisar
           const archivos = ArchivosEntrega.enEntregables(ArchivosEntrega.relativos(escritos.valor, carpeta))
           const r: Obj = { reply: texto }
+          // cuánto ocupa ahora la charla (el chip de contexto); si claude no dijo la ventana, queda la que ya se sabía
+          if (uso.valor) {
+            try { store.fijarContexto(sid, uso.valor) } catch {}
+            const c = store.contexto(sid)
+            if (c) r.contexto = c
+          }
           // los pasos (textos intermedios, herramientas y archivos) para mostrarlos plegados arriba de la respuesta; los
           // textos después de la última herramienta son la respuesta misma (reply), así que no se repiten
           const todos = enVivo.valor
@@ -276,6 +286,52 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     log.info(`chat agente=${agente} sid=${sid.slice(0, 8)} estado=${resultado[0]} seg=${((Date.now() - t0) / 1000).toFixed(1)}`
       + (ctx.modelo !== undefined ? ` modelo=${ctx.modelo}` : '') + (ctx.esfuerzo !== undefined ? ` esfuerzo=${ctx.esfuerzo}` : '') + caja.tokensLog())
     return resultado
+  }
+
+  /** `POST /api/chat/contexto` `{agent, session, modelo?, esfuerzo?, …}` (lo mismo que se elige en la charla): el
+   *  desglose de `/context` de esa charla → `{modelo, usados, ventana, grupos:{mensajes, herramientas, instrucciones,
+   *  skills, otros}, libre, reserva}`. Corre claude con los argumentos del chat pero sin llamar a la API (~1 s). */
+  async function desgloseContexto(body?: Buffer): Promise<Resp> {
+    const act = oficinas.requerirActiva()
+    const b = objeto(body)
+    if (typeof b.agent !== 'string' || typeof b.session !== 'string' || !uuidValido(b.session)) return invalido
+    const agente = b.agent
+    const def = act.oficina.agentes.find((a) => a.id === agente)
+    if (!def) return invalido
+    const sid = b.session.toLowerCase()
+    if (store.agenteDe(sid) !== agente || store.oficinaDe(sid) !== act.carpeta) return [404, { error: 'Esa charla no está.' }]
+    if (!store.estaActiva(sid)) return [409, { error: 'La charla todavía no empezó.' }]
+    let eleccion: EleccionCharla
+    try {
+      eleccion = eleccionCharla(b)
+    } catch (e) {
+      if (e instanceof ErrorAPI) return [e.status, { error: e.mensaje }]
+      throw e
+    }
+    const carpeta = act.carpeta
+    const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: d.catalogo?.(), config })
+    const mcp = d.mcp?.()
+    const mcpUrl = mcp ? await mcp.url() : undefined
+    if (mcpUrl !== undefined) ctx.mcpUrl = mcpUrl
+    ctx.preguntar = true
+    aplicarEleccion(ctx, eleccion)
+    const envExtra: Record<string, string> = { ...entorno(ctx) }
+    if (mcpUrl !== undefined && mcp) envExtra[variableTokenMCP] = mcp.emitir({ oficina: carpeta, agente, sid, perfil: ctx.perfilMCP, interactivo: true })
+    try {
+      const md = await runner.contextoChat({ agente, sid, carpeta, envExtra, armar: (p) => argumentos(config, ctx, p) })
+      const r = parsearContexto(md)
+      if (!r) {
+        log.warn(`contexto agente=${agente} sid=${sid.slice(0, 8)}: no se pudo leer el informe`)
+        return [502, { error: 'Claude Code no devolvió el uso del contexto.' }]
+      }
+      return [200, r]
+    } catch (e) {
+      if (e instanceof ClaudeError) return [e.status, { error: e.mensaje }]
+      throw e
+    } finally {
+      const tok = envExtra[variableTokenMCP]
+      if (tok !== undefined) mcp?.revocar(tok)
+    }
   }
 
   /** `POST /api/permisos/<id>` `{decision: una_vez|siempre|rechazar}`: responde un pedido de permiso de un chat o de una
@@ -316,6 +372,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (seccion === 'sesiones' && n === 2) return method === 'GET' ? sesiones(query) : no405
     if (seccion === 'chat' && n === 2) return method === 'POST' ? chat(body) : no405
     if (seccion === 'chat' && n === 3 && a2 === 'vivo') return method === 'GET' ? vivo(query) : no405
+    if (seccion === 'chat' && n === 3 && a2 === 'contexto') return method === 'POST' ? desgloseContexto(body) : no405
     if (seccion === 'actividad' && n === 2) {
       if (method !== 'GET') return no405
       const act = oficinas.activa()

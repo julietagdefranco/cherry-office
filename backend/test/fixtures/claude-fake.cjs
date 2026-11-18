@@ -228,6 +228,29 @@ async function main() {
     fin()
     return 0
   }
+  // `/context` de Claude Code: comando local, devuelve el informe en markdown (como el claude real)
+  if (m === '/context') {
+    const md = '## Context Usage\n\n**Model:** claude-opus-5-5  \n**Tokens:** 150.2k / 1m (15%)\n\n### Estimated usage by category\n\n'
+      + '| Category | Tokens | Percentage |\n|----------|--------|------------|\n| System prompt | 10.5k | 1.1% |\n| System tools | 17.3k | 1.7% |\n'
+      + '| MCP tools | 18.8k | 1.9% |\n| MCP server instructions | 5.1k | 0.5% |\n| MCP tools (deferred) | 79.3k | 7.9% |\n| Custom agents | 217 | 0.0% |\n'
+      + '| Memory files | 428 | 0.0% |\n| Skills | 10k | 1.0% |\n| Messages | 87.9k | 8.8% |\n| Cosa nueva | 1.2k | 0.1% |\n| Free space | 816.8k | 81.7% |\n'
+      + '| Autocompact buffer | 33k | 3.3% |\n\n### MCP Tools\n\n| Tool | Server | Tokens |\n|------|--------|--------|\n| mcp__x__y | x | 1.6k |\n'
+    salida(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: md, local_command: 'context', total_cost_usd: 0, num_turns: 0 }))
+    fin()
+    return 0
+  }
+  // tamaño del contexto: `usage` en cada mensaje del agente (el último manda); los de subagentes no cuentan
+  if (m.includes('CTX')) {
+    const u = (n) => ({ input_tokens: 3, cache_read_input_tokens: n, cache_creation_input_tokens: 1000, output_tokens: 50 })
+    salida(JSON.stringify({ type: 'system', subtype: 'init', session_id: `s-${agent}` }))
+    salida(JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { model: 'claude-opus-5-5', usage: u(20000), content: [{ type: 'tool_use', name: 'Task', input: { description: 'x' } }] } }))
+    salida(JSON.stringify({ type: 'assistant', parent_tool_use_id: 'toolu_1', message: { model: 'claude-haiku-5-5', usage: u(90000), content: [{ type: 'text', text: 'sub' }] } }))
+    salida(JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { model: 'claude-opus-5-5', usage: u(41000), content: [{ type: 'text', text: 'listo' }] } }))
+    salida(JSON.stringify({ type: 'result', subtype: 'success', result: `ctx ${agent}`, is_error: false, total_cost_usd: 0.05,
+      usage: u(151000), modelUsage: { 'claude-opus-5-5': { contextWindow: 1000000 }, 'claude-haiku-5-5': { contextWindow: 200000 } } }))
+    fin()
+    return 0
+  }
   if (m.includes('STREAM')) {
     salida('{"type":"system","subtype":"hook_started","hook_name":"x"}')
     salida(JSON.stringify({ type: 'system', subtype: 'init', session_id: `s-${agent}` }))
