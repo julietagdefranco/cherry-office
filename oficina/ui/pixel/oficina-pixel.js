@@ -12,7 +12,7 @@ App.OficinaPixel = (function () {
   /* ---------- estado del módulo ---------- */
   var cont = null, vista = null, vc = null, capa = null, mundo = null, g = null, W = 800, H = 600, FX = 20, FY = 14;
   var cbAgente = function () {}, cbLugar = function () {}, cbPasar = null;
-  var salas = [], items = [], EST = null, figs = {}, orden = [], puestos = {}, sillasReu = [], spotsOcio = [], recepcion = null, despacho = null, bandeja = null;
+  var salas = [], items = [], EST = null, figs = {}, orden = [], puestos = {}, sillasReu = [], spotsOcio = [], recepcion = null, despacho = null, bandeja = null, recepcionYo = null, cafeYo = null;
   var trabajo = {}, faroDe = {}, ocupados = {}, elegido = null, reunionActual = { ids: [], quien: null }, muroDatos = { entregas: [], sinRevisar: 0 };
   var piezas = [], etiquetas = [], etqSalas = [], etqBandeja = null, hover = null, pausado = false, oficinaNombre = '', deptoColor = {};
   var FASE = null, LUZ = 0, T = 0, ultimoTick = 0, ultimoRevisar = 0, ultimo = 0, raf = 0, dormido = 0, sucio = true;
@@ -105,7 +105,7 @@ App.OficinaPixel = (function () {
 
   /* ---------- muebles de cada sala ---------- */
   function amueblar(perfil) {
-    items = []; puestos = {}; sillasReu = []; spotsOcio = []; recepcion = null; despacho = null; bandeja = null;
+    items = []; puestos = {}; sillasReu = []; spotsOcio = []; recepcion = null; despacho = null; bandeja = null; recepcionYo = null; cafeYo = null;
     var filas = {}; salas.forEach(function (s) { (filas[s.fila] = filas[s.fila] || []).push(s); });
     Object.keys(filas).forEach(function (k) {
       var f = filas[k], y0 = f[0].r[1], i = +k;
@@ -139,9 +139,10 @@ App.OficinaPixel = (function () {
       atras: function () { M.monitor(cx - .46, y + .3, { mira: '-y', estado: estadoMonitor(a1 && a1.id), t: T, luz: LUZ, seed: x * 3 }); M.tecladoMouse(cx - .45, y + .1, { mira: '-y' }); if (taza) M.taza(cx + .3, y + .2, { t: T }); },
       adelante: function () { M.monitor(cx + .04, y + h.d - .42, { mira: '+y', estado: estadoMonitor(a2 && a2.id), t: T, luz: LUZ, seed: x * 5 }); M.tecladoMouse(cx + .05, y + h.d - .24, { mira: '+y' }); if (!taza) M.papeles(cx - .4, y + h.d - .3, {}); }
     });
+    var hueco = x + h.w + .32;   // el lado de atrás se alcanza por el pasillo entre islas, no cruzando el escritorio
     [[{ x: cx - .25, y: y - .38 }, '+y', a1], [{ x: cx + .25, y: y + h.d + .38 }, '-y', a2]].forEach(function (q) {
       var p = q[0], mira = q[1], a = q[2]; silla(p, mira);
-      if (a) puestos[a.id] = { x: p.x, y: p.y, mira: mira, sala: s, aisle: { x: p.x, y: mira === '+y' ? p.y - .6 : p.y + .6 } };
+      if (a) puestos[a.id] = { x: p.x, y: p.y, mira: mira, sala: s, aisle: mira === '+y' ? { x: hueco, y: p.y - .6 } : { x: p.x, y: p.y + .6 } };
     });
   }
   function salaReunion(s) {
@@ -159,7 +160,7 @@ App.OficinaPixel = (function () {
     var x0 = s.r[0], y0 = s.r[1];
     put('escritorio', x0 + 1.2, y0 + 2.4, { mira: '+y' });
     var p = { x: x0 + 1.75, y: y0 + 2.0 }; silla(p, '+y');
-    despacho = { x: p.x, y: p.y, mira: '+y', sala: s, perfil: perfil };
+    despacho = { x: p.x, y: p.y, mira: '+y', sala: s, perfil: perfil, aisle: { x: x0 + 3.0, y: p.y } };   // entra y sale por detrás del escritorio, sin pisar las sillas de visita
     bandeja = { x: x0 + 1.95, y: y0 + 2.55, sala: s };
     at(50, function (t) { M.notebook(x0 + 1.35, y0 + 2.5, { mira: '-y' }); dibujarBandeja(); M.lamparaEscritorio(x0 + 1.25, y0 + 2.75, { luz: LUZ }); }, [x0 + 1.2, y0 + 2.4, x0 + 2.3, y0 + 3.0, 16]);
     put('sillaVisita', x0 + 1.5, y0 + 3.4, { mira: '-y' }); put('sillaVisita', x0 + 2.2, y0 + 3.4, { mira: '-y' });
@@ -186,6 +187,7 @@ App.OficinaPixel = (function () {
     spotsOcio.push({ x: x0 + .75, y: y0 + 3.6, mira: '+x', sit: true, sofa: true, sala: s }, { x: x0 + .75, y: y0 + 4.1, mira: '+x', sit: true, sofa: true, sala: s },
       { x: x0 + 1.15, y: y0 + 1.6, mira: '+y', sit: false, sala: s }, { x: x0 + 2.9, y: y0 + 1.6, mira: '+y', sit: false, sala: s }, { x: x0 + 2.5, y: y0 + 3.85, mira: '+x', sit: false, sala: s },
       { x: x0 + 4.65, y: y0 + 3.85, mira: '-x', sit: false, sala: s }, { x: x0 + 1.8, y: y0 + 1.15, mira: '-y', sit: false, sala: s });
+    cafeYo = { x: x0 + .85, y: y0 + .8, mira: '-y', sit: false, sala: s };   // vos, frente a la cafetera
   }
   function salaComun(s) {
     var x0 = s.r[0], y0 = s.r[1], w = s.r[2] - x0;
@@ -200,6 +202,7 @@ App.OficinaPixel = (function () {
     put('mostrador', x0 + 1.0, y0 + 2.0, { mira: '+y' }); put('dispensador', x0 + 3.2, y0 + .3, {}); put('planta', x0 + .3, y0 + .35, { tipo: 'alta' });
     put('sillaVisita', x0 + .35, y0 + 3.9, { mira: '+x' }); put('sillaVisita', x0 + .35, y0 + 4.6, { mira: '+x' }); put('planta', x0 + 2.5, y0 + 5.0, { tipo: 'mediana' });
     recepcion = { x: x0 + 1.8, y: y0 + 2.9, sala: s };
+    recepcionYo = { x: x0 + 2.6, y: y0 + 3.3, mira: '-x', sit: false, sala: s };   // vos, recibiendo al lado del mostrador
   }
   /* bandeja de entregas sobre tu escritorio: hojas del color del departamento de quien la hizo */
   function dibujarBandeja() {
@@ -265,7 +268,7 @@ App.OficinaPixel = (function () {
 
   /* ---------- figuras: agentes y vos ---------- */
   function figura(a, home, esYo) {
-    var f = figs[a.id] || { a: a, x: home.x, y: home.y, mira: home.mira, sit: true, modo: 'puesto', ruta: null, k: 0, ocioDesde: 0 };
+    var f = figs[a.id] || { a: a, x: home.x, y: home.y, mira: home.mira, sit: true, modo: 'puesto', ruta: null, k: 0, ocioDesde: 0, destYo: 'puesto' };
     f.a = a; f.home = home; f.yo = !!esYo; f.c = App.Pixel ? App.Pixel.spec(a.avatar, a.id) : null;
     if (f.modo === 'puesto' && !f.ruta) { f.x = home.x; f.y = home.y; f.mira = home.mira; f.sit = true; }
     figs[a.id] = f; return f;
@@ -337,7 +340,7 @@ App.OficinaPixel = (function () {
   function revisar(now) {
     var ids = reunionActual.ids || [];
     Object.keys(figs).forEach(function (id) {
-      var f = figs[id]; if (f.yo) return;
+      var f = figs[id]; if (f.yo) { revisarYo(f, now); return; }
       var i = ids.indexOf(id);
       if (i >= 0 && i < sillasReu.length) { if (f.modo !== 'reunion' || f.spot !== sillasReu[i]) irA(f, Object.assign({ sit: true }, sillasReu[i]), 'reunion'); f.hablar = reunionActual.quien === id; return; }
       f.hablar = false;
@@ -350,10 +353,33 @@ App.OficinaPixel = (function () {
       } else if (f.modo === 'puesto') f.ocioDesde = 0;
     });
   }
+  /* vos: en el despacho, salvo que estés con un agente abierto (visita), armando con el Creador (recepción)
+     o un rato sin tocar nada con la oficina a la vista (café). Las piezas y la bandeja siguen yendo al despacho */
+  var VISITA_MS = 3000, CAFE_MS = 5 * 60000, elegidoDesde = 0, ultimaActividad = performance.now();
+  function visitaDe(f) {
+    var h = f.home; if (!h || !h.aisle) return null;
+    var norte = h.mira === '+y', x = h.x + (norte ? .6 : -.6), y = h.y + (norte ? -.15 : .15);
+    return { x: x, y: y, mira: norte ? '-x' : '+x', sit: false, sala: h.sala, aisle: { x: norte ? h.aisle.x : x, y: h.aisle.y } };
+  }
+  function creadorAbierto() { try { return !!(App.Creador && App.Creador.abierta && App.Creador.abierta()); } catch (e) { return false; } }
+  function destinoYo(now) {
+    if (recepcionYo && creadorAbierto()) return { clave: 'recepcion', modo: 'recepcion', spot: recepcionYo };
+    var a = elegido && figs[elegido];
+    if (a && !a.yo && a.modo !== 'reunion' && now - elegidoDesde >= VISITA_MS) { var v = visitaDe(a); if (v) return { clave: 'visita:' + elegido, modo: 'visita', spot: v }; }
+    if (cafeYo && now - ultimaActividad >= CAFE_MS) return { clave: 'cafe', modo: 'cafe', spot: cafeYo };
+    return null;
+  }
+  function revisarYo(f, now) {
+    if (f.ruta) return;   // termina de llegar y recién ahí cambia de rumbo (si no, cruza paredes en diagonal)
+    var d = destinoYo(now), clave = d ? d.clave : 'puesto';
+    if (clave === f.destYo) return;
+    f.destYo = clave; f.hablar = !!d && d.modo === 'visita';
+    if (d) irA(f, d.spot, d.modo); else irA(f, Object.assign({ sit: true }, f.home), 'puesto');
+  }
   function hashStr(s) { var h = 0; s = String(s); for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
 
   /* ---------- pieza viajera de los flujos ---------- */
-  function lugarDe(id) { if (!id) return recepcion ? { x: recepcion.x, y: recepcion.y, sala: recepcion.sala } : null; var f = figs[id]; var u = f && (ubicacion(f) || f.home); return u ? { x: u.x, y: u.y, sala: u.sala, aisle: u.aisle } : null; }
+  function lugarDe(id) { if (!id) return recepcion ? { x: recepcion.x, y: recepcion.y, sala: recepcion.sala } : null; var f = figs[id]; var u = f && (f.yo ? f.home : (ubicacion(f) || f.home)); return u ? { x: u.x, y: u.y, sala: u.sala, aisle: u.aisle } : null; }
   function pieza(desde, hacia, color) {
     try {
       if (desde === hacia) return false;
@@ -643,6 +669,8 @@ App.OficinaPixel = (function () {
     vc = vista.getContext('2d');
     mundo = document.createElement('canvas'); g = mundo.getContext('2d'); N.g = g;
     conectar();
+    ['pointerdown', 'pointermove', 'keydown', 'wheel'].forEach(function (ev) { window.addEventListener(ev, function () { ultimaActividad = performance.now(); }, { passive: true, capture: true }); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') ultimaActividad = performance.now(); });
     if (window.ResizeObserver) new ResizeObserver(ajustar).observe(cont); else window.addEventListener('resize', ajustar);
     ajustar(); return true;
   }
@@ -668,7 +696,7 @@ App.OficinaPixel = (function () {
   function actividad(mapa) { trabajo = mapa || {}; pintarEtiquetas(); revisar(performance.now()); pedir(); }
   function faros(mapa) { faroDe = mapa || {}; pintarEtiquetas(); revisar(performance.now()); pedir(); }
   function ocupado(id, si) { if (si) ocupados[id] = true; else delete ocupados[id]; pintarEtiquetas(); revisar(performance.now()); pedir(); }
-  function elegir(id) { elegido = id || null; pintarEtiquetas(); revisar(performance.now()); pedir(); }
+  function elegir(id) { if ((id || null) !== elegido) elegidoDesde = performance.now(); elegido = id || null; pintarEtiquetas(); revisar(performance.now()); pedir(); }
   function reunion(ids, quien) { reunionActual = { ids: (ids || []).slice(0, 10), quien: quien || null }; pintarEtiquetas(); revisar(performance.now()); pedir(); }
   function finReunion() { reunion([], null); }
   function muro(entregas, sinRevisar) { muroDatos = { entregas: entregas || [], sinRevisar: sinRevisar || 0 }; pintarEtiquetas(); pedir(); }

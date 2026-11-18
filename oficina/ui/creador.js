@@ -578,5 +578,5 @@ window.App = window.App || {};
     cargarBorrador();
   }
 
-  App.Creador = { abrir: abrir };
+  App.Creador = { abrir: abrir, abierta: function () { return !!(abierta && abierta.el.isConnected); } };
 })();
