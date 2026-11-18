@@ -5,8 +5,9 @@
 //   POST /api/fs/carpetas {padre, nombre}     crea una subcarpeta dentro de $HOME
 //   GET  /api/oficina/archivos?ruta=<rel>     lista de la carpeta de la oficina activa
 //   GET  /api/oficina/archivo?ruta=<rel>      vista previa: {texto} (512 KB) o {base64, mime} (imágenes, 2 MB)
+//   GET  /api/oficina/descarga?ruta=<rel>     el archivo entero para bajarlo: {nombre, mime, base64} (25 MB)
 //   GET  /api/oficina/vista?ruta=<rel>        lista para mostrar (Vista.leer): una página trae adentro su CSS, JS e imágenes
-//   En las tres de la oficina, `ruta` también puede ser absoluta dentro de una carpeta de trabajo (trabajo.ts).
+//   En las de la oficina, `ruta` también puede ser absoluta dentro de una carpeta de trabajo (trabajo.ts).
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Config } from './config.js'
@@ -21,10 +22,19 @@ import { atrapar, no405, type Query, type RespuestaAPI, type SubRouter } from '.
 const maxEntradas = 500
 const maxTexto = 512 * 1024
 const maxImagen = 2 * 1024 * 1024
+const maxDescarga = 25 * 1024 * 1024
 const maxNombre = 120
 const extTexto = new Set(['md', 'markdown', 'txt', 'json', 'csv', 'tsv', 'log', 'html', 'htm', 'svg', 'mmd', 'mermaid', 'xml', 'yaml', 'yml', 'js', 'mjs', 'ts', 'css', 'py', 'sh', 'sql'])
 const extImagen: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
-const rutas = new Set(['/api/fs/carpetas', '/api/oficina/archivos', '/api/oficina/archivo', '/api/oficina/vista'])
+/** mime de lo que se baja: el navegador lo usa para el Blob; lo desconocido va como octet-stream. */
+const mimes: Record<string, string> = {
+  ...extImagen, svg: 'image/svg+xml', pdf: 'application/pdf', zip: 'application/zip', json: 'application/json', csv: 'text/csv', html: 'text/html', htm: 'text/html',
+  md: 'text/markdown', txt: 'text/plain',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
+const rutas = new Set(['/api/fs/carpetas', '/api/oficina/archivos', '/api/oficina/archivo', '/api/oficina/descarga', '/api/oficina/vista'])
 /** En Windows y macOS (por defecto) el sistema de archivos no distingue mayúsculas: la contención tampoco. */
 const sinMayusculas = process.platform === 'win32'
 
@@ -91,6 +101,7 @@ export class ExploradorRouter implements SubRouter {
         if (p === '/api/fs/carpetas' && method === 'POST') return [200, this.crearCarpeta(body)]
         if (p === '/api/oficina/archivos' && method === 'GET') return [200, this.archivos(query)]
         if (p === '/api/oficina/archivo' && method === 'GET') return [200, this.archivo(query)]
+        if (p === '/api/oficina/descarga' && method === 'GET') return [200, this.descarga(query)]
         if (p === '/api/oficina/vista' && method === 'GET') return [200, this.vista(query)]
         return no405
       } catch (e) {
@@ -246,6 +257,23 @@ export class ExploradorRouter implements SubRouter {
     if (!esArchivoRegular(r)) throw new ErrorAPI(400, 'Eso no es un archivo.')
     // en una carpeta de trabajo, la página toma sus recursos de esa carpeta (y nada de afuera)
     return { vista: Vista.leer(trabajo ? base : this.oficinas.requerirActiva().carpeta, partes.join('/')) }
+  }
+
+  /** El archivo entero, para bajarlo desde el navegador (otra compu no puede abrir la ruta local). Mismas reglas de ruta. */
+  private descarga(q: Query): Obj {
+    const { real: r, partes } = this.resolverEnOficina(q.ruta ?? '')
+    if (partes.length === 0) throw new ErrorAPI(400, 'Falta la ruta del archivo.')
+    if (!esArchivoRegular(r)) throw new ErrorAPI(400, 'Eso no es un archivo.')
+    if ((stat(r)?.size ?? 0) > maxDescarga) throw new ErrorAPI(413, 'El archivo es demasiado grande para bajarlo desde acá (máximo 25 MB).')
+    const nombre = partes[partes.length - 1]!
+    const ext = nombre.includes('.') ? nombre.split('.').pop()!.toLowerCase() : ''
+    let datos: Buffer
+    try {
+      datos = fs.readFileSync(r)
+    } catch {
+      throw new ErrorAPI(403, 'No tengo permiso para leer ese archivo.')
+    }
+    return { nombre, mime: mimes[ext] ?? 'application/octet-stream', tam: datos.length, base64: datos.toString('base64') }
   }
 
   private archivo(q: Query): Obj {

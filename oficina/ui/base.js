@@ -129,6 +129,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     dado: 'M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM9 9h.01M15 15h.01M15 9h.01M9 15h.01',
     papelera: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
     importar: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+    bajar: 'M12 4v11M7 10l5 5 5-5M5 20h14',
     enlace: 'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',
     recargar: 'M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5',
     flujo: 'M5 4h4v4H5zM15 16h4v4h-4zM9 6h3a3 3 0 0 1 3 3v7M12 10h0',
@@ -725,6 +726,40 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     return el;
   };
 
+  /* ---------- bajar archivos ----------
+     Los visores muestran el archivo, pero quien usa la oficina desde otra compu no puede abrir la ruta local: «Descargar»
+     lo baja con su nombre. Si se sabe su ruta en la oficina (`rel`), se pide entero a /api/oficina/descarga (la vista
+     previa puede venir cortada); si no, se baja lo que ya está en memoria (texto, base64 o una URL data:/blob:). */
+  function bajarBlob(blob, nombre) {
+    var url = URL.createObjectURL(blob);
+    var a = h('a', { href: url, download: nombre || 'archivo' });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+  function bytesDe(b64) {
+    var bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+  App.bajarContenido = function (c) {
+    bajarBlob(new Blob([bytesDe(c.base64)], { type: c.mime || 'application/octet-stream' }), c.nombre);
+  };
+  /* op: {nombre, rel?, texto?, truncado?, base64?, mime?, url?} */
+  App.descargar = function (op) {
+    var nombre = op.nombre || 'archivo';
+    if (op.rel) return App.api.get('/api/oficina/descarga', { ruta: op.rel }).then(App.bajarContenido).catch(App.fallo);
+    if (op.base64) { App.bajarContenido({ nombre: nombre, mime: op.mime, base64: op.base64 }); return; }
+    if (typeof op.texto === 'string' && !op.truncado) { bajarBlob(new Blob([op.texto], { type: (op.mime || 'text/plain') + ';charset=utf-8' }), nombre); return; }
+    if (op.url) {
+      return fetch(op.url).then(function (r) { if (!r.ok) throw new Error(); return r.blob(); })
+        .then(function (b) { bajarBlob(b, nombre); }, function () { App.aviso('No se pudo bajar el archivo.', true); });
+    }
+    App.aviso('No se pudo bajar el archivo completo.', true);
+  };
+  App.botonDescargar = function (op) {
+    return h('button.btn', { title: 'Bajar el archivo a esta compu', onclick: function () { App.descargar(op); } }, App.icono('bajar'), 'Descargar');
+  };
+
   /* visor de documentos dentro de la app: markdown formateado (con opción de ver el texto) o texto plano */
   App.esMarkdown = function (nombre) { return /\.(md|markdown|mdown|mkd)$/i.test(nombre || ''); };
   App.verDocumento = function (op) {
@@ -745,6 +780,7 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
       h('button.btn', { onclick: function () {
         (navigator.clipboard ? navigator.clipboard.writeText(op.texto || '') : Promise.reject()).then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
       } }, 'Copiar'),
+      App.botonDescargar({ nombre: op.nombre || op.titulo, rel: op.rel, texto: op.texto, truncado: op.truncado, mime: md ? 'text/markdown' : null }),
       App.nativo.hay && op.ruta ? h('button.btn', { onclick: function () { App.nativo.abrir(op.ruta); } }, App.icono('abrir'), 'Abrir con otra app') : null,
       h('button.btn.primario', { onclick: hj.cerrar }, 'Cerrar'));
     pintar();
@@ -777,31 +813,30 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     var CR = App.ChatRico;
     if (App.esMarkdown(nombre)) {
       var t = textoDe(c);
-      if (t !== null) { App.verDocumento({ nombre: nombre, texto: t, ruta: c.ruta, truncado: c.truncado }); return; }
+      if (t !== null) { App.verDocumento({ nombre: nombre, texto: t, ruta: c.ruta, rel: c.rel, truncado: c.truncado }); return; }
     }
-    if (CR && EXT_IMAGEN.test(nombre) && c.base64) { CR.verImagen('data:' + (c.mime || 'image/' + ext) + ';base64,' + c.base64, nombre); return; }
+    if (CR && EXT_IMAGEN.test(nombre) && c.base64) { CR.verImagen('data:' + (c.mime || 'image/' + ext) + ';base64,' + c.base64, nombre, c.rel); return; }
     if (CR && EXT_ARTEFACTO[ext]) {
       // una página de la oficina se vuelve a pedir por su ruta para dibujarla con su CSS, JS e imágenes
       var rel = !c.rel && EXT_ARTEFACTO[ext] === 'html' && c.ruta ? CR.relOficina(c.ruta) : null;
       if (rel) { CR.abrirArchivo(rel); return; }
       var cod = textoDe(c);
-      if (cod !== null) { CR.verArtefacto({ tipo: EXT_ARTEFACTO[ext], codigo: cod, titulo: nombre, ruta: c.ruta }); return; }
+      if (cod !== null) { CR.verArtefacto({ tipo: EXT_ARTEFACTO[ext], codigo: cod, titulo: nombre, nombre: nombre, ruta: c.ruta, rel: c.rel }); return; }
     }
     if (typeof c.texto === 'string' || EXT_TEXTO.test(nombre)) {
       var tx = textoDe(c);
-      if (tx !== null) { App.verDocumento({ nombre: nombre, texto: tx, ruta: c.ruta, truncado: c.truncado, markdown: false }); return; }
+      if (tx !== null) { App.verDocumento({ nombre: nombre, texto: tx, ruta: c.ruta, rel: c.rel, truncado: c.truncado, markdown: false }); return; }
     }
     if (App.nativo.hay && c.ruta) { App.nativo.abrir(c.ruta); return; }
+    // desde el navegador (puede ser otra compu): lo que la app no muestra se baja entero si está en la oficina
+    if (!c.base64 && c.rel) { App.descargar({ nombre: nombre, rel: c.rel }); return; }
     if (!c.base64 && c.sinVista) { App.aviso('La app no sabe mostrar este tipo de archivo. Está en: ' + (c.ruta || ''), true); return; }
     if (!c.base64) { App.aviso('El archivo es muy grande para abrirlo desde el navegador. Está en: ' + (c.ruta || ''), true); return; }
-    var bin = atob(c.base64), arr = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    var url = URL.createObjectURL(new Blob([arr], { type: c.mime || 'application/octet-stream' }));
     // El PDF se ve dentro del navegador; el resto se baja. window.open sobre un blob baja sin nombre (usa el UUID de la
     // URL, sin extensión), así que para bajar usamos un ancla con download, que conserva c.nombre.
-    var verInline = ext === 'pdf';
-    var w = verInline ? window.open(url, '_blank') : null;
-    if (!w) { var a = h('a', { href: url, download: c.nombre || 'archivo' }); document.body.appendChild(a); a.click(); a.remove(); }
+    if (ext !== 'pdf') { App.bajarContenido(c); return; }
+    var url = URL.createObjectURL(new Blob([bytesDe(c.base64)], { type: c.mime || 'application/pdf' }));
+    if (!window.open(url, '_blank')) App.bajarContenido(c);
     setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   };
 

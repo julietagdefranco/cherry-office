@@ -98,6 +98,14 @@
     (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).then(function () { App.aviso('Copiado.'); }, function () { App.aviso('No se pudo copiar.', true); });
   }
 
+  /* nombre para bajar un artefacto del chat que no es un archivo: «Página.html», «Gráfico.svg» */
+  var MIME = { html: 'text/html', svg: 'image/svg+xml', mermaid: 'text/plain' };
+  var EXT_TIPO = { html: '.html', svg: '.svg', mermaid: '.mmd' };
+  function nombreDe(tipo, titulo) {
+    var base = String(titulo || 'artefacto').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim().slice(0, 80) || 'artefacto';
+    return /\.[a-z0-9]{2,8}$/i.test(base) ? base : base + EXT_TIPO[tipo];
+  }
+
   /* visor grande: vista / código, copiar y abrir el archivo con otra app si lo hay */
   /* `op.vista`: lo que se dibuja, si no es el código mismo (una página de la oficina empaquetada con su CSS e imágenes) */
   function verArtefacto(op) {
@@ -115,6 +123,7 @@
       tipo === 'mermaid' ? h('span.ayuda', { style: { flex: 1 } }, 'El diagrama se dibuja con mermaid (necesita internet).') : null,
       h('button.btn', { onclick: function () { pintar(); } }, App.icono('recargar'), 'Recargar'),
       h('button.btn', { onclick: function () { copiar(codigo); } }, 'Copiar'),
+      App.botonDescargar({ nombre: op.nombre || nombreDe(tipo, op.titulo || tituloDe(tipo, codigo)), rel: op.rel, texto: codigo, mime: MIME[tipo] }),
       App.nativo.hay && op.ruta ? h('button.btn', { onclick: function () { App.nativo.abrir(op.ruta); } }, App.icono('abrir'), 'Abrir con otra app') : null,
       h('button.btn.primario', { onclick: hj.cerrar }, 'Cerrar'));
     pintar();
@@ -122,11 +131,11 @@
   }
 
   /* imagen en grande */
-  function verImagen(src, titulo) {
+  function verImagen(src, titulo, rel) {
     var hj = App.visor({ titulo: titulo || 'Imagen', ancho: 1000, alto: '88vh' });
     hj.el.classList.add('hoja-imagen');
     hj.cuerpo.appendChild(h('img.imagen-grande', { src: src, alt: titulo || '' }));
-    App.add(hj.pie, h('button.btn.primario', { onclick: hj.cerrar }, 'Cerrar'));
+    App.add(hj.pie, App.botonDescargar({ nombre: titulo || 'imagen', rel: rel, url: src }), h('button.btn.primario', { onclick: hj.cerrar }, 'Cerrar'));
   }
 
   /* ---------------- archivos de la oficina ---------------- */
@@ -144,7 +153,7 @@
   /* abre un archivo de la oficina con el visor que le toque */
   function abrirArchivo(rel, alFallar) {
     var e = ext(rel), nombre = rel.split('/').pop(), fallo = alFallar || App.fallo;
-    if (EXT_IMAGEN[e]) { cargarImagen(rel).then(function (src) { verImagen(src, nombre); }, fallo); return; }
+    if (EXT_IMAGEN[e]) { cargarImagen(rel).then(function (src) { verImagen(src, nombre, rel); }, fallo); return; }
     // una página se dibuja empaquetada (/api/oficina/vista): el iframe aislado no puede pedir su CSS, JS ni imágenes
     var empaquetada = EXT_ARTEFACTO[e] === 'html'
       ? App.api.get('/api/oficina/vista', { ruta: rel }).then(function (r) { return r.vista; }, function () { return null; })
@@ -155,7 +164,7 @@
         if (c.truncado && !(v && v.html)) App.aviso('El archivo es largo: se muestra solo el principio.', true);
         var avisos = v && v.avisos || [];
         if (avisos.length) App.aviso(avisos.length === 1 ? avisos[0] : avisos[0] + ' (y ' + (avisos.length - 1) + ' más)', true);
-        verArtefacto({ tipo: EXT_ARTEFACTO[e], codigo: c.texto, vista: v && v.html, titulo: nombre, ruta: c.ruta });
+        verArtefacto({ tipo: EXT_ARTEFACTO[e], codigo: c.texto, vista: v && v.html, titulo: nombre, nombre: nombre, ruta: c.ruta, rel: c.rel || rel });
       } else App.abrirContenido(c);
     }).catch(fallo);
   }
@@ -337,6 +346,9 @@
         onkeydown: dentro ? function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); abrirArchivo(rel); } } : null
       }, mini, h('div.archivo-chat-txt', h('div.archivo-chat-nom', p.nombre),
         h('div.archivo-chat-sub', !dentro ? 'fuera de la oficina' : EXT_ARTEFACTO[e] ? 'Clic para ver' : EXT_IMAGEN[e] ? 'Imagen' : (rel.split('/').slice(0, -1).pop() ? 'En ' + rel.split('/').slice(0, -1).pop() : 'En la carpeta de la oficina'))),
+        dentro ? h('button.archivo-chat-bajar', { type: 'button', title: 'Descargar ' + p.nombre, 'aria-label': 'Descargar ' + p.nombre,
+          onclick: function (ev) { ev.stopPropagation(); App.descargar({ nombre: p.nombre, rel: rel }); },
+          onkeydown: function (ev) { ev.stopPropagation(); } }, App.icono('bajar')) : null,
         !dentro && p.ruta ? botonTrabajo(p.ruta, function (r) { p.rel = r; var n = tarjetasArchivos([p]); if (n && tarjeta.parentNode) tarjeta.parentNode.replaceChild(n.firstChild, tarjeta); }) : null);
       return tarjeta;
     }));
