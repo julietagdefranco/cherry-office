@@ -731,11 +731,11 @@ button.adjunto:hover { background: var(--panel-2); }
 }
 
 /* ================= navegación (nav.js): riel · lista de la sección · vista ================= */
-:root { --riel: 68px; --lista: 284px; --ancho-lectura: 760px; --charla: 440px; --escritorio: 720px; --escritorio-ancho: 1320px; }
+:root { --riel: 68px; --lista: 284px; --ancho-lectura: 760px; --charla: 500px; --escritorio: 720px; --escritorio-ancho: 1320px; }
 /* pantallas anchas (2K y más): los paneles se ensanchan para no quedar como una tira alta y angosta.
    --charla: la charla · --escritorio: bandeja, archivos y trabajo · --escritorio-ancho: biblioteca, conocimiento, creador… */
-@media (min-width: 1900px) { :root { --charla: 520px; --escritorio: 860px; } }
-@media (min-width: 2400px) { :root { --charla: 600px; --escritorio: 960px; --escritorio-ancho: 1440px; } }
+@media (min-width: 1900px) { :root { --charla: 580px; --escritorio: 860px; } }
+@media (min-width: 2400px) { :root { --charla: 680px; --escritorio: 960px; --escritorio-ancho: 1440px; } }
 .app { grid-template-columns: var(--riel) minmax(0, 1fr); }
 .riel { grid-column: 1; } .vista { grid-column: 2; container-type: size; }
 /* La ventana (nav.js): lo que abre cada botón del riel, con su lista y su panel. Una sola a la vez; la × la cierra y
@@ -1040,6 +1040,8 @@ button.adjunto:hover { background: var(--panel-2); }
   .app.en-seccion .ventana > .lista-col { width: var(--lista); }
   .app.en-seccion .derecho { width: 440px; max-width: var(--panel-max); border-left: 0; box-shadow: none; }
   .app.en-seccion .derecho[data-modo="vacio"] { width: 360px; }
+  /* la reunión: una sola columna (sin lateral), al mismo ancho que la charla con sus detalles */
+  .app.en-seccion .derecho[data-modo="reunion"] { width: min(calc(var(--charla) + 290px), var(--panel-max)); }
   /* lo de escritorio (biblioteca, archivos, tareas, flujos…) necesita más ancho; la oficina conserva su franja */
   .app.en-seccion:is([data-seccion="bandeja"], [data-seccion="archivos"], [data-seccion="trabajo"]) .derecho:not([data-modo="vacio"]) { width: min(var(--escritorio), calc(var(--panel-max) - 240px)); min-width: min(440px, var(--panel-max)); }
   .app.en-seccion[data-seccion] .derecho.abierto:is([data-modo="biblioteca"], [data-modo="conocimiento"], [data-modo="creador"], [data-modo="flujos-editor"], [data-modo="deptos"], [data-modo="contratar"]) { width: min(max(640px, calc(var(--panel-max) - 400px)), var(--escritorio-ancho)); max-width: var(--panel-max); }
