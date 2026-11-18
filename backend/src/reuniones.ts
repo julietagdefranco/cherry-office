@@ -67,6 +67,9 @@ export const sintesisJSON = (s: SintesisReunion): Obj => ({ resumen: s.resumen, 
 export type ReunionFila = {
   id: string
   oficina: string
+  /** Nombre corto de la reunión (el que se muestra en listas, panel, acta y avisos). */
+  titulo: string
+  /** Descripción larga del tema (opcional). Da contexto a los agentes; puede estar vacía. */
   tema: string
   agentes: string[]
   estado: string
@@ -111,9 +114,16 @@ export const etiquetaPatron: Record<PatronReunion, string> = {
 export type FaseTurno = 'libre' | 'abre' | 'opina' | 'cierra' | 'defiende' | 'critica' | 'revisa'
 export type PasoTurno = { agente: string; fase: FaseTurno }
 
+/** Texto del tema para los prompts de los agentes: el título y, debajo, la descripción si la hay y aporta algo. */
+export function temaReunion(f: { titulo: string; tema?: string }): string {
+  const d = (f.tema ?? '').trim()
+  if (d === '' || d === f.titulo || d.startsWith(f.titulo)) return d === '' ? f.titulo : d
+  return `${f.titulo}\n\n${d}`
+}
+
 // MARK: - SQLite (tablas `reuniones` y `turnos`, con clave de oficina)
 
-const columnasReunion = 'id,oficina,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida,resumen_parcial,modelo,esfuerzo,memoria'
+const columnasReunion = 'id,oficina,titulo,tema,agentes,estado,creada,cerrada,sintesis,error_sintesis,acta,error,documentos,patron,lider,bandos,salida,resumen_parcial,modelo,esfuerzo,memoria'
 
 const opt = (v: SQLValor | undefined) => (v === null || v === undefined ? undefined : txt(v))
 
@@ -135,8 +145,10 @@ function filaReunion(r: Fila): ReunionFila {
       if (esObjeto(b) && Object.values(b).every((x) => Array.isArray(x) && x.every((y) => typeof y === 'string'))) bandos = b as Record<string, string[]>
     } catch {}
   }
+  const tema = txt(r.tema)
   const f: ReunionFila = {
-    id: txt(r.id), oficina: txt(r.oficina), tema: txt(r.tema), agentes: listaTexto(r.agentes), estado: txt(r.estado), creada: num(r.creada),
+    // filas viejas no tienen `titulo`: se deriva del tema (recortado).
+    id: txt(r.id), oficina: txt(r.oficina), titulo: opt(r.titulo) ?? prefijo(tema, 120), tema, agentes: listaTexto(r.agentes), estado: txt(r.estado), creada: num(r.creada),
     documentos: listaTexto(r.documentos), patron: r.patron === null || r.patron === undefined ? 'debate' : txt(r.patron),
   }
   if (r.cerrada !== null && r.cerrada !== undefined) f.cerrada = num(r.cerrada)
@@ -157,6 +169,7 @@ export class ReunionesDB {
     CREATE TABLE IF NOT EXISTS reuniones (
         id TEXT PRIMARY KEY,
         oficina TEXT NOT NULL,
+        titulo TEXT,
         tema TEXT NOT NULL,
         agentes TEXT NOT NULL,
         estado TEXT NOT NULL,
@@ -182,7 +195,7 @@ export class ReunionesDB {
     `)
     const cols = this.db.query('PRAGMA table_info(reuniones)').map((f) => txt(f.name))
     if (!cols.includes('documentos')) this.db.exec('ALTER TABLE reuniones ADD COLUMN documentos TEXT')
-    for (const [c, tipo] of [['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT'], ['resumen_parcial', 'TEXT'], ['modelo', 'TEXT'], ['esfuerzo', 'TEXT'], ['memoria', 'TEXT']]) {
+    for (const [c, tipo] of [['titulo', 'TEXT'], ['patron', 'TEXT'], ['lider', 'TEXT'], ['bandos', 'TEXT'], ['salida', 'TEXT'], ['resumen_parcial', 'TEXT'], ['modelo', 'TEXT'], ['esfuerzo', 'TEXT'], ['memoria', 'TEXT']]) {
       if (!cols.includes(c!)) this.db.exec(`ALTER TABLE reuniones ADD COLUMN ${c} ${tipo}`)
     }
     this.prepararVista()
@@ -196,10 +209,10 @@ export class ReunionesDB {
     if (cols.length > 0 && !cols.includes('vista')) this.db.exec('ALTER TABLE reuniones ADD COLUMN vista INTEGER')
   }
 
-  crear(p: { id: string; oficina: string; tema: string; agentes: string[]; documentos?: string[]; patron?: string; lider?: string; bandos?: Record<string, string[]>; salida?: string; modelo?: string; esfuerzo?: string; memoria?: string }) {
+  crear(p: { id: string; oficina: string; titulo: string; tema: string; agentes: string[]; documentos?: string[]; patron?: string; lider?: string; bandos?: Record<string, string[]>; salida?: string; modelo?: string; esfuerzo?: string; memoria?: string }) {
     const docs = p.documentos ?? []
-    this.db.run('INSERT INTO reuniones(id,oficina,tema,agentes,estado,creada,documentos,patron,lider,bandos,salida,modelo,esfuerzo,memoria) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
-      p.id, p.oficina, p.tema, JSON.stringify(p.agentes), 'esperando', Date.now() / 1000, docs.length === 0 ? null : JSON.stringify(docs),
+    this.db.run('INSERT INTO reuniones(id,oficina,titulo,tema,agentes,estado,creada,documentos,patron,lider,bandos,salida,modelo,esfuerzo,memoria) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+      p.id, p.oficina, p.titulo, p.tema, JSON.stringify(p.agentes), 'esperando', Date.now() / 1000, docs.length === 0 ? null : JSON.stringify(docs),
       p.patron ?? 'debate', p.lider ?? null, p.bandos ? JSON.stringify({ a: p.bandos.a, b: p.bandos.b }) : null, p.salida ?? null,
       p.modelo ?? null, p.esfuerzo ?? null, p.memoria ?? null,
     ])
@@ -711,7 +724,8 @@ export const ReunionPatron = {
   markdownSalida(p: { oficina: Oficina; f: ReunionFila; participantes: AgenteDef[]; sintesis?: SintesisReunion; errorSintesis?: string; acta?: string; fecha: Date }): string {
     const { oficina, f } = p
     const patron: PatronReunion = esPatron(f.patron) ? f.patron : 'debate'
-    let s = `# ${f.tema}\n\n`
+    let s = `# ${f.titulo}\n\n`
+    if (f.tema.trim() !== '' && f.tema.trim() !== f.titulo) s += `${f.tema.trim()}\n\n`
     s += `- **Patrón:** ${etiquetaPatron[patron]}\n- **Oficina:** ${oficina.nombre}\n- **Fecha:** ${dia(p.fecha)}\n`
     s += '- **Participantes:** ' + gente(p.participantes) + '\n'
     if (patron === 'lider' && f.lider !== undefined) s += `- **Líder:** ${nombreDe(f.lider, oficina)}\n`
@@ -828,7 +842,7 @@ export const PendientesReunion = {
     const a = this.agente(p.quien, act.oficina)
     if (!a) return
     const d = dia(new Date((f.cerrada ?? f.creada) * 1000))
-    try { this.tildar(act.carpeta, a.id, this.linea(p, f.tema, d)) } catch {}
+    try { this.tildar(act.carpeta, a.id, this.linea(p, f.titulo, d)) } catch {}
   },
 }
 
@@ -930,7 +944,7 @@ export class ReunionesRouter implements SubRouter {
    *  así que quien ve «no corre» y lee después siempre ve el estado final (nunca un «en_curso» viejo). */
   private vista(f: ReunionFila, vivo: boolean, habla: string | undefined, turnos: TurnoReunion[], resumen = false): Obj {
     const estado = f.estado === 'en_curso' && !vivo ? 'esperando' : vivo ? 'en_curso' : f.estado
-    const o: Obj = { id: f.id, tema: f.tema, agentes: f.agentes, estado, creada: iso(f.creada) }
+    const o: Obj = { id: f.id, titulo: f.titulo, tema: f.tema, agentes: f.agentes, estado, creada: iso(f.creada) }
     o.patron = f.patron
     if (f.lider !== undefined) o.lider = f.lider
     if (f.bandos) o.bandos = f.bandos
@@ -981,7 +995,11 @@ export class ReunionesRouter implements SubRouter {
   private crear(body?: Buffer): Obj {
     const a = this.s.oficinas.requerirActiva()
     const d = objeto(body, ReunionesRouter.maxBody)
-    const tema = Validar.texto(d.tema, 'tema', 500)!
+    // `titulo` (corto) y `tema`/descripción (larga, opcional). Clientes viejos mandan solo `tema`: se deriva el título.
+    const tituloIn = Validar.texto(d.titulo, 'título', 120, false)
+    const tema = Validar.texto(d.tema, 'descripción', 1000, false) ?? ''
+    if (tituloIn === undefined && tema === '') throw new ErrorAPI(400, 'Escribí un título para la reunión.')
+    const titulo = tituloIn ?? prefijo(tema, 120)
     if (!Array.isArray(d.agentes) || d.agentes.length === 0) throw new ErrorAPI(400, 'Elegí al menos un agente para la reunión.')
     const ids: string[] = []
     for (const x of d.agentes) {
@@ -1030,7 +1048,7 @@ export class ReunionesRouter implements SubRouter {
     }
     if (patron === 'revision' && documentos.length === 0) throw new ErrorAPI(400, 'El panel de revisión necesita al menos un documento adjunto.')
     const creada = new Date()
-    let salida = ReunionPatron.salidaPorDefecto(tema, creada)
+    let salida = ReunionPatron.salidaPorDefecto(titulo, creada)
     if (d.salida !== undefined && d.salida !== null) {
       const t = typeof d.salida === 'string' ? d.salida.trim() : undefined
       if (t === undefined || ReunionPatron.errorDeSalida(t) !== undefined) {
@@ -1040,9 +1058,9 @@ export class ReunionesRouter implements SubRouter {
     }
     const eleccion = eleccionCharla(d)
     const id = randomUUID().toLowerCase()
-    const ordenados = ordenar(ids.map((x) => agenteDe(a.oficina, x)!), a.oficina, tema).map((x) => x.id)
+    const ordenados = ordenar(ids.map((x) => agenteDe(a.oficina, x)!), a.oficina, temaReunion({ titulo, tema })).map((x) => x.id)
     try {
-      this.db.crear({ id, oficina: a.carpeta, tema, agentes: ordenados, documentos, patron, lider, bandos, salida, modelo: eleccion.modelo, esfuerzo: eleccion.esfuerzo, memoria: eleccion.memoria })
+      this.db.crear({ id, oficina: a.carpeta, titulo, tema, agentes: ordenados, documentos, patron, lider, bandos, salida, modelo: eleccion.modelo, esfuerzo: eleccion.esfuerzo, memoria: eleccion.memoria })
     } catch {
       throw new ErrorAPI(500, 'No pude guardar la reunión.')
     }
@@ -1111,7 +1129,7 @@ export class ReunionesRouter implements SubRouter {
     try {
       let t: string
       try {
-        t = await this.s.runner.correrSinAgente(promptSintesis({ oficina: of, tema: f.tema, participantes: parts, turnos, patron, lider, bandoA, bandoB, parcial: true }),
+        t = await this.s.runner.correrSinAgente(promptSintesis({ oficina: of, tema: temaReunion(f), participantes: parts, turnos, patron, lider, bandoA, bandoB, parcial: true }),
           { timeout: this.timeoutSintesis, cwd: a.carpeta, obs: caja.observador() })
       } catch (e) {
         throw new ErrorAPI(500, e instanceof ClaudeError ? e.mensaje : 'No pude armar el resumen.')
@@ -1143,7 +1161,7 @@ export class ReunionesRouter implements SubRouter {
     } else {
       const caja = new CajaCosto()
       try {
-        const t = await runner.correrSinAgente(promptSintesis({ oficina: of, tema: f.tema, participantes: parts, turnos, patron, lider, bandoA, bandoB }),
+        const t = await runner.correrSinAgente(promptSintesis({ oficina: of, tema: temaReunion(f), participantes: parts, turnos, patron, lider, bandoA, bandoB }),
           { timeout: this.timeoutSintesis, cwd: a.carpeta, obs: caja.observador() })
         const s = parsearSintesis(t, 1, (m) => log.info(`reuniones: dependencia descartada: ${m}`))
         if (s) sintesis = s
@@ -1157,19 +1175,19 @@ export class ReunionesRouter implements SubRouter {
     const hoy = new Date()
     let errorActa: string | undefined
     let rel: string | undefined
-    const textoActa = acta({ oficina: of, tema: f.tema, participantes: parts, turnos, sintesis, errorSintesis: errSint, fecha: hoy })
+    const textoActa = acta({ oficina: of, tema: f.titulo, participantes: parts, turnos, sintesis, errorSintesis: errSint, fecha: hoy })
     let salidaFinal: string | undefined
     try {
       rel = this.escribirActa(a, f, textoActa, hoy)
       if (sintesis && sintesis.decisiones.length > 0) anexarDecisiones(a.carpeta, sintesis.decisiones, hoy)
       if (sintesis && sintesis.pendientes.length > 0) {
-        PendientesReunion.repartir(a.carpeta, of, f.tema, sintesis.pendientes, hoy)
+        PendientesReunion.repartir(a.carpeta, of, f.titulo, sintesis.pendientes, hoy)
         // lo que necesita a la persona (asignado a ella o marcado) deja un aviso «te necesita»
         const paraVos = sintesis.pendientes.filter((p) => p.usuario || PendientesReunion.agente(p.quien, of) === undefined).length
         if (paraVos > 0) {
           this.s.avisos.crear({
             oficina: a.carpeta, tipo: 'pendiente', ref: id,
-            texto: paraVos === 1 ? `Quedó 1 pendiente de «${f.tema}» que necesita tu parte` : `Quedaron ${paraVos} pendientes de «${f.tema}» que necesitan tu parte`,
+            texto: paraVos === 1 ? `Quedó 1 pendiente de «${f.titulo}» que necesita tu parte` : `Quedaron ${paraVos} pendientes de «${f.titulo}» que necesitan tu parte`,
           })
         }
       }
@@ -1195,7 +1213,7 @@ export class ReunionesRouter implements SubRouter {
     }
     // el acta queda como entrega para revisar (sin agente: es de la reunión)
     if (rel !== undefined) {
-      this.s.entregas.registrar({ oficina: a.carpeta, agente: '', nombre: '', origen: 'reunion', ref: id, titulo: `Acta: ${f.tema}`, texto: textoActa, archivos: [rel, ...(salidaFinal !== undefined ? [salidaFinal] : [])] })
+      this.s.entregas.registrar({ oficina: a.carpeta, agente: '', nombre: '', origen: 'reunion', ref: id, titulo: `Acta: ${f.titulo}`, texto: textoActa, archivos: [rel, ...(salidaFinal !== undefined ? [salidaFinal] : [])] })
     }
     return this.respuesta(id, a)
   }
@@ -1203,7 +1221,7 @@ export class ReunionesRouter implements SubRouter {
   /** `reuniones/AAAA-MM-DD-<slug-tema>.md` (si ya existe, `-2`, `-3`...). Devuelve la ruta relativa. */
   private escribirActa(a: OficinaActiva, f: ReunionFila, texto: string, fecha: Date): string {
     fs.mkdirSync(a.ruta('reuniones'), { recursive: true })
-    const slug = Slug.de(f.tema)
+    const slug = Slug.de(f.titulo)
     const base = `${dia(fecha)}-${slug === '' ? 'reunion' : slug}`
     let rel = `reuniones/${base}.md`
     let n = 2
@@ -1323,7 +1341,7 @@ export class ReunionesRouter implements SubRouter {
     // los siguientes retoman esa sesión y llevan solo lo que se dijo desde su último turno. Sin lo ya mostrado en memoria
     // (la app se reinició) vuelve a mandar todo, una vez.
     const completo = () => promptTurno({
-      oficina: of, carpeta, tema: f.tema, participantes, quien: ag, turnos, ronda, fichas: fichas(carpeta, f.documentos),
+      oficina: of, carpeta, tema: temaReunion(f), participantes, quien: ag, turnos, ronda, fichas: fichas(carpeta, f.documentos),
       patron, fase: paso.fase, lider, bandoA, bandoB, leidos,
     })
     const visibles = ReunionPatron.visibles(patron, turnos, ronda)
@@ -1334,7 +1352,7 @@ export class ReunionesRouter implements SubRouter {
     let prompt: string
     if (vistos && yaHablo) {
       const nuevos = visibles.filter((t) => !vistos.has(indice(t)) && t.agente !== ag.id)
-      prompt = promptTurnoSeguido({ oficina: of, tema: f.tema, quien: ag, turnos, nuevos, ronda, patron, fase: paso.fase, lider, bandoA, bandoB, leidos })
+      prompt = promptTurnoSeguido({ oficina: of, tema: f.titulo, quien: ag, turnos, nuevos, ronda, patron, fase: paso.fase, lider, bandoA, bandoB, leidos })
     } else prompt = completo()
     this.vistos.set(clave, new Set([...(vistos ?? []), ...visibles.map(indice)]))
     this.leidos.set(clave, turnos.length)
@@ -1358,7 +1376,7 @@ export class ReunionesRouter implements SubRouter {
     try {
       const dirs = [...dirsVinculos(of, ag), ...dirsTrabajo(of, ag)]
       texto = await runner.conCarrilDe(carpeta, ag.id, () => runner.actividad.seguir(
-        { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.tema, extra: caja.observador() },
+        { oficina: carpeta, agente: ag.id, origen: 'reunion', tarea: 'Reunión: ' + f.titulo, extra: caja.observador() },
         async (obs) => {
           const turno = (pr: string, ses: { sid: string; retomar: boolean }) => runner.turnoSoloLectura({ agente: ag.id, prompt: pr, cwd: carpeta, timeout, dirsExtra: dirs, obs,
             instrucciones: conMemoria(Instrucciones.para(of, ag, { enApp: true }), esMemoriaIA(f.memoria) ? f.memoria : this.s.config.iaEfectiva.memoria), preguntar,
@@ -1477,7 +1495,7 @@ export class ReunionesRouter implements SubRouter {
       }
     })
     const usados = new Set((a.oficina.flujos ?? []).map((x) => x.id))
-    const flujo = flujoDesde({ nombre: prefijo(f.tema, 80), descripcion: prefijo(`Armado desde la reunión «${f.tema}»`, 600), origen: `reunion:${f.id}`, pasos }, usados)
+    const flujo = flujoDesde({ nombre: prefijo(f.titulo, 80), descripcion: prefijo(`Armado desde la reunión «${f.titulo}»`, 600), origen: `reunion:${f.id}`, pasos }, usados)
     return { borrador: flujoJSON(flujo) }
   }
 
@@ -1500,7 +1518,7 @@ export class ReunionesRouter implements SubRouter {
     if (p.usuario) throw new ErrorAPI(409, 'Ese pendiente necesita tu parte: el agente no lo puede hacer solo.')
     const def = PendientesReunion.agente(p.quien, a.oficina)
     if (!def) throw new ErrorAPI(409, 'Ese pendiente no es de un agente de la oficina.')
-    const consigna = consignaEncargo({ tema: f.tema, acta: f.acta, pendiente: p })
+    const consigna = consignaEncargo({ tema: f.titulo, acta: f.acta, pendiente: p })
     const nombre = TextoEntrega.titulo(p.que)
     const dep = dependenciasDe(this.s)
     const grupo = `reunion:${f.id}:${n}`

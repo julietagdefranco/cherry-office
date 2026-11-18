@@ -348,14 +348,14 @@ App.Nav = (function () {
     if (reuniones && abierta && !reuniones.some(function (x) { return x.id === abierta; })) cargarReuniones();   // recién creada
     caja.appendChild(filtroFila('mas', 'Llamar a reunión', App.modoDerecho() === 'reunion-nueva', function () { App.Reunion.nueva(); }));
     if (!reuniones) { cargarReuniones(); caja.appendChild(App.cargando('Trayendo las reuniones…')); return caja; }
-    var rs = reuniones.filter(function (x) { return !q || (x.tema + ' ' + nombresDe(x).join(' ')).toLowerCase().indexOf(q) >= 0; });
+    var rs = reuniones.filter(function (x) { return !q || ((x.titulo || '') + ' ' + (x.tema || '') + ' ' + nombresDe(x).join(' ')).toLowerCase().indexOf(q) >= 0; });
     var vivas = rs.filter(function (x) { return x.estado !== 'cerrada'; });
     var cerradas = rs.filter(function (x) { return x.estado === 'cerrada'; });
     function fila(x) {
       var est = x.estado === 'cerrada' ? h('small', App.fecha(x.creada)) : h('span.insignia.ok', x.estado === 'en_curso' ? 'En curso' : 'Esperando');
       return h('div.lista-item' + (abierta === x.id ? '.activo' : ''), { onclick: function () { ir('#/reuniones/' + encodeURIComponent(x.id)); } },
         h('div.lista-icono', App.icono('reunion')),
-        h('div.lista-item-txt', h('div.lista-item-tit', h('b', x.tema), est), h('div.lista-item-sub', nombresDe(x).join(', '))));
+        h('div.lista-item-txt', h('div.lista-item-tit', h('b', x.titulo || x.tema), est), h('div.lista-item-sub', nombresDe(x).join(', '))));
     }
     if (vivas.length) App.add(caja, h('div.lista-grupo', 'En curso', h('span.cuenta', vivas.length)), vivas.map(fila));
     if (cerradas.length) App.add(caja, h('div.lista-grupo', 'Terminadas', h('span.cuenta', cerradas.length)), cerradas.map(fila));

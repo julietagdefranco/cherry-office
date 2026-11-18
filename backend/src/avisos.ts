@@ -114,8 +114,9 @@ export class Avisos {
     const out: Aviso[] = db.query('SELECT id,tipo,agente,texto,ref,creado FROM avisos WHERE oficina=? AND visto=0 ORDER BY id', [oficina])
       .map((f) => ({ id: `a${num(f.id)}`, tipo: txt(f.tipo), agente: txt(f.agente), texto: txt(f.texto), ref: txt(f.ref), creado: num(f.creado) }))
     try {
-      for (const f of db.query("SELECT id,tema,creada FROM reuniones WHERE oficina=? AND estado='esperando' AND vista IS NULL ORDER BY creada", [oficina])) {
-        out.push({ id: `reunion:${txt(f.id)}`, tipo: 'reunion', agente: '', texto: `La reunión «${txt(f.tema)}» te espera`, ref: txt(f.id), creado: num(f.creada) })
+      for (const f of db.query("SELECT id,titulo,tema,creada FROM reuniones WHERE oficina=? AND estado='esperando' AND vista IS NULL ORDER BY creada", [oficina])) {
+        const nombre = f.titulo === null || f.titulo === undefined ? txt(f.tema).slice(0, 120) : txt(f.titulo)
+        out.push({ id: `reunion:${txt(f.id)}`, tipo: 'reunion', agente: '', texto: `La reunión «${nombre}» te espera`, ref: txt(f.id), creado: num(f.creada) })
       }
     } catch {}
     for (const fuente of this.fuentes) {

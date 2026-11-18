@@ -42,9 +42,10 @@
     if (activa(E.reunion)) { App.aviso('Ya hay una reunión en curso.'); panel(E.reunion.id); return; }
     var o = E.oficina;
     if (o.agentes.length < 2) { App.aviso('Para una reunión hacen falta al menos dos agentes.', true); return; }
-    var hj = App.hojaEnPanel({ titulo: 'Llamar a reunión', icono: 'reunion', sub: 'Elegí el tema, quiénes participan y cómo se habla' }, 'reunion-nueva');
+    var hj = App.hojaEnPanel({ titulo: 'Llamar a reunión', icono: 'reunion', sub: 'Ponele un título, elegí quiénes participan y cómo se habla' }, 'reunion-nueva');
     function cancelar() { if (App.Nav && App.Nav.ir) App.Nav.ir('#/equipo/reuniones'); else hj.cerrar(); }
-    var tema = h('textarea.campo', { rows: 3, maxlength: 500, autofocus: true, placeholder: 'Ej.: ¿Cómo lanzamos la colección de verano? Presupuesto, canales y fechas.' });
+    var titulo = h('input.campo', { type: 'text', maxlength: 120, autofocus: true, placeholder: 'Ej.: Lanzamiento de la colección de verano' });
+    var tema = h('textarea.campo', { rows: 4, maxlength: 1000, placeholder: 'Opcional: contexto, objetivos y lo que haga falta. Ej.: presupuesto, canales, fechas y qué queremos decidir hoy.' });
     var elegidos = [], grilla = h('div.elegir-agentes');
     o.agentes.forEach(function (a) {
       var b = h('button.elegible', { type: 'button', onclick: function () {
@@ -90,7 +91,7 @@
         bandosCaja.appendChild(fila);
       });
     }
-    tema.addEventListener('input', function () { if (!editoSalida) salida.value = salidaSugerida(tema.value); });
+    titulo.addEventListener('input', function () { if (!editoSalida) salida.value = salidaSugerida(titulo.value); });
     var docsAviso = h('div.ayuda.oculto');
     /* modelo y esfuerzo de toda la reunión: por defecto, los de cada agente. Cada turno lee lo dicho hasta ahí, así que
        una reunión larga con mucho esfuerzo gasta bastante */
@@ -101,7 +102,8 @@
     var esfuerzoReu = App.elegir({ etiqueta: 'Esfuerzo', forma: 'chips', valor: '',
       opciones: [{ valor: '', titulo: 'El de cada agente' }].concat(App.ESFUERZOS.filter(function (m) { return m.valor !== ''; }).map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; })) });
     App.add(hj.cuerpo,
-      h('div.fila-campo', h('label.etiqueta-campo', 'Tema'), tema),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Título'), h('div.ayuda', 'Un nombre corto para la reunión.'), titulo),
+      h('div.fila-campo', h('label.etiqueta-campo', 'Descripción'), h('div.ayuda', 'Opcional. Acá va el detalle: lo leen todos antes de opinar.'), tema),
       h('div.fila-campo', h('label.etiqueta-campo', 'Quiénes participan'), h('div.ayuda', 'Entre 2 y 10.'), grilla),
       h('div.fila-campo', h('label.etiqueta-campo', 'Tipo de reunión'), patron),
       liderFila, bandosFila,
@@ -130,10 +132,10 @@
     var ir = h('button.btn.primario', {
       onclick: function () {
         err.textContent = '';
-        if (!tema.value.trim()) { err.textContent = 'Escribí el tema.'; return; }
+        if (!titulo.value.trim()) { err.textContent = 'Escribí un título.'; return; }
         if (elegidos.length < 2) { err.textContent = 'Elegí al menos dos participantes.'; return; }
         var pat = patron.valor();
-        var cuerpo = { tema: tema.value.trim(), agentes: elegidos, rondas: +rondas.valor(), documentos: docsSel.length ? docsSel : undefined, patron: pat };
+        var cuerpo = { titulo: titulo.value.trim(), tema: tema.value.trim() || undefined, agentes: elegidos, rondas: +rondas.valor(), documentos: docsSel.length ? docsSel : undefined, patron: pat };
         if (pat === 'lider') {
           if (!lider) { err.textContent = 'Elegí quién lidera.'; return; }
           cuerpo.lider = lider;
@@ -229,9 +231,10 @@
     if (viejo) scrollAbajo = viejo.scrollTop + viejo.clientHeight >= viejo.scrollHeight - 30;
     var cuerpo = h('div.der-cuerpo'), pie = h('div.der-pie');
     var est = r.estado === 'cerrada' ? 'Cerrada' : r.estado === 'en_curso' ? 'En curso' : 'Esperando: escribí algo, pedí otra ronda o cerrá';
-    App.add(App.vaciar(der), 
-      App.cabPanel({ icono: 'reunion', titulo: r.tema, sub: est + ' · ' + patronDe(r.patron).nombre + ' · ' + r.agentes.map(nombre).join(', ') }),
+    App.add(App.vaciar(der),
+      App.cabPanel({ icono: 'reunion', titulo: r.titulo || r.tema, sub: est + ' · ' + patronDe(r.patron).nombre + ' · ' + r.agentes.map(nombre).join(', ') }),
       cuerpo, pie);
+    if (r.tema && r.tema.trim() && r.tema.trim() !== (r.titulo || '')) cuerpo.appendChild(h('div.reunion-desc', r.tema));
     var t = h('div.turnos'), ronda = 0;
     r.turnos.forEach(function (x) {
       if (x.ronda !== ronda && x.agente !== 'usuario') { ronda = x.ronda; t.appendChild(h('div.ronda-sep', 'Ronda ' + ronda)); }
@@ -472,7 +475,7 @@
       mas.push({ texto: 'Convertir en tarea', icono: 'parte', accion: function () {
         if (!App.Agente || !App.Agente.nuevaTarea) return;
         App.Agente.nuevaTarea(est.agente, { nombre: p.que.length > 80 ? p.que.slice(0, 79) + '…' : p.que,
-          consigna: 'Pendiente de la reunión «' + r.tema + '»' + (r.acta ? ' (acta: ' + r.acta + ')' : '') + ': ' + p.que,
+          consigna: 'Pendiente de la reunión «' + (r.titulo || r.tema) + '»' + (r.acta ? ' (acta: ' + r.acta + ')' : '') + ': ' + p.que,
           origen: { reunion: r.id, pendiente: i }, unica: true }, function () { refrescar(r.id); });
       } });
     } else if (!est.encargable && !est.hecho && !enc) {

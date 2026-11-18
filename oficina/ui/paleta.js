@@ -74,7 +74,7 @@ App.Paleta = (function () {
     });
     App.opcionesOficina().forEach(function (op) { ag('Acciones', 'Acción', op.icono, op.texto, '', op.texto, op.accion); });
     reuniones.slice(0, 8).forEach(function (r) {
-      ag('Recientes', 'Reunión', 'reunion', r.tema, App.fecha ? App.fecha(r.creada) : '', 'reunion ' + r.tema,
+      ag('Recientes', 'Reunión', 'reunion', r.titulo || r.tema, App.fecha ? App.fecha(r.creada) : '', 'reunion ' + (r.titulo || r.tema) + ' ' + (r.tema || ''),
         function () { App.Reunion.ver ? App.Reunion.ver(r.id) : App.Reunion.abrir(); });
     });
     return out;

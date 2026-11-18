@@ -73,8 +73,11 @@ describe('Reuniones', () => {
     await malo({}, 'sin nada')
     await malo({ agentes: ['marce'] }, 'sin tema')
     await malo({ tema: '  ', agentes: ['marce'] }, 'tema vacío')
-    await malo({ tema: 't'.repeat(501), agentes: ['marce'] }, 'tema largo')
+    await malo({ titulo: '  ', agentes: ['marce'] }, 'título vacío sin tema')
+    await malo({ titulo: 't'.repeat(121), agentes: ['marce'] }, 'título largo')
+    await malo({ tema: 't'.repeat(1001), agentes: ['marce'] }, 'descripción larga')
     await malo({ tema: 5, agentes: ['marce'] }, 'tema no texto')
+    await malo({ titulo: 5, agentes: ['marce'] }, 'título no texto')
     await malo({ tema: 't' }, 'sin agentes')
     await malo({ tema: 't', agentes: [] }, 'agentes vacío')
     await malo({ tema: 't', agentes: 'marce' }, 'agentes no lista')
@@ -115,7 +118,7 @@ describe('Reuniones', () => {
     f.sb.modo('marce', 'puerta')
     const r = await nueva(f, 'plan', ['marce', 'marce'])
     expect(r.status).toBe(200)
-    expect(new Set(Object.keys(r.obj))).toEqual(new Set(['id', 'tema', 'agentes', 'estado', 'creada', 'hablando', 'rondas', 'turnos', 'patron', 'salida']))
+    expect(new Set(Object.keys(r.obj))).toEqual(new Set(['id', 'titulo', 'tema', 'agentes', 'estado', 'creada', 'hablando', 'rondas', 'turnos', 'patron', 'salida']))
     const id = str(r.obj.id)
     expect(uuidValido(id) && id === id.toLowerCase()).toBe(true)
     expect(r.obj.tema).toBe('plan')
@@ -133,6 +136,30 @@ describe('Reuniones', () => {
     expect(fin.estado).toBe('esperando')
     expect(fin.hablando).toBeNull()
     expect(turnos(fin).map((t) => str(t.agente))).toEqual(['marce'])
+  })
+
+  test('crear: título corto y descripción larga; el prompt lleva los dos y el acta el título', async () => {
+    const f = await fix()
+    f.sb.modo('marce', 'puerta')
+    const r = await f.post('/api/reuniones', { titulo: 'Lanzamiento verano', tema: 'Definir presupuesto, canales y fechas de la colección de verano.', agentes: ['marce', 'nico'] })
+    expect(r.status).toBe(200)
+    expect(r.obj.titulo).toBe('Lanzamiento verano')
+    expect(r.obj.tema).toBe('Definir presupuesto, canales y fechas de la colección de verano.')
+    expect(await esperar(() => f.sb.eventos.includes('S marce'))).toBe(true)
+    const p = promptsTurno(f)[0] ?? ''
+    expect(p.includes('Lanzamiento verano')).toBe(true)
+    expect(p.includes('Definir presupuesto, canales y fechas')).toBe(true)
+    f.sb.abrirPuerta()
+    await aguardar(f, str(r.obj.id))
+  })
+
+  test('crear: sin descripción, solo título', async () => {
+    const f = await fix()
+    const r = await f.post('/api/reuniones', { titulo: 'Repaso semanal', agentes: ['marce', 'nico'] })
+    expect(r.status).toBe(200)
+    expect(r.obj.titulo).toBe('Repaso semanal')
+    expect(r.obj.tema).toBe('')
+    await aguardar(f, str(r.obj.id))
   })
 
   // MARK: orden
@@ -747,7 +774,7 @@ describe('Reuniones', () => {
     const l = lista((await f.get('/api/reuniones')).obj.reuniones)
     expect(l.map((x) => str(x.id))).toEqual([b, a])
     expect(l.map((x) => x.turnos)).toEqual([2, 1])
-    expect(new Set(Object.keys(l[0]!))).toEqual(new Set(['id', 'tema', 'agentes', 'estado', 'creada', 'turnos', 'patron', 'salida']))
+    expect(new Set(Object.keys(l[0]!))).toEqual(new Set(['id', 'titulo', 'tema', 'agentes', 'estado', 'creada', 'turnos', 'patron', 'salida']))
     // otra oficina
     await llamar(f.b, 'POST', '/api/oficinas', { body: { nombre: 'Otra' } })
     expect(lista((await f.get('/api/reuniones')).obj.reuniones)).toEqual([])

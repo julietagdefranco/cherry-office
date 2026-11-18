@@ -338,6 +338,7 @@ select.campo { padding-right: 26px; }
 .pasos b { color: var(--texto); font-weight: 600; }
 
 /* reuniones */
+.reunion-desc { margin: 10px 14px 0; padding: 10px 12px; border: 1px solid var(--linea); border-radius: var(--radio); background: var(--panel-2); color: var(--suave); line-height: 1.5; white-space: pre-wrap; }
 .turnos { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
 .turno { display: flex; gap: 10px; }
 .turno .retrato { width: 32px; height: 32px; }
