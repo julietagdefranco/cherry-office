@@ -41,14 +41,16 @@
 .imagen-grande { max-width: 100%; max-height: 100%; object-fit: contain; }
 
 /* pasos del agente */
-details.pasos { align-self: flex-start; max-width: 88%; font-size: 12px; color: var(--suave); margin-bottom: -4px; }
-details.pasos > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--linea); background: var(--panel); }
+details.pasos { align-self: flex-start; width: 100%; max-width: 88%; box-sizing: border-box; min-width: 0; font-size: 12px; color: var(--suave); margin-bottom: -4px; }
+details.pasos > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 8px; border: 1px solid transparent; color: var(--tenue); transition: background .12s ease, color .12s ease, border-color .12s ease; }
+details.pasos > summary:hover { background: var(--panel); border-color: var(--linea); color: var(--suave); }
+details.pasos[open] > summary { color: var(--suave); margin-bottom: 2px; }
 details.pasos > summary::-webkit-details-marker { display: none; }
-details.pasos > summary::before { content: '▸'; font-size: 10px; }
+details.pasos > summary::before { content: '▸'; font-size: 9px; opacity: .7; }
 details.pasos[open] > summary::before { content: '▾'; }
-details.pasos .pasos-lista { margin: 6px 0 2px 8px; padding-left: 10px; border-left: 2px solid var(--linea); }
-.pasos-lista { display: flex; flex-direction: column; gap: 4px; }
-.paso-herr { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--suave); }
+details.pasos .pasos-lista { margin: 4px 0 2px 10px; padding-left: 12px; border-left: 2px solid var(--linea); }
+.pasos-lista { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.paso-herr { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--suave); min-width: 0; overflow: hidden; }
 .paso-punto { width: 6px; height: 6px; border-radius: 50%; background: var(--tenue); flex: none; transform: translateY(-1px); }
 .paso-obj { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--texto); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .paso-texto { color: var(--texto); font-size: 13px; }
