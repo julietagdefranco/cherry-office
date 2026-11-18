@@ -296,8 +296,19 @@
       dom.avisoReu = h('div.aviso-reunion.oculto');
       dom.derecho = h('aside.derecho');
       dom.lista = h('aside.lista-col');
-      /* la ventana que abre el riel: la lista de la sección y el panel, juntos y sobre la oficina */
-      dom.ventana = h('div.ventana', dom.lista, dom.derecho);
+      /* la ventana que abre el riel: la lista de la sección y el panel, juntos y sobre la oficina. En la compu la cruza
+         una barra fina (sección › lo abierto) con la única ×, arriba a la derecha de todo: cierra la ventana entera. */
+      dom.ruta = h('div.ventana-ruta');
+      dom.barra = h('div.ventana-barra', dom.ruta,
+        h('button.btn.fantasma.icono.ventana-cerrar', { title: 'Cerrar', onclick: cerrarDesdeBarra }, App.icono('cerrar')));
+      dom.ventana = h('div.ventana', dom.barra, dom.lista, dom.derecho);
+      var rutaPend = false, refrescarRuta = function () {
+        if (rutaPend) return;
+        rutaPend = true;
+        requestAnimationFrame(function () { rutaPend = false; pintarRuta(); });
+      };
+      new MutationObserver(refrescarRuta).observe(dom.lista, { childList: true, subtree: true, characterData: true });
+      new MutationObserver(refrescarRuta).observe(dom.derecho, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'data-modo'] });
       var riel = App.Nav.riel({
         menuOficina: menuOficina, menuNuevo: menuNuevo,
         insignias: { bandeja: dom.navEnt, equipo: dom.navReu, trabajo: dom.navTar },
@@ -473,6 +484,23 @@
     if (App.Nav.enSeccion() && !window.matchMedia('(max-width: 720px)').matches) App.Nav.ir('#/oficina');
     else if (App.modoDerecho()) App.cerrarDerecho();
   };
+  /* La × de la barra de la ventana: aprieta la × del panel (la que sabe limpiar lo suyo, p. ej. el Creador) y, si el
+     panel no tiene, cierra la ventana como siempre. */
+  function cerrarDesdeBarra() {
+    var x = App.modoDerecho() ? dom.derecho.querySelector('.cerrar-panel') : null;
+    if (x) x.click(); else App.cerrarVentana();
+  }
+  /* La ruta de la barra: la sección y, si hay algo abierto en el panel, su título (el nombre del agente, «Contratar»…) */
+  function pintarRuta() {
+    if (!dom.ruta) return;
+    var sec = App.Nav.nombreSeccion();
+    var m = App.modoDerecho(), h2 = m && m !== 'vacio' ? dom.derecho.querySelector('.der-cab h2') : null;
+    var tit = h2 ? h2.textContent.trim() : '';
+    var clave = sec + '\u0000' + tit;
+    if (dom.ruta.getAttribute('data-clave') === clave) return;
+    dom.ruta.setAttribute('data-clave', clave);
+    App.add(App.vaciar(dom.ruta), tit ? h('span', sec) : h('b', sec), tit ? h('span.sep', '›') : null, tit ? h('b', { title: tit }, tit) : null);
+  }
   App.modoDerecho = function () { return dom.derecho && dom.derecho.classList.contains('abierto') ? dom.derecho.getAttribute('data-modo') : null; };
   App.volverAlInicio = inicio;
 

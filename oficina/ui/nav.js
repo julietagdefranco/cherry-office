@@ -598,6 +598,7 @@ App.Nav = (function () {
   return {
     riel: riel, aplicar: aplicar, ir: ir, alAbrir: alAbrir, alCerrar: alCerrar, refrescar: refrescar,
     seccion: function () { return seccion; }, enSeccion: function () { return !!seccion && seccion !== 'oficina'; },
+    nombreSeccion: function () { var s = SECCIONES.filter(function (x) { return x.id === seccion; })[0]; return s ? s.texto : ''; },
     pintarLista: pintarLista, elegirAgente: elegirAgente, relacionado: relacionado, menuNueva: menuNueva,
     todasLasCharlas: todasLasCharlas, tituloCharla: tituloCharla, acomodar: acomodar, cuentas: cuentas
   };
