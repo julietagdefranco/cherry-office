@@ -89,6 +89,11 @@ export const lineaConsultas = 'Podés consultar a un colega con la herramienta c
 /** Documenta las herramientas de conocimiento compartido (conocimiento.ts). Su presencia también marca una sección al día. */
 export const lineaConocimiento = 'Antes de consultar, buscá si ya se sabe con buscar(pregunta) (notas, decisiones, actas, entregables y respuestas de colegas, lo más nuevo primero) y usá quien_sabe(tema) para saber a quién preguntarle. Si encontrás algo desactualizado, marcalo con marcar_obsoleto(ref, motivo).'
 
+/** Formato de los entregables: lo que se ve en la app es HTML (se dibuja al costado de la charla); los archivos de Office
+ *  (.pptx, .docx, .xlsx) son binarios que la app no sabe mostrar, así que solo se hacen si la persona los pide. Su presencia
+ *  también marca una sección al día. */
+export const lineaFormato = 'Formato de lo que entregues: para presentaciones, informes, tableros o cualquier cosa que la persona vaya a mirar, hacé un archivo .html autocontenido (CSS y JS dentro del mismo archivo; las diapositivas, como secciones del HTML): la app lo dibuja al costado de la charla. NO uses .pptx, .docx ni .xlsx (ni sus skills) salvo que la persona pida expresamente ese archivo de Office, por ejemplo para editarlo o mandarlo.'
+
 /** Sección fija con las rutas de memoria (relativas a la oficina). Sin salto de línea final. */
 export function seccionMemoria(id: string): string {
   return `${marcaMemoria}
@@ -99,11 +104,12 @@ Tu carpeta de trabajo es la raíz de la oficina; todas las rutas son relativas a
 - Lo que produzcas para el usuario (informes, borradores, archivos) guardalo con Write en \`archivos/entregables/${id}/\`; esa es la única carpeta de archivos donde podés escribir.
 - No podés escribir ningún otro archivo (el sistema lo impide igual). Si algo debería quedar como decisión, proponelo en una reunión o decile al usuario que lo registre.
 - ${lineaConsultas}
-- ${lineaConocimiento}`
+- ${lineaConocimiento}
+- ${lineaFormato}`
 }
 
 /** Al abrir una oficina: reescribe la sección de memoria de los `.md` de agente desactualizados (sin la línea de
- *  consultas o sin la de conocimiento). Solo toca desde la marca hasta el final. Idempotente. Devuelve cuántos reescribió. */
+ *  consultas, la de conocimiento o la de formato). Solo toca desde la marca hasta el final. Idempotente. Devuelve cuántos reescribió. */
 export function actualizarMemoria(carpeta: string, ids: string[]): number {
   let n = 0
   for (const id of ids) {
@@ -115,7 +121,7 @@ export function actualizarMemoria(carpeta: string, ids: string[]): number {
       continue
     }
     const i = t.indexOf(marcaMemoria)
-    if (i < 0 || (t.includes(lineaConsultas) && t.includes(lineaConocimiento))) continue
+    if (i < 0 || (t.includes(lineaConsultas) && t.includes(lineaConocimiento) && t.includes(lineaFormato))) continue
     try {
       const tmp = `${p}.tmp`
       fs.writeFileSync(tmp, t.slice(0, i) + seccionMemoria(id) + '\n')

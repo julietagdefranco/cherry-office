@@ -309,4 +309,23 @@ describe('Consultas entre agentes (MCP)', () => {
     await f.post('/api/oficinas/abrir', { carpeta: f.carpeta })
     expect(f.leer(rel)).toBe(hoy)                                  // idempotente
   })
+
+  test('la sección de memoria pide entregables en HTML y pptx/docx/xlsx solo a pedido; los .md viejos sin esa línea se actualizan', async () => {
+    const f = await fix()
+    const rel = '.claude/agents/marce.md'
+    const nuevo = f.leer(rel)
+    const i = nuevo.indexOf('- Formato de lo que entregues:')
+    expect(i).toBeGreaterThan(0)
+    expect(nuevo).toContain('.html')
+    expect(nuevo).toContain('salvo que la persona pida expresamente')
+    // un .md de antes de la línea de formato: la sección termina en la línea de conocimiento
+    escribirArchivo(nuevo.slice(0, i).trimEnd() + '\n', f.ruta(rel))
+    expect(f.leer(rel).includes('Formato de lo que entregues')).toBe(false)
+    const abrir = await f.post('/api/oficinas/abrir', { carpeta: f.carpeta })
+    expect(abrir.status).toBe(200)
+    const hoy = f.leer(rel)
+    expect(hoy).toBe(nuevo)                                        // volvió a quedar igual que uno nuevo
+    await f.post('/api/oficinas/abrir', { carpeta: f.carpeta })
+    expect(f.leer(rel)).toBe(hoy)                                  // idempotente
+  })
 })
