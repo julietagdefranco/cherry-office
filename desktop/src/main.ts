@@ -225,8 +225,8 @@ async function mensaje(ev: IpcMainInvokeEvent, m: unknown): Promise<unknown> {
   }
 }
 
-/** Borra la oficina abierta (solo si es la que pidió el front): el backend la cierra y olvida lo guardado en hq.db, y
- *  la carpeta va a la papelera (se puede recuperar). */
+/** Borra la oficina abierta (solo si es la que pidió el front): el backend la cierra, olvida lo guardado en hq.db y
+ *  borra su carpeta del disco (permanente). */
 async function borrarOficina(carpeta?: string): Promise<Record<string, unknown>> {
   const estado = await api('/api/estado')
   const activa: string | undefined = estado.oficina?.carpeta
@@ -235,12 +235,7 @@ async function borrarOficina(carpeta?: string): Promise<Record<string, unknown>>
   let cuerpo: Record<string, unknown> = {}
   try { cuerpo = JSON.parse(r.json.toString('utf8')) } catch {}
   if (r.status !== 200) return { error: typeof cuerpo.error === 'string' ? cuerpo.error : 'No pude borrar la oficina.' }
-  try {
-    await shell.trashItem(carpeta)
-    return { ok: true, papelera: true }
-  } catch {
-    return { ok: true, papelera: false }
-  }
+  return { ok: true }
 }
 
 /** Abrir (con su aplicación) o mostrar en el Finder/Explorador, solo dentro de la oficina, de una carpeta vinculada o de

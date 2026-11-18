@@ -551,7 +551,7 @@ App.Ajustes = (function () {
     }
     App.add(hj.cuerpo,
       fila('Exportar oficina', 'Un archivo .zip para compartirla o pasarla a otra compu.', 'Exportar…', function () { App.exportarOficina(); }),
-      fila('Borrar oficina', App.nativo.hay ? 'Se borran sus conversaciones y tareas; la carpeta va a la papelera.' : 'Se borran sus conversaciones y tareas.', 'Borrar…', function () { App.borrarOficina(); }, true));
+      fila('Borrar oficina', 'Se borran sus conversaciones y tareas, y su carpeta del disco (permanente).', 'Borrar…', function () { App.borrarOficina(); }, true));
   }
 
   function permisos(crear) {

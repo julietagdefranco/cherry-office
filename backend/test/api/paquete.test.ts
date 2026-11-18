@@ -161,7 +161,7 @@ describe('Exportar e importar oficinas', () => {
     // importarla otra vez no pisa la primera
     const r2 = await importar(b2, zip)
     expect(r2.status).toBe(200)
-    expect(str(r2.obj.carpeta)).toBe(ruta(sb2.oficinasDir, 'Taller 2'))
+    expect(str(r2.obj.carpeta)).toBe(ruta(sb2.oficinasDir, 'Taller_2'))
   }, 60_000)
 
   test('importar: un .zip hecho a mano con la carpeta (sin índice) también se abre, con aviso', async () => {

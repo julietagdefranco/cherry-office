@@ -123,28 +123,32 @@ describe('Oficinas y departamentos', () => {
     expect(dict(r.obj.oficina).nombre).toBe('Con espacios')
   })
 
-  test('crear: nombre ocupado -> «Nombre 2», «Nombre 3»; caracteres de ruta en el nombre pasan a «-»', async () => {
+  test('crear: nombre ocupado -> «Nombre_2», «Nombre_3»; espacios pasan a «_» y caracteres de ruta a «-»', async () => {
     const sb = new Sandbox()
     const b = await sb.backend({ oficina: false })
     const a = await nueva(b, { nombre: 'Taller' })
     const c = await nueva(b, { nombre: 'Taller' })
     const d = await nueva(b, { nombre: 'Taller' })
-    expect([a, c, d].map((x) => str(x.obj.carpeta))).toEqual([ruta(sb.oficinasDir, 'Taller'), ruta(sb.oficinasDir, 'Taller 2'), ruta(sb.oficinasDir, 'Taller 3')])
+    expect([a, c, d].map((x) => str(x.obj.carpeta))).toEqual([ruta(sb.oficinasDir, 'Taller'), ruta(sb.oficinasDir, 'Taller_2'), ruta(sb.oficinasDir, 'Taller_3')])
     // el nombre de la oficina queda tal cual aunque la carpeta tenga sufijo
     expect(dict(c.obj.oficina).nombre).toBe('Taller')
+    // los espacios del título van como guiones bajos en la carpeta
+    const esp = await nueva(b, { nombre: 'Mi Oficina Linda' })
+    expect(str(esp.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'Mi_Oficina_Linda'))
+    expect(dict(esp.obj.oficina).nombre).toBe('Mi Oficina Linda')
     const raro = await nueva(b, { nombre: 'A/B:C' })
     expect(str(raro.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'A-B-C'))
     const punto = await nueva(b, { nombre: '..oculta' })
     expect(str(punto.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'oculta'))
     // sin punto ni espacio al final (Claude Code no aplica las reglas de escritura en esas rutas); el nombre queda igual
     const inc = await nueva(b, { nombre: 'Luis Inc. . ' })
-    expect(str(inc.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'Luis Inc'))
+    expect(str(inc.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'Luis_Inc'))
     expect(dict(inc.obj.oficina).nombre).toBe('Luis Inc. .')
     expect(str((await nueva(b, { nombre: '...' })).obj.carpeta)).toBe(ruta(sb.oficinasDir, 'Oficina'))
     const ultima = await nueva(b, { nombre: '..oculta' })
-    expect(str(ultima.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'oculta 2'))
+    expect(str(ultima.obj.carpeta)).toBe(ruta(sb.oficinasDir, 'oculta_2'))
     // la última creada es la activa
-    expect((await llamar(b, 'GET', '/api/oficinas')).obj.activa).toBe(ruta(sb.oficinasDir, 'oculta 2'))
+    expect((await llamar(b, 'GET', '/api/oficinas')).obj.activa).toBe(ruta(sb.oficinasDir, 'oculta_2'))
   })
 
   test('crear: carpeta explícita (absoluta, con ~ del HOME temporal), relativa -> 400, 409 si ya hay oficina.json', async () => {
@@ -362,13 +366,13 @@ describe('Oficinas y departamentos', () => {
     expect((await llamar(f.b, 'PUT', '/api/oficina')).status).toBe(405)
   })
 
-  test('DELETE oficina: la cierra y la saca de recientes; la carpeta queda', async () => {
+  test('DELETE oficina: la cierra, la saca de recientes y borra su carpeta del disco', async () => {
     const f = await Fix.crear()
     const r = await llamar(f.b, 'DELETE', '/api/oficina')
     expect(r.status).toBe(200)
     expect((await f.get('/api/estado')).obj.oficina).toBeNull()
     expect(lista((await f.get('/api/oficinas')).obj.oficinas)).toEqual([])
-    expect(fs.existsSync(f.carpeta)).toBe(true)
+    expect(fs.existsSync(f.carpeta)).toBe(false)
     expect((await llamar(f.b, 'DELETE', '/api/oficina')).status).toBe(409)
   })
 

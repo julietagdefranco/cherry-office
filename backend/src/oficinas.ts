@@ -239,13 +239,18 @@ export class Oficinas {
     return new OficinaActiva(dir, o)
   }
 
-  /** Borra la oficina `dir` de la app: deja de estar activa y en recientes, y se olvida lo guardado en hq.db. Los
-   *  archivos de la carpeta no se tocan (la app de escritorio los manda a la papelera). */
+  /** Borra la oficina `dir` de la app: deja de estar activa y en recientes, olvida lo guardado en hq.db y borra la
+   *  carpeta del disco (recursivo, permanente: no va a la papelera). */
   borrar(dir: string) {
     if (this.activaCarpeta === dir) this.activaCarpeta = undefined
     this.recientes = this.recientes.filter((r) => r.carpeta !== dir)
     this.guardarEstado()
     this.olvidarDatos(dir)
+    try {
+      fs.rmSync(dir, { recursive: true, force: true })
+    } catch {
+      this.log.warn('no pude borrar la carpeta de la oficina del disco')
+    }
     this.log.info('oficina borrada')
   }
 
@@ -323,15 +328,17 @@ export class Oficinas {
   static carpetaLibre(base: string, nombre: string): string {
     let limpio = [...nombre].map((ch) => {
       const u = ch.codePointAt(0)!
-      return ch === '/' || ch === ':' || ch === '\\' || u < 32 ? '-' : ch
+      if (ch === '/' || ch === ':' || ch === '\\' || u < 32) return '-'
+      if (ch === ' ') return '_' // los espacios del título van como guiones bajos en la carpeta
+      return ch
     }).join('').trim()
-    limpio = limpio.replace(/^\.+/, '')
-    // Sin punto ni espacio al final («Luis Inc.» -> «Luis Inc»): con una carpeta así en la ruta, Claude Code nunca
-    // aplica las reglas `Edit(//…)`/`Write(//…)` y en `dontAsk` rechaza toda escritura (docs/aprendizajes.md).
-    limpio = limpio.replace(/[.\s]+$/u, '')
+    limpio = limpio.replace(/^[._]+/, '')
+    // Sin punto ni guion bajo al final: antes era por el espacio final («Luis Inc.» -> «Luis Inc»), con el que Claude
+    // Code nunca aplica `Edit(//…)`/`Write(//…)` y en `dontAsk` rechaza toda escritura (docs/aprendizajes.md).
+    limpio = limpio.replace(/[._]+$/u, '')
     if (limpio === '') limpio = 'Oficina'
     let cand = path.join(base, limpio)
-    for (let n = 2; fs.existsSync(cand); n++) cand = path.join(base, `${limpio} ${n}`)
+    for (let n = 2; fs.existsSync(cand); n++) cand = path.join(base, `${limpio}_${n}`)
     return cand
   }
 

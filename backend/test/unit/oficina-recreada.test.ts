@@ -55,7 +55,7 @@ test('una oficina nueva en la carpeta de una borrada arranca sin la conversació
   expect(tarjetas.lista(otra.carpeta)).toHaveLength(1)
 })
 
-test('borrar una oficina la cierra, la saca de recientes y olvida lo guardado, sin tocar la carpeta', () => {
+test('borrar una oficina la cierra, la saca de recientes, olvida lo guardado y borra su carpeta del disco', () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'borrada-')))
   tmps.push(root)
   const config = new Config(path.join(root, 'home'))
@@ -75,7 +75,8 @@ test('borrar una oficina la cierra, la saca de recientes y olvida lo guardado, s
   expect(oficinas.activa()).toBeUndefined()
   expect(oficinas.listar().map((o) => o.carpeta)).toEqual([otra.carpeta])
   expect(store.mensajes(SID)).toEqual([])
-  expect(fs.existsSync(a.carpeta)).toBe(true)
+  expect(fs.existsSync(a.carpeta)).toBe(false)
+  expect(fs.existsSync(otra.carpeta)).toBe(true) // la otra oficina no se toca
   // sigue sin oficina activa después de reabrir la app
   expect(new Oficinas(config, new HQLog()).activa()).toBeUndefined()
 })

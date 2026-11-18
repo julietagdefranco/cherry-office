@@ -153,15 +153,13 @@
      papelera (se puede recuperar); en el navegador queda donde está. Después vuelve a la pantalla de inicio. */
   function borrarOficina() {
     var carpeta = E.carpeta, nombre = E.oficina.nombre;
-    var archivos = App.nativo.hay ? 'Su carpeta va a la papelera, por si te arrepentís.' : 'Su carpeta queda en ' + carpeta + ': borrala a mano si no la querés.';
-    App.confirmar('¿Borrar «' + nombre + '»?', 'Se borran sus conversaciones, reuniones, tareas y lo que charlaste con el Creador. ' + archivos, 'Borrar oficina', true).then(function (si) {
+    App.confirmar('¿Borrar «' + nombre + '»?', 'Se borran sus conversaciones, reuniones, tareas y lo que charlaste con el Creador. Su carpeta (' + carpeta + ') se borra del disco de forma permanente: no se puede deshacer.', 'Borrar oficina', true).then(function (si) {
       if (!si) return;
       var p = App.nativo.hay ? App.nativo.borrarOficina(carpeta) : api.del('/api/oficina');
       p.then(function (r) {
         if (r && r.error) throw new Error(r.error);
-        if (r && r.papelera === false) App.aviso('Borré la oficina, pero no pude mandar su carpeta a la papelera: quedó en ' + carpeta + '.', true);
         App.Agente.cerrar();
-        setTimeout(function () { location.reload(); }, r && r.papelera === false ? 2500 : 0);
+        location.reload();
       }).catch(App.fallo);
     });
   }
