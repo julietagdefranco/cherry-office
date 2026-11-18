@@ -167,7 +167,7 @@
       pintarPie();
       App.add(caja, h('div.pc-pie', restablecer,
         op.soloModelo ? null : h('button.btn.chico.fantasma', { type: 'button', title: 'Lo de siempre, para todas las charlas',
-          onclick: function () { if (panel) panel.cerrar(); App.Ajustes.abrir('consumo'); } }, 'Ajustes › Consumo de IA')));
+          onclick: function () { if (panel) panel.cerrar(); App.Ajustes.abrir('ia'); } }, 'Ajustes › Modelos y consumo')));
     }
 
     var panel = null;

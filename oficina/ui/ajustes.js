@@ -267,8 +267,7 @@ App.Ajustes = (function () {
     /* la elige la persona la primera vez que abre la app (permisos.js); acá se ve y se cambia */
     { id: 'permisos', grupo: 'app', texto: 'Permisos de los agentes', icono: 'escudo', nota: modoPermisos,
       visible: function () { return !!(App.Permisos && (App.Permisos.pintarModo || App.Permisos.abrirModo)); }, pintar: permisos },
-    { id: 'modelos', grupo: 'app', texto: 'Modelos', icono: 'bombilla', pintar: modelos },
-    { id: 'consumo', grupo: 'app', texto: 'Consumo de IA', icono: 'medidor', pintar: consumo },
+    { id: 'ia', grupo: 'app', texto: 'Modelos y consumo', icono: 'medidor', pintar: iaAjustes },
     { id: 'apariencia', grupo: 'app', texto: 'Apariencia', icono: 'capas', nota: function () { return App.estiloOficina === 'lego' ? 'Maqueta LEGO' : 'Pixel'; }, pintar: apariencia },
   ];
 
@@ -292,24 +291,19 @@ App.Ajustes = (function () {
     hj.cuerpo.appendChild(err);
   }
 
-  /* `modelos` (toda la app, PUT /api/preferencias): los procesos que no son un agente de la oficina. El de cada agente se
-     elige en su ficha. Se guarda al elegir; vale desde la próxima corrida. La lista de modelos es una sola (App.MODELOS). */
+  /* Sección «Modelos y consumo» (toda la app, PUT /api/preferencias): qué modelo usa cada proceso que no es un agente y
+     cuánto gasta la IA. El modelo y el esfuerzo de cada agente se eligen en su ficha. Se guarda al elegir. */
   var PROCESOS = [
     { clave: 'creador', titulo: 'Creador', bajada: 'El de la recepción, que arma y cambia la oficina charlando.' },
     { clave: 'internos', titulo: 'Tareas de fondo', bajada: 'Borradores de agentes nuevos, fichas e imágenes de la biblioteca y resúmenes de reuniones.' },
   ];
-  function modelos(crear) {
-    var hj = crear({ titulo: 'Modelos' });
-    var err = h('div.error-txt');
+  /* qué modelo usa cada proceso no-agente; vale desde la próxima corrida */
+  function cuerpoModelos(hj, err) {
     var actual = Object.assign({}, (App.E.estado && App.E.estado.modelos) || {});
-    var lista = App.MODELOS || [];
-    function titulo(v) { var m = lista.filter(function (x) { return x.valor === v; })[0]; return m ? m.titulo : v; }
-    App.add(hj.cuerpo,
-      h('div.ayuda', { style: { marginTop: 0 } }, 'Vale para todas tus oficinas. El modelo de cada agente se elige en su ficha.'),
-      h('ul.modelos-leyenda', lista.map(function (m) { return h('li', h('b', m.titulo), ' · ' + m.sub); })));
+    function titulo(v) { var m = (App.MODELOS || []).filter(function (x) { return x.valor === v; })[0]; return m ? m.titulo : v; }
     PROCESOS.forEach(function (p) {
-      var el = App.elegir({ forma: 'chips', etiqueta: p.titulo, valor: actual[p.clave],
-        opciones: lista.map(function (m) { return { valor: m.valor, titulo: m.titulo, sub: m.sub }; }),
+      var el = App.elegir({ forma: 'deslizador', etiqueta: p.titulo, valor: actual[p.clave],
+        opciones: App.modeloOpciones(),
         alCambiar: function (v) { poner(p, v, false); } });
       function poner(p2, v, silencioso) {
         var antes = actual[p2.clave];
@@ -323,18 +317,11 @@ App.Ajustes = (function () {
       }
       hj.cuerpo.appendChild(App.ajuste(p.titulo, p.bajada, el));
     });
-    hj.cuerpo.appendChild(err);
   }
 
-  /* `ia` (toda la app, PUT /api/preferencias): esfuerzo y opciones de consumo por defecto. Valen para todo lo que usa la IA
-     (charlas, reuniones, tareas, flujos, consultas y tareas de fondo); el esfuerzo de un agente (su ficha) le gana, y cada
-     charla o reunión nueva puede cambiarlos para sí. Se guarda al elegir. */
-  function consumo(crear) {
-    var hj = crear({ titulo: 'Consumo de IA' });
-    var err = h('div.error-txt');
-    App.add(hj.cuerpo, h('div.ayuda', { style: { marginTop: 0 } },
-      'Vale para todas tus oficinas y para todo lo que hace la IA: charlas, reuniones, tareas, flujos y consultas entre colegas. ' +
-      'Cada charla y cada reunión nueva lo pueden cambiar para sí, y el esfuerzo de un agente se elige en su ficha.'));
+  /* esfuerzo y opciones de consumo por defecto para todo lo que usa la IA (charlas, reuniones, tareas, flujos, consultas).
+     El esfuerzo de un agente (su ficha) le gana, y cada charla o reunión nueva puede cambiarlos para sí. */
+  function cuerpoConsumo(hj, err) {
     /* guarda varias claves juntas (el nivel de ahorro fija cuatro); deshacer vuelve a las de antes */
     function guardar(cambios, texto) {
       var ia = App.iaApp(), antes = {};
@@ -373,8 +360,20 @@ App.Ajustes = (function () {
     App.add(hj.cuerpo,
       App.ajuste('Esfuerzo', 'Cuánto piensa antes de responder. Lo que piensa se cobra como texto escrito: para el día a día, Bajo o Medio alcanza.', esf),
       App.ajuste('Ahorro de tokens', 'Cuánto contexto lee y cuántas herramientas tiene a mano en cada paso. Más ahorro, menos gasto, pero sabe y puede hacer menos sin que se lo pidas.', ahorro),
-      detalle,
-      err);
+      detalle);
+  }
+
+  /* la sección junta las dos cosas: qué modelo usa cada proceso y cuánto gasta la IA (son todo preferencias de IA de la app) */
+  function iaAjustes(crear) {
+    var hj = crear({ titulo: 'Modelos y consumo' });
+    var err = h('div.error-txt');
+    App.add(hj.cuerpo, h('div.ayuda', { style: { marginTop: 0 } },
+      'Qué modelo usa cada parte de la app y cuánto gasta la IA. Vale para todas tus oficinas; el modelo y el esfuerzo de cada agente se eligen en su ficha, y cada charla o reunión nueva lo puede cambiar para sí.'));
+    App.add(hj.cuerpo, h('div.aj-subtit', 'Modelos'));
+    cuerpoModelos(hj, err);
+    App.add(hj.cuerpo, h('div.aj-subtit', 'Consumo'));
+    cuerpoConsumo(hj, err);
+    hj.cuerpo.appendChild(err);
   }
 
   /* ---------------- skills, MCP y conectores habilitados (habilitados.ts) ----------------
