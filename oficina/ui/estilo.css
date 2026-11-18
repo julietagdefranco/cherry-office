@@ -243,12 +243,15 @@ select.campo { padding-right: 26px; }
 @keyframes aparecer { from { opacity: 0; } }
 .hoja { background: var(--panel); border-radius: 14px; box-shadow: var(--sombra-alta); width: 560px; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; animation: subir .18s ease; border: 1px solid var(--linea); }
 @keyframes subir { from { transform: translateY(8px); opacity: 0; } }
-.hoja-cab { display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; }
-.hoja-cab h2 { font-size: 16px; flex: 1; }
-.hoja-cuerpo { padding: 4px 18px 18px; overflow-y: auto; min-height: 0; flex: 1; }
+.hoja-cab { display: flex; align-items: center; gap: 8px; height: var(--barra-v); flex: none; padding: 0 4px 0 14px; background: var(--fondo); border-bottom: 1px solid var(--linea); border-radius: 14px 14px 0 0; }
+/* la misma barra fina de las ventanas del riel (.ventana-barra): una sola medida, --barra-v */
+.hoja-cab h2 { font-size: 12px; font-weight: 600; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hoja-cab .btn.icono { width: 24px; height: 24px; flex: none; }
+.hoja-cab .btn.icono svg { width: 15px; height: 15px; }
+.hoja-cuerpo { padding: 14px 18px 18px; overflow-y: auto; min-height: 0; flex: 1; }
 .hoja-pie { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--linea); }
 .hoja-pie .izq { margin-right: auto; }
-.hoja-ajustes .hoja-cuerpo { padding: 0; display: flex; overflow: hidden; border-top: 1px solid var(--linea); }
+.hoja-ajustes .hoja-cuerpo { padding: 0; display: flex; overflow: hidden; }
 .aj { display: grid; grid-template-columns: 220px minmax(0, 1fr); flex: 1; min-height: 0; }
 .aj-nav { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--linea); background: var(--fondo); overflow-y: auto; }
 .aj-grupo { font-size: 11px; font-weight: 600; color: var(--tenue); text-transform: uppercase; letter-spacing: .04em; padding: 10px 10px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -503,10 +506,9 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .velo { padding: 0; align-items: flex-end; }
   .hoja { width: 100% !important; height: auto !important; max-height: calc(100dvh - 24px); border-radius: 14px 14px 0 0; border-bottom: 0; }
   .hoja[style*="height"] { height: calc(100dvh - 24px) !important; }
-  .hoja-cab { padding: 12px 12px 10px 16px; }
-  .hoja-cuerpo { padding: 4px 16px 16px; }
+  .hoja-cuerpo { padding: 12px 16px 16px; }
   .hoja-pie { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
-  .hoja-doc .hoja-cuerpo { padding: 6px 16px 20px; }
+  .hoja-doc .hoja-cuerpo { padding: 14px 16px 20px; }
   /* Ajustes en el celular: la lista ocupa todo; al entrar a una sección, la sección ocupa todo con «‹ Ajustes» */
   .aj { grid-template-columns: minmax(0, 1fr); }
   .aj-nav { border-right: 0; background: none; }
@@ -692,7 +694,7 @@ button.adjunto:hover { background: var(--panel-2); }
 .md th { background: rgba(127, 127, 127, .1); font-weight: 600; }
 
 /* visor de documentos */
-.hoja-doc .hoja-cuerpo { padding: 6px 28px 24px; }
+.hoja-doc .hoja-cuerpo { padding: 18px 28px 24px; }
 .md-doc { font-size: 14px; line-height: 1.6; }
 .hoja-doc .md-doc { max-width: 72ch; }
 .md-doc.md h2 { font-size: 21px; margin: 22px 0 8px; } .md-doc.md h3 { font-size: 17px; margin: 18px 0 6px; }
@@ -732,7 +734,7 @@ button.adjunto:hover { background: var(--panel-2); }
 }
 
 /* ================= navegación (nav.js): riel · lista de la sección · vista ================= */
-:root { --riel: 68px; --lista: 284px; --ancho-lectura: 760px; --charla: 500px; --escritorio: 720px; --escritorio-ancho: 1320px; }
+:root { --barra-v: 30px; --riel: 68px; --lista: 284px; --ancho-lectura: 760px; --charla: 500px; --escritorio: 720px; --escritorio-ancho: 1320px; }
 /* pantallas anchas (2K y más): los paneles se ensanchan para no quedar como una tira alta y angosta.
    --charla: la charla · --escritorio: bandeja, archivos y trabajo · --escritorio-ancho: biblioteca, conocimiento, creador… */
 @media (min-width: 1900px) { :root { --charla: 580px; --escritorio: 860px; } }
@@ -1075,7 +1077,7 @@ button.adjunto:hover { background: var(--panel-2); }
   .app.lista-plegada.lista-ver .ventana > .lista-col { display: flex; position: absolute; z-index: 5; left: 0; top: var(--barra-v); bottom: 0; box-shadow: var(--sombra-alta); }
   /* la barra fina de la ventana: la cruza de lado a lado (lista, panel y columnas) con la ruta y la única ×, que
      cierra todo. Las × de cada panel quedan escondidas (la de la barra las aprieta: app.js cerrarDesdeBarra). */
-  .app.en-seccion .ventana { --barra-v: 30px; padding-top: var(--barra-v); }
+  .app.en-seccion .ventana { padding-top: var(--barra-v); }
   .app.en-seccion .ventana-barra { display: flex; align-items: center; gap: 8px; position: absolute; z-index: 6; top: 0; left: 0; right: 0; height: var(--barra-v);
     padding: 0 4px 0 14px; background: var(--fondo); border-bottom: 1px solid var(--linea); font-size: 12px; color: var(--suave); }
   .ventana-ruta { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
