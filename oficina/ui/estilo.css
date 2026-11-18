@@ -219,7 +219,7 @@ select.campo { padding-right: 26px; }
 .selector-charla { height: 26px; padding: 0 8px; font-size: 12px; gap: 5px; color: var(--tenue); }
 .selector-charla svg { width: 14px; height: 14px; }
 .selector-charla.cambiado { color: var(--texto); box-shadow: inset 0 0 0 1px var(--linea-fuerte); }
-/* panel del selector de la charla: modelo en chips, esfuerzo y ahorro en deslizador, el detalle plegado */
+/* panel del selector de la charla: modelo, esfuerzo y ahorro en deslizador, el detalle plegado */
 .panel-charla { width: min(380px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 14px 16px 10px; }
 .pc-sec { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--linea); }
 .pc-sec:first-child { border-top: 0; padding-top: 0; }

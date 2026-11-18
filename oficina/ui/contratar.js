@@ -20,6 +20,15 @@
     { valor: 'xhigh', titulo: 'Muy alto', sub: 'Para problemas difíciles. Gasta bastante más.' },
     { valor: 'max', titulo: 'Máximo', sub: 'Todo lo que pueda pensar. El que más gasta.' },
   ];
+  /* orden del deslizador de modelo, de menos a más capaz y caro; el de Claude Code va como chip aparte */
+  App.MODELO_ESCALA = ['haiku', 'sonnet', 'opus'];
+  App.modeloOpciones = function () {
+    var ord = App.MODELO_ESCALA.map(function (v) { return App.MODELOS.filter(function (m) { return m.valor === v; })[0]; });
+    var resto = App.MODELOS.filter(function (m) { return App.MODELO_ESCALA.indexOf(m.valor) < 0; });
+    return ord.concat(resto).map(function (m) {
+      return { valor: m.valor, titulo: m.valor === 'inherit' ? 'Claude Code' : m.titulo, sub: m.sub, aparte: App.MODELO_ESCALA.indexOf(m.valor) < 0 };
+    });
+  };
   App.tituloModelo = function (v) { var m = App.MODELOS.filter(function (x) { return x.valor === v; })[0]; return m ? m.titulo : 'Sonnet'; };
   App.tituloEsfuerzo = function (v) { var m = App.ESFUERZOS.filter(function (x) { return x.valor === (v || ''); })[0]; return m ? m.titulo : ''; };
 
@@ -111,13 +120,12 @@
     function contenido(caja) {
       App.vaciar(caja);
       var e = efectivo(), d = defecto();
-      var subModelo = h('div.pc-nota');
+      var subModelo = h('div.pc-nota');   // el deslizador ya muestra qué hace cada modelo; acá solo el default del agente
       function notaModelo(m) {
-        var x = App.MODELOS.filter(function (y) { return y.valor === m; })[0];
-        subModelo.textContent = (x ? x.sub : '') + (m !== d.modelo ? ' El de este agente es ' + App.tituloModelo(d.modelo) + '.' : '');
+        subModelo.textContent = m !== d.modelo ? 'El de este agente es ' + App.tituloModelo(d.modelo) + '.' : '';
       }
-      var modelo = App.elegir({ forma: 'chips', etiqueta: 'Modelo', valor: e.modelo,
-        opciones: App.MODELOS.map(function (m) { return { valor: m.valor, titulo: m.valor === 'inherit' ? 'Claude Code' : m.titulo, sub: m.sub }; }),
+      var modelo = App.elegir({ forma: 'deslizador', etiqueta: 'Modelo', valor: e.modelo,
+        opciones: App.modeloOpciones(),
         alCambiar: function (m) { uno('modelo', m); notaModelo(m); pintarPie(); } });
       notaModelo(e.modelo);
       var esfuerzo = App.elegir({ forma: 'deslizador', etiqueta: 'Esfuerzo', valor: e.esfuerzo,
