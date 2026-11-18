@@ -18,7 +18,7 @@ App.Nav = (function () {
   var SECCIONES = [
     { id: 'bandeja', texto: 'Bandeja', icono: 'bandeja', ruta: '#/bandeja', movil: true },
     { id: 'oficina', texto: 'Oficina', icono: 'edificio', ruta: '#/oficina' },
-    { id: 'equipo', texto: 'Conversaciones', icono: 'personas', ruta: '#/equipo', movil: true },
+    { id: 'equipo', texto: 'Chats', icono: 'charla', ruta: '#/equipo', movil: true },
     { id: 'archivos', texto: 'Archivos', icono: 'carpeta', ruta: '#/archivos', movil: true },
     { id: 'trabajo', texto: 'Trabajo', icono: 'reloj', ruta: '#/trabajo' }
   ];
