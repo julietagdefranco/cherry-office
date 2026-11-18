@@ -491,6 +491,20 @@
       } });
     } else if (!est.encargable && !est.hecho && !enc) {
       principal = h('button.btn.chico.primario', { title: 'Marcalo como hecho: lo que dependa de esto puede seguir', onclick: function () { yaLoHice(r, i, p); } }, 'Ya lo hice');
+      /* nació a nombre de alguien que no es agente (o sin agente): dejá dárselo a uno de los tuyos */
+      var ags = (E.oficina.agentes || []);
+      if (ags.length && App.Agente && App.Agente.nuevaTarea) {
+        mas.push({ titulo: 'Dárselo a un agente' });
+        ags.forEach(function (a) {
+          mas.push({ retrato: a, texto: a.nombre, nota: a.rol || '', accion: function () {
+            App.Agente.nuevaTarea(a.id, {
+              nombre: p.que.length > 80 ? p.que.slice(0, 79) + '…' : p.que,
+              consigna: 'Pendiente de la reunión «' + (r.titulo || r.tema) + '»' + (r.acta ? ' (acta: ' + r.acta + ')' : '') + ': ' + p.que,
+              origen: { reunion: r.id, pendiente: i }, unica: true
+            }, function () { refrescar(r.id); });
+          } });
+        });
+      }
     }
     return App.filaDecision({ marca: marca, titulo: p.que, sub: sub.join(' · '), estado: estado, principal: principal, mas: mas });
   }
