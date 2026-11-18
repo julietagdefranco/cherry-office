@@ -346,7 +346,6 @@ App.Nav = (function () {
     var caja = h('div');
     var abierta = App.modoDerecho() === 'reunion' ? App.Reunion.abierta() : null;
     if (reuniones && abierta && !reuniones.some(function (x) { return x.id === abierta; })) cargarReuniones();   // recién creada
-    caja.appendChild(filtroFila('mas', 'Llamar a reunión', App.modoDerecho() === 'reunion-nueva', function () { App.Reunion.nueva(); }));
     if (!reuniones) { cargarReuniones(); caja.appendChild(App.cargando('Trayendo las reuniones…')); return caja; }
     var rs = reuniones.filter(function (x) { return !q || ((x.titulo || '') + ' ' + (x.tema || '') + ' ' + nombresDe(x).join(' ')).toLowerCase().indexOf(q) >= 0; });
     var vivas = rs.filter(function (x) { return x.estado !== 'cerrada'; });
@@ -397,7 +396,7 @@ App.Nav = (function () {
         pintarLista();
       } }, texto, extra);
     }
-    var inp = h('input.campo', { placeholder: eqTab === 'personas' ? 'Buscar persona' : 'Buscar reunión', value: buscarEq, 'aria-label': 'Buscar' });
+    var inp = h('input.campo', { placeholder: 'Buscar', value: buscarEq, 'aria-label': 'Buscar' });
     var cuerpo = h('div.lista-cuerpo');
     function llenar() {
       var q = buscarEq.trim().toLowerCase();
@@ -418,12 +417,14 @@ App.Nav = (function () {
     }
     inp.addEventListener('input', function () { buscarEq = inp.value; llenar(); });
     llenar();
+    var accion = eqTab === 'reuniones'
+      ? h('button.btn.chico', { title: 'Llamar a una reunión', onclick: function () { App.Reunion.nueva(); } }, App.icono('mas'), 'Nueva reunión')
+      : h('button.btn.chico', { title: 'Contratar un agente', onclick: function () { ir('#/equipo/contratar'); } }, App.icono('mas'), 'Contratar');
     App.add(App.vaciar(col),
-      cabecera('Equipo', h('button.btn.chico', { title: 'Contratar un agente', onclick: function () { ir('#/equipo/contratar'); } }, App.icono('mas'), 'Contratar')),
-      h('div.eq-tabs', { role: 'tablist' },
+      h('div.eq-tabs.eq-tabs-tope', { role: 'tablist' },
         pest('personas', 'Personas', h('em', String((App.E.oficina.agentes || []).length))),
         pest('reuniones', 'Reuniones', vivas ? h('span.en-curso', { title: vivas === 1 ? 'Una en curso' : vivas + ' en curso' }, h('i.vivo-p'), String(vivas)) : h('em', String((reuniones || []).length || '')))),
-      h('div.lista-buscar', App.icono('buscar'), inp), cuerpo);
+      h('div.eq-fila', h('div.lista-buscar', App.icono('buscar'), inp), accion), cuerpo);
     if (App.marcarEstados) App.marcarEstados();
   }
   /* Departamentos como pantalla (la misma sección de Ajustes): al guardar se vuelve a pintar */
