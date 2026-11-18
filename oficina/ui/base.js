@@ -797,7 +797,10 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     var bin = atob(c.base64), arr = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
     var url = URL.createObjectURL(new Blob([arr], { type: c.mime || 'application/octet-stream' }));
-    var w = window.open(url, '_blank');
+    // El PDF se ve dentro del navegador; el resto se baja. window.open sobre un blob baja sin nombre (usa el UUID de la
+    // URL, sin extensión), así que para bajar usamos un ancla con download, que conserva c.nombre.
+    var verInline = ext === 'pdf';
+    var w = verInline ? window.open(url, '_blank') : null;
     if (!w) { var a = h('a', { href: url, download: c.nombre || 'archivo' }); document.body.appendChild(a); a.click(); a.remove(); }
     setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   };
