@@ -22,11 +22,12 @@ import {
   OficinaStore, frecuenciasMemoria, escribirAtomico, topesMemoria, type ConsolidarMemoria, type Oficina,
 } from './oficina.js'
 import { anexarDecisiones } from './plantillas.js'
+import { similitud } from './texto-comun.js'
 import { no405, type Resp } from './router.js'
 import { registrarModulo, type Servicios } from './servicios.js'
 import { num, txt, type Fila, type SQLiteDB, type SQLValor } from './sqlite.js'
 import { CajaCosto } from './stream.js'
-import { Slug, largo, prefijo } from './validar.js'
+import { Slug, Validar, largo, prefijo } from './validar.js'
 
 // MARK: - tipos
 
@@ -626,6 +627,28 @@ export class MemoriaDatos {
 
 // MARK: - servicio
 
+const LimitesPregunta = { maxPregunta: 1000, maxTemas: 3, maxTemaChars: 6000 }
+type Fuente = { ref: string; ruta: string; titulo: string; tipo: string; fecha: string }
+
+/** `{"respuesta": "…", "citas": [1, 3]}` → respuesta y citas válidas (1..`max`, sin repetir). Si no es JSON, el texto es la respuesta,
+ *  sin citas. undefined si no hay nada que mostrar. */
+export function leerRespuesta(t: string, max: number): { respuesta: string; citas: number[] } | undefined {
+  const crudo = t.trim()
+  if (crudo === '') return undefined
+  const a = crudo.indexOf('{')
+  const b = crudo.lastIndexOf('}')
+  if (a >= 0 && b > a) {
+    try {
+      const o: unknown = JSON.parse(crudo.slice(a, b + 1))
+      if (esObjeto(o) && typeof o.respuesta === 'string' && o.respuesta.trim() !== '') {
+        const citas = Array.isArray(o.citas) ? o.citas.filter((n): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= max) : []
+        return { respuesta: o.respuesta.trim(), citas: [...new Set(citas)] }
+      }
+    } catch {}
+  }
+  return { respuesta: crudo, citas: [] }
+}
+
 const maxAnotacionesPorCorrida = 10
 const claveCupo = 'anotar'
 
@@ -636,6 +659,9 @@ export class Memoria {
   private readonly automatico: boolean
   /** Oficinas con una consolidación en curso en este proceso. */
   private readonly enCurso = new Set<string>()
+  /** Oficinas con una pregunta a «Preguntale» en curso: una a la vez. */
+  private readonly preguntando = new Set<string>()
+  private readonly timeoutPregunta: number
   /** Primera vez que el bucle vio cada oficina. */
   private readonly vistas = new Map<string, number>()
   private bucle?: { parar: () => void }
@@ -646,6 +672,7 @@ export class Memoria {
     this.datos.preparar()
     const num1 = (v: string | undefined, def: number) => { const n = Number((v ?? '').trim()); return (v ?? '').trim() !== '' && Number.isFinite(n) && n > 0 ? n : def }
     this.timeout = num1(s.env.HQ_MEMORIA_TIMEOUT, 300)
+    this.timeoutPregunta = num1(s.env.HQ_MEMORIA_PREGUNTA_TIMEOUT, 120)
     this.intervalo = num1(s.env.HQ_MEMORIA_INTERVALO, 600)
     this.automatico = s.env.HQ_MEMORIA !== '0'
   }
@@ -945,6 +972,12 @@ export class Memoria {
       this.marcarRevisada()
       return [200, { consolidacion: this.consolidacionJSON(this.datos.consolidacion(c.id)!) }]
     }
+    if (n === 3 && sub === 'preguntar') {
+      if (method !== 'POST') return no405
+      const a = this.activa()
+      const pregunta = Validar.texto(objeto(body).pregunta, 'pregunta', LimitesPregunta.maxPregunta)!
+      return [200, await this.preguntar(a.carpeta, a.oficina, pregunta)]
+    }
     if (sub === 'temas') {
       const a = this.activa()
       if (method !== 'GET') return no405
@@ -1006,6 +1039,64 @@ export class Memoria {
     conocimientoDe(this.s)?.datos.sincronizar(carpeta, true)
     const titulos = new Map(listarTemas(carpeta).map((t) => [t.slug, t.titulo]))
     return this.choqueJSON(this.datos.choque(carpeta, id)!, titulos)
+  }
+
+  // MARK: «Preguntale»
+
+  /** Contesta con citas a partir de la búsqueda y los temas. Solo lectura: sin herramientas, cada pregunta va sola. */
+  private async preguntar(carpeta: string, oficina: Oficina, pregunta: string): Promise<Obj> {
+    if (this.preguntando.has(carpeta)) throw new ErrorAPI(409, 'Ya estoy contestando otra pregunta.')
+    this.preguntando.add(carpeta)
+    const caja = new CajaCosto()
+    const t0 = Date.now()
+    try {
+      const con = conocimientoDe(this.s)
+      const { texto, fuentes } = this.materialPregunta(carpeta, oficina, pregunta, con)
+      let t: string
+      try {
+        t = await this.s.runner.correrSinAgente(Bibliotecario.promptPreguntar({ oficina, pregunta, material: texto }), { timeout: this.timeoutPregunta, cwd: carpeta, obs: caja.observador() })
+      } catch (e) {
+        if (e instanceof ClaudeError) throw new ErrorAPI(502, e.mensaje)
+        throw e
+      }
+      const r = leerRespuesta(t, fuentes.length)
+      if (!r) throw new ErrorAPI(502, 'No pude leer la respuesta. Probá de nuevo.')
+      this.log.info(`memoria: pregunta citas=${r.citas.length} seg=${((Date.now() - t0) / 1000).toFixed(1)}`)
+      return { respuesta: r.respuesta, citas: r.citas.map((n) => ({ n, ...fuentes[n - 1]! })) }
+    } finally {
+      this.preguntando.delete(carpeta)
+      this.s.store.registrarCosto({ oficina: carpeta, origen: 'memoria-preguntar', ref: '', costo: caja.valor })
+    }
+  }
+
+  /** Resultados de la búsqueda, `indice.md`, `decisiones.md` y hasta 3 temas enteros, numerados [1], [2]… para citar. */
+  private materialPregunta(carpeta: string, oficina: Oficina, pregunta: string, con: ReturnType<typeof conocimientoDe>): { texto: string; fuentes: Fuente[] } {
+    const fuentes: Fuente[] = []
+    let texto = ''
+    const agregar = (f: Fuente, cuerpo: string) => {
+      fuentes.push(f)
+      texto += `[${fuentes.length}] ${f.titulo} (${f.ruta}${f.fecha === '' ? '' : `, ${f.fecha}`})\n${cuerpo.trim()}\n\n`
+    }
+    const rutasBuscadas = new Set<string>()
+    if (con) {
+      con.datos.sincronizar(carpeta, true)
+      for (const r of con.datos.buscar(carpeta, prefijo(pregunta, 500), 8)) {
+        rutasBuscadas.add(r.ruta)
+        agregar({ ref: r.ref, ruta: r.ruta, titulo: r.titulo, tipo: r.tipo, fecha: diaLocal(new Date(r.ts * 1000)) }, `${r.autor === '' ? '' : `${con.nombre(oficina, r.autor)}: `}${r.fragmento}`)
+      }
+    }
+    const archivo = (rel: string, titulo: string, tipo: string, max = 12_000) => {
+      const t = leer(rutaDe(carpeta, rel)).trim()
+      const st = statDe(carpeta, rel)
+      if (t !== '' && st) agregar({ ref: rel, ruta: rel, titulo, tipo, fecha: diaLocal(new Date(st.mtimeMs)) }, prefijo(t, max))
+    }
+    archivo('conocimiento/indice.md', 'Índice de la memoria', 'oficina')
+    archivo('conocimiento/decisiones.md', 'Decisiones vigentes', 'decision')
+    const temas = listarTemas(carpeta)
+      .filter((t) => rutasBuscadas.has(`conocimiento/temas/${t.slug}.md`) || similitud(`${t.titulo} ${t.resumen}`, pregunta) >= 0.3 || similitud(t.titulo, pregunta) >= 0.3)
+      .slice(0, LimitesPregunta.maxTemas)
+    for (const t of temas) archivo(`conocimiento/temas/${t.slug}.md`, t.titulo, 'tema', LimitesPregunta.maxTemaChars)
+    return { texto, fuentes }
   }
 
   // MARK: herramienta MCP

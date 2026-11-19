@@ -4,13 +4,19 @@
 (function () {
   'use strict';
   var h = App.h, api = App.api;
-  var relojEstado = null, estadoPrevio = null;
+  var relojEstado = null, estadoPrevio = null, estadoMemoria = null;
   var PROCESANDO = { pendiente: 'En cola', extrayendo: 'Leyendo el texto', fichando: 'Haciendo la ficha', leyendo: 'Los agentes lo están leyendo' };
   var OFICINA = 'compartido';
 
   /* estado de la cola: insignia en la barra lateral y aviso cuando termina algo */
   function vigilarEstado() {
     clearTimeout(relojEstado);
+    /* lo que hay para decidir en la memoria (la insignia del menú «Memoria»); sin oficina abierta no se muestra */
+    api.get('/api/memoria').then(function (m) {
+      var antes = App.Memoria ? App.Memoria.contar(estadoMemoria) : 0;
+      estadoMemoria = m;
+      if (App.Memoria && App.Memoria.contar(m) !== antes) App.emit('memoria');
+    }).catch(function () {});
     api.get('/api/biblioteca/estado').then(function (st) {
       var b = App.dom && App.dom.navBib;
       if (b) {
@@ -58,7 +64,7 @@
   function abrir(slug) {
     if (App.Agente && App.Agente.alCerrar) App.Agente.alCerrar();
     var hj = App.hojaEnPanel({ titulo: 'Biblioteca', icono: 'libro', sinPie: true }, 'biblioteca');
-    var vista = 'todo';            // 'todo' | 'compartido' | id de departamento | 'propuestas'
+    var vista = 'todo';            // 'todo' | 'compartido' | id de departamento | 'memoria' | 'propuestas'
     var sel = typeof slug === 'string' && slug ? { tipo: 'archivo', id: slug } : null;   // {tipo: 'archivo'|'carpeta', id}
     var abiertas = {};             // carpetas vinculadas desplegadas en la lista
     var archivos = [], vinculos = [];
@@ -92,7 +98,7 @@
         pintar();
       }).catch(function (e) { App.vaciar(lista).appendChild(h('div.vacio', e.message)); });
     }, 150);
-    buscar.addEventListener('input', function () { if (vista === 'propuestas') vista = 'todo'; cargar(); });
+    buscar.addEventListener('input', function () { if (vista === 'propuestas' || vista === 'memoria') vista = 'todo'; cargar(); });
 
     function esDe(duenos, v) { return v === 'todo' || duenos.indexOf(v) >= 0; }
     function cuenta(v) {
@@ -105,7 +111,9 @@
       App.vaciar(btnSubir);
       App.add(btnSubir, App.icono('subir'), 'Subir a ' + textoDestino());
       pintarNav();
+      biblio.classList.remove('sin-det');
       if (vista === 'propuestas') { cargarPropuestas(); return; }
+      if (vista === 'memoria') { biblio.classList.remove('con-sel'); App.Memoria.pintar(lista, { det: det, biblio: biblio, alCambiar: function () { var n = App.Memoria.contar(estadoMemoria); vigilarEstado(); return n; } }); return; }
       det.style.display = '';
       pintarLista();
       pintarDetalle();
@@ -124,6 +132,7 @@
         itemNav(OFICINA, App.icono('personas'), 'Toda la oficina', cuenta(OFICINA)),
         deptos().map(function (d) { return itemNav(d.id, marca(d.id), d.nombre, cuenta(d.id)); }),
         h('div.biblio-nav-sep'),
+        itemNav('memoria', App.icono('libro'), 'Memoria', App.Memoria.contar(estadoMemoria) || null),
         itemNav('propuestas', App.icono('chispa'), 'Propuestas', np || null));
     }
 
@@ -427,6 +436,7 @@
 
     var alCambiar = function () { if (document.body.contains(hj.el)) cargar(); };
     App.on('biblioteca', alCambiar);
+    App.on('memoria', function () { if (document.body.contains(hj.el)) pintarNav(); });
     cargar();
   }
 

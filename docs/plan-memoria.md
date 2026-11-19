@@ -1,7 +1,8 @@
 # Plan: memoria que no crece sin control
 
-> Estado: propuesta. Tres fases que se pueden publicar por separado: M1 (estructura nueva y migración mecánica),
-> M2 (`anotar` y el bibliotecario de la memoria) y M3 (pestaña Memoria en la Biblioteca, con «Preguntale»).
+> Estado: implementado M1, M2 y M3 (M4 queda fuera de alcance). Sin verificar con el `claude` real: que `anotar` se use sin
+> pedir permiso y que los agentes dejen de leer `archivos.md` al empezar (ver «Preguntas abiertas» al final; falta anotarlo
+> en `docs/aprendizajes.md`). Se usaron los valores por defecto propuestos en las preguntas abiertas.
 
 ## Contexto
 Hoy la memoria de una oficina está en `conocimiento/` y los agentes la leen **entera al empezar cada corrida** (modo
