@@ -12,7 +12,11 @@ App.OficinaPixel = (function () {
   /* ---------- estado del módulo ---------- */
   var cont = null, vista = null, vc = null, capa = null, mundo = null, g = null, W = 800, H = 600, FX = 20, FY = 14;
   var cbAgente = function () {}, cbLugar = function () {}, cbPasar = null;
-  var salas = [], items = [], EST = null, figs = {}, orden = [], puestos = {}, sillasReu = [], spotsOcio = [], recepcion = null, despacho = null, bandeja = null, recepcionYo = null, cafeYo = null;
+  var salas = [], items = [], EST = null, figs = {}, orden = [], puestos = {}, sillasReu = [], spotsOcio = [], recepcion = null, despacho = null, bandeja = null, recepcionYo = null, cafeYo = null, puestoBib = null;
+  /* el bibliotecario de la memoria: vive detrás del mostrador de la Biblioteca; con la tablet en la mano mientras ordena
+     la memoria y con un aviso encima si hay algo para decidir. El estado lo manda la Biblioteca (App.Biblioteca.vigilarEstado) */
+  var BIB_ID = '__bibliotecario', bibDatos = { corriendo: false, pendientes: 0 };
+  var BIB_AVATAR = { semilla: 'bibliotecario', pxPelo: 'rodete', colorPelo: '#9a9a9a', pxArriba: 'traje', colorTorso: '#5b4a3a' };
   var trabajo = {}, faroDe = {}, ocupados = {}, elegido = null, reunionActual = { ids: [], quien: null }, muroDatos = { entregas: [], sinRevisar: 0 };
   var piezas = [], etiquetas = [], etqSalas = [], etqBandeja = null, hover = null, pausado = false, oficinaNombre = '', deptoColor = {};
   var FASE = null, LUZ = 0, T = 0, ultimoTick = 0, ultimoRevisar = 0, ultimo = 0, raf = 0, dormido = 0, sucio = true;
@@ -105,7 +109,7 @@ App.OficinaPixel = (function () {
 
   /* ---------- muebles de cada sala ---------- */
   function amueblar(perfil) {
-    items = []; puestos = {}; sillasReu = []; spotsOcio = []; recepcion = null; despacho = null; bandeja = null; recepcionYo = null; cafeYo = null;
+    items = []; puestos = {}; sillasReu = []; spotsOcio = []; recepcion = null; despacho = null; bandeja = null; recepcionYo = null; cafeYo = null; puestoBib = null;
     var filas = {}; salas.forEach(function (s) { (filas[s.fila] = filas[s.fila] || []).push(s); });
     Object.keys(filas).forEach(function (k) {
       var f = filas[k], y0 = f[0].r[1], i = +k;
@@ -171,6 +175,10 @@ App.OficinaPixel = (function () {
   function salaBiblioteca(s) {
     var x0 = s.r[0], y0 = s.r[1];
     put('biblioteca', x0 + .3, y0 + .2, { mira: '+y' }); put('biblioteca', x0 + 1.4, y0 + .2, { mira: '+y' }); put('biblioteca', x0 + .25, y0 + 1.6, { mira: '+x' });
+    // el puesto del bibliotecario: estantes al fondo y un mostrador que mira a la puerta; él queda detrás, al lado de los libros
+    put('biblioteca', x0 + 2.5, y0 + .2, { mira: '+y' }); put('biblioteca', x0 + 3.5, y0 + .2, { mira: '+y' });
+    put('mostrador', x0 + 2.65, y0 + 1.7, { mira: '+y' });
+    puestoBib = { x: x0 + 3.4, y: y0 + 1.25, mira: '+y', sit: false, sala: s };
     put('mesaLectura', x0 + 1.4, y0 + 2.8, {}); put('sillaVisita', x0 + 1.6, y0 + 2.35, { mira: '+y' }); put('sillaVisita', x0 + 2.2, y0 + 2.35, { mira: '+y' });
     put('sillon1', x0 + .5, y0 + 4.5, { mira: '+x', color: '#a0644a' }); put('lamparaPie', x0 + .3, y0 + 4.0, {});
     spotsOcio.push({ x: x0 + 1.9, y: y0 + 2.35, mira: '+y', sit: true, sala: s });
@@ -272,14 +280,15 @@ App.OficinaPixel = (function () {
   function figura(a, home, esYo) {
     var f = figs[a.id] || { a: a, x: home.x, y: home.y, mira: home.mira, sit: true, modo: 'puesto', ruta: null, k: 0, ocioDesde: 0, destYo: 'puesto' };
     f.a = a; f.home = home; f.yo = !!esYo; f.c = App.Pixel ? App.Pixel.spec(a.avatar, a.id) : null;
-    if (f.modo === 'puesto' && !f.ruta) { f.x = home.x; f.y = home.y; f.mira = home.mira; f.sit = true; }
+    if (f.modo === 'puesto' && !f.ruta) { f.x = home.x; f.y = home.y; f.mira = home.mira; f.sit = home.sit !== false; }
+    f.bib = a.id === BIB_ID;
     figs[a.id] = f; return f;
   }
   function bloqueado(id) { return trabajo[id] || ocupados[id] || elegido === id || faroDe[id] || reunionActual.ids.indexOf(id) >= 0; }
   var ESTADO_POSE = { pensando: 'pensar' };
   function poseDe(f) {
     if (f.ruta) return 'caminar';
-    if (!f.sit) return f.hablar ? 'hablar' : 'quieto';
+    if (!f.sit) return f.bib && bibDatos.corriendo ? 'tablet' : f.hablar ? 'hablar' : 'quieto';
     var id = f.a.id;
     if (faroDe[id] === 'error' && f.modo === 'puesto') return 'error';
     var t = trabajo[id]; if (t && f.modo === 'puesto') return ESTADO_POSE[t.estado] || 'tipear';
@@ -296,7 +305,7 @@ App.OficinaPixel = (function () {
     var seat = f.spot && f.spot.sofa ? 3.5 * S : 4 * S, sh = st === 'error' && (t % 16) < 6 ? (t % 2 ? 1 : -1) : 0, ay = sit ? f.sy - R(seat) : f.sy;
     if (f.c) drawChar(g, f.sx + sh, ay, f.c, o[0], sit, o[1], t + (f.semilla || 0), st);
     f.top = sit ? ay - (drawChar.ALTO_SENTADO || 26) : ay - (drawChar.ALTO || 43);
-    if (elegido === f.a.id || hover && hover.tipo === 'agente' && hover.id === f.a.id) {
+    if (elegido === f.a.id || hover && (hover.tipo === 'agente' && hover.id === f.a.id || f.bib && hover.id === 'bibliotecario')) {
       var c = elegido === f.a.id ? '#ffcf5a' : '#ffffff', sx = f.sx, sy0 = f.sy;
       L([sx - 15, sy0], [sx, sy0 - 7], c); L([sx, sy0 - 7], [sx + 15, sy0], c); L([sx + 15, sy0], [sx, sy0 + 7], c); L([sx, sy0 + 7], [sx - 15, sy0], c);
     }
@@ -342,7 +351,7 @@ App.OficinaPixel = (function () {
   function revisar(now) {
     var ids = reunionActual.ids || [];
     Object.keys(figs).forEach(function (id) {
-      var f = figs[id]; if (f.yo) { revisarYo(f, now); return; }
+      var f = figs[id]; if (f.bib) return; if (f.yo) { revisarYo(f, now); return; }
       var i = ids.indexOf(id);
       if (i >= 0 && i < sillasReu.length) { if (f.modo !== 'reunion' || f.spot !== sillasReu[i]) irA(f, Object.assign({ sit: true }, sillasReu[i]), 'reunion'); f.hablar = reunionActual.quien === id; return; }
       f.hablar = false;
@@ -509,12 +518,13 @@ App.OficinaPixel = (function () {
   }
   function pintarEtiquetas() {
     Object.keys(figs).forEach(function (id) {
-      var f = figs[id], t = trabajo[id], hab = reunionActual.quien === id;
-      if (f.etqNombre) { var vis = elegido === id || ocupados[id] || hab || (hover && hover.tipo === 'agente' && hover.id === id) || (hover && hover.tipo === 'yo' && f.yo);
+      var f = figs[id], t = f.bib ? (bibDatos.corriendo ? { estado: 'escribiendo', tarea: 'Bibliotecario', detalle: 'ordenando la memoria' } : null) : trabajo[id], hab = reunionActual.quien === id;
+      var faro = f.bib ? (bibDatos.pendientes && !bibDatos.corriendo ? 'aviso' : null) : faroDe[id];
+      if (f.etqNombre) { var vis = elegido === id || ocupados[id] || hab || (hover && hover.tipo === 'agente' && hover.id === id) || (hover && hover.tipo === 'yo' && f.yo) || (f.bib && hover && hover.id === 'bibliotecario');
         f.etqNombre.oculta = !vis || (t && !f.ruta && f.modo === 'puesto'); f.etqNombre.el.classList.toggle('activa', elegido === id); f.etqNombre.el.classList.toggle('ocupado', !!ocupados[id]); f.etqNombre.el.classList.toggle('hablando', hab); }
       if (f.etqTarea) { f.etqTarea.oculta = !t || f.modo !== 'puesto';
-        if (t) { f.etqTarea.titulo.textContent = t.tarea || (t.origen === 'reunion' ? 'En reunión' : 'Trabajando'); f.etqTarea.detalle.textContent = (VERBO[t.estado] || t.estado) + (t.objetivo ? ' ' + t.objetivo : ''); f.etqTarea.el.dataset.estado = t.estado; } }
-      if (f.etqFaro) { f.etqFaro.oculta = !faroDe[id]; f.etqFaro.el.firstChild.firstChild.textContent = faroDe[id] === 'error' ? '!' : '•'; f.etqFaro.el.dataset.tipo = faroDe[id] || ''; }
+        if (t) { f.etqTarea.titulo.textContent = t.tarea || (t.origen === 'reunion' ? 'En reunión' : 'Trabajando'); f.etqTarea.detalle.textContent = t.detalle || ((VERBO[t.estado] || t.estado) + (t.objetivo ? ' ' + t.objetivo : '')); f.etqTarea.el.dataset.estado = t.estado; } }
+      if (f.etqFaro) { f.etqFaro.oculta = !faro; f.etqFaro.el.firstChild.firstChild.textContent = faro === 'error' ? '!' : '•'; f.etqFaro.el.dataset.tipo = faro || ''; }
     });
     if (etqBandeja) { var n = muroDatos.sinRevisar || 0; etqBandeja.el.querySelector('span').textContent = n ? n + ' para revisar' : 'Bandeja al día'; etqBandeja.el.classList.toggle('al-dia', !n); }
     etqSalas.forEach(function (e) { e.el.classList.toggle('hover', !!(hover && e.sala && hover.sala === e.sala)); });
@@ -594,7 +604,7 @@ App.OficinaPixel = (function () {
     var m = aMundo(e), mejor = null;
     Object.keys(figs).forEach(function (id) { var f = figs[id]; if (f.sx == null) return;
       if (m[0] >= f.sx - 8 && m[0] <= f.sx + 8 && m[1] >= f.top && m[1] <= f.sy + 1 && (!mejor || f.x + f.y > mejor.f.x + mejor.f.y)) mejor = { f: f }; });
-    if (mejor) return mejor.f.yo ? { tipo: 'yo' } : { tipo: 'agente', id: mejor.f.a.id };
+    if (mejor) return mejor.f.bib ? { tipo: 'biblioteca', id: 'bibliotecario' } : mejor.f.yo ? { tipo: 'yo' } : { tipo: 'agente', id: mejor.f.a.id };
     var w = aPiso(m[0], m[1]);
     if (bandeja && Math.abs(w[0] - bandeja.x - .15) < .4 && Math.abs(w[1] - bandeja.y - .1) < .4) return { tipo: 'entregables', texto: etqBandeja ? etqBandeja.el.textContent : '' };
     if (recepcion && Math.abs(w[0] - recepcion.x) < 1.2 && Math.abs(w[1] - recepcion.y + .5) < .8) return { tipo: 'creador' };
@@ -688,6 +698,7 @@ App.OficinaPixel = (function () {
       var vivos = {};
       (oficina.agentes || []).forEach(function (a) { var p = puestos[a.id]; if (!p) return; var f = figura(a, Object.assign({ sit: true }, p)); f.semilla = hashStr(a.id) % 97; vivos[a.id] = 1; });
       if (despacho) { figura({ id: '__yo', nombre: (perfil && perfil.nombre) || 'Vos', avatar: perfil && perfil.avatar }, Object.assign({ sit: true }, despacho), true); vivos.__yo = 1; }
+      if (puestoBib) { figura({ id: BIB_ID, nombre: 'Bibliotecario', avatar: BIB_AVATAR }, puestoBib).semilla = 7; vivos[BIB_ID] = 1; }
       Object.keys(figs).forEach(function (id) { if (!vivos[id]) delete figs[id]; });
       armarEtiquetas();
       if (cambio || !cam.k) Object.assign(cam, encuadreGeneral());
@@ -702,12 +713,19 @@ App.OficinaPixel = (function () {
   function reunion(ids, quien) { reunionActual = { ids: (ids || []).slice(0, 10), quien: quien || null }; pintarEtiquetas(); revisar(performance.now()); pedir(); }
   function finReunion() { reunion([], null); }
   function muro(entregas, sinRevisar) { muroDatos = { entregas: entregas || [], sinRevisar: sinRevisar || 0 }; pintarEtiquetas(); pedir(); }
+  /* lo que sabe la Biblioteca de la memoria: {corriendo, propuesta, choques} (lo mismo que devuelve /api/memoria) */
+  function bibliotecario(st) {
+    st = st || {};
+    var nuevo = { corriendo: !!st.corriendo, pendientes: (st.choques || 0) + (st.propuesta ? 1 : 0) };
+    if (nuevo.corriendo === bibDatos.corriendo && nuevo.pendientes === bibDatos.pendientes) return;
+    bibDatos = nuevo; pintarEtiquetas(); pedir();
+  }
   function pausar(si) { pausado = !!si; if (pausado && dormido) { clearTimeout(dormido); dormido = 0; } if (!pausado) pedir(); }
 
   return {
     iniciar: iniciar, construir: construir, alElegirAgente: function (fn) { cbAgente = fn || function () {}; }, alElegirLugar: function (fn) { cbLugar = fn || function () {}; },
     alPasar: function (fn) { cbPasar = fn; }, elegir: elegir, ocupado: ocupado, reunion: reunion, finReunion: finReunion, encuadrar: encuadrar, actividad: actividad,
-    faros: faros, enfocar: function (x, z) { return enfocar(x, z); }, enfocarAgente: enfocarAgente, margen: margen, marcar: marcar, enfocarLugar: enfocarLugar, muro: muro, pieza: pieza, pedir: pedir, pausar: pausar,
+    faros: faros, enfocar: function (x, z) { return enfocar(x, z); }, enfocarAgente: enfocarAgente, margen: margen, marcar: marcar, enfocarLugar: enfocarLugar, muro: muro, pieza: pieza, pedir: pedir, pausar: pausar, bibliotecario: bibliotecario,
     pixel: true, _estado: function () { return { salas: salas.length, figuras: Object.keys(figs).length, items: items.length, W: W, H: H, cam: cam, fase: FASE && FASE.k,
       caminando: Object.keys(figs).filter(function (id) { return figs[id].ruta; }).length, dormido: !!dormido, piezas: piezas.length }; }
   };

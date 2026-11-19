@@ -4,7 +4,7 @@
 (function () {
   'use strict';
   var h = App.h, api = App.api;
-  var relojEstado = null, estadoPrevio = null, estadoMemoria = null;
+  var relojEstado = null, estadoPrevio = null, estadoMemoria = null, memoriaCorriendo = false;
   var PROCESANDO = { pendiente: 'En cola', extrayendo: 'Leyendo el texto', fichando: 'Haciendo la ficha', leyendo: 'Los agentes lo están leyendo' };
   var OFICINA = 'compartido';
 
@@ -16,6 +16,9 @@
       var antes = App.Memoria ? App.Memoria.contar(estadoMemoria) : 0;
       estadoMemoria = m;
       if (App.Memoria && App.Memoria.contar(m) !== antes) App.emit('memoria');
+      /* el bibliotecario de la oficina pixel trabaja y avisa según esto; mientras ordena se mira más seguido */
+      if (App.Oficina3D && App.Oficina3D.bibliotecario) App.Oficina3D.bibliotecario(m);
+      memoriaCorriendo = !!m.corriendo;
     }).catch(function () {});
     api.get('/api/biblioteca/estado').then(function (st) {
       var b = App.dom && App.dom.navBib;
@@ -27,7 +30,7 @@
       var cambio = estadoPrevio && (estadoPrevio.pendientes !== st.pendientes || estadoPrevio.total !== st.total || estadoPrevio.propuestas !== st.propuestas);
       estadoPrevio = st;
       if (cambio) App.emit('biblioteca');
-      relojEstado = setTimeout(vigilarEstado, st.pendientes || (st.cola || []).length ? 2500 : 15000);
+      relojEstado = setTimeout(vigilarEstado, st.pendientes || (st.cola || []).length ? 2500 : memoriaCorriendo ? 4000 : 15000);
     }).catch(function () { relojEstado = setTimeout(vigilarEstado, 20000); });
   }
 

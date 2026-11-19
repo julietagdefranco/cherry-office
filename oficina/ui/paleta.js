@@ -170,7 +170,7 @@ App.Paleta = (function () {
       t = 'Clic: hablar con ' + (a ? a.nombre : hov.id);
       if (act) t += ' · ' + (VERBO[act.estado] || act.estado) + (act.objetivo ? ' ' + act.objetivo : '');
     } else if (hov.tipo === 'reunion') t = 'Clic: abrir la sala de reuniones';
-    else if (hov.tipo === 'biblioteca') t = 'Clic: abrir la biblioteca';
+    else if (hov.tipo === 'biblioteca') t = hov.id === 'bibliotecario' ? 'El bibliotecario cuida la memoria de la oficina · clic: abrir la biblioteca' : 'Clic: abrir la biblioteca';
     else if (hov.tipo === 'direccion') t = 'Clic: lo que te espera para revisar';
     else if (hov.tipo === 'yo') t = 'Sos vos' + (App.Yo.nombre() ? ', ' + App.Yo.nombre() : '') + ' · clic: cambiar tu nombre o ' + (App.estiloOficina === 'pixel' ? 'tu apariencia' : 'tu minifig');
     else if (hov.tipo === 'creador') t = 'Clic: armar o cambiar la oficina con el Creador';
