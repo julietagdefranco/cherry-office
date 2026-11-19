@@ -135,12 +135,14 @@ App.OficinaPixel = (function () {
   function islaDoble(x, y, a1, a2, s) {
     var h = hu('escritorioDoble', {}), cx = x + h.w / 2, taza = (R(x * 7)) % 3 === 0;
     // el escritorio llama a atras/adelante sin argumentos: la animación sale de T (el cuadro actual)
+    // puestos cruzados (atrás a la derecha, adelante a la izquierda): en isométrico así los dos monitores quedan lado a
+    // lado; en la misma mitad caían en la misma columna de pantalla y parecían un solo monitor alto
     put('escritorioDoble', x, y, {
-      atras: function () { M.monitor(cx - .46, y + .3, { mira: '-y', estado: estadoMonitor(a1 && a1.id), t: T, luz: LUZ, seed: x * 3 }); M.tecladoMouse(cx - .45, y + .1, { mira: '-y' }); if (taza) M.taza(cx + .3, y + .2, { t: T }); },
-      adelante: function () { M.monitor(cx + .04, y + h.d - .42, { mira: '+y', estado: estadoMonitor(a2 && a2.id), t: T, luz: LUZ, seed: x * 5 }); M.tecladoMouse(cx + .05, y + h.d - .24, { mira: '+y' }); if (!taza) M.papeles(cx - .4, y + h.d - .3, {}); }
+      atras: function () { M.monitor(cx - .02, y + .3, { mira: '-y', estado: estadoMonitor(a1 && a1.id), t: T, luz: LUZ, seed: x * 3 }); M.tecladoMouse(cx + .05, y + .1, { mira: '-y' }); if (taza) M.taza(cx - .4, y + .2, { t: T }); },
+      adelante: function () { M.monitor(cx - .52, y + h.d - .42, { mira: '+y', estado: estadoMonitor(a2 && a2.id), t: T, luz: LUZ, seed: x * 5 }); M.tecladoMouse(cx - .45, y + h.d - .24, { mira: '+y' }); if (!taza) M.papeles(cx + .15, y + h.d - .3, {}); }
     });
     var hueco = x + h.w + .32;   // el lado de atrás se alcanza por el pasillo entre islas, no cruzando el escritorio
-    [[{ x: cx - .25, y: y - .38 }, '+y', a1], [{ x: cx + .25, y: y + h.d + .38 }, '-y', a2]].forEach(function (q) {
+    [[{ x: cx + .25, y: y - .38 }, '+y', a1], [{ x: cx - .25, y: y + h.d + .38 }, '-y', a2]].forEach(function (q) {
       var p = q[0], mira = q[1], a = q[2]; silla(p, mira);
       if (a) puestos[a.id] = { x: p.x, y: p.y, mira: mira, sala: s, aisle: mira === '+y' ? { x: hueco, y: p.y - .6 } : { x: p.x, y: p.y + .6 } };
     });

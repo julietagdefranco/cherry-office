@@ -228,18 +228,25 @@
   };
 
   /* monitor sobre el escritorio (o.z = altura de apoyo, 8 por defecto) */
-  M.huella.monitor = { w: .42, d: .12 };
+  /* apaisado: pantalla de ~6.5 x 4 (antes 0.42 x 7.5, quedaba más alto que ancho) */
+  M.huella.monitor = { w: .54, d: .12 };
   M.monitor = (x, y, o) => {
-    o = op(o); const W = .42, D = .12, z0 = o.z ?? 8, k = K(x, y, o.mira, W, D), seed = o.seed ?? semilla(x, y);
-    k.box(.12, .015, .18, .09, z0, .5, MAT.metalO);
-    k.box(.19, .03, .04, .03, z0 + .5, 3.5, MAT.metal);
-    k.box(0, .06, W, .04, z0 + 2.5, 7.5, T('#3a3d48', '#23252e', '#1a1c23', O, '#4b4f5c'), () => {
+    o = op(o); const W = .54, D = .12, z0 = o.z ?? 8, k = K(x, y, o.mira, W, D), seed = o.seed ?? semilla(x, y);
+    k.box(.17, .015, .2, .09, z0, .5, MAT.metalO);
+    k.box(.25, .03, .04, .03, z0 + .5, 2.5, MAT.metal);
+    const marco = T('#3a3d48', '#23252e', '#1a1c23', O, '#4b4f5c');
+    k.box(0, .06, W, .04, z0 + 2.5, 5.4, marco, () => {
+      /* el relleno y el contorno de abajo redondean distinto y dejaban píxeles de fondo en la diagonal: se tapa con una
+         línea del color de la cara, un píxel arriba del contorno */
+      const v = k.vis('front') ? .1 : .06, b = [k.P(0, v, z0 + 2.5), k.P(W, v, z0 + 2.5)].sort((p, q) => p[0] - q[0]);
+      N.line(b[0][0], b[0][1] - 1, b[1][0], b[1][1] - 1, marco.l);   // de izquierda a derecha, como el contorno de N.box
+      k.ln([0, v, z0 + 2.5], [0, v, z0 + 7.9], O); k.ln([W, v, z0 + 2.5], [W, v, z0 + 7.9], O);
       if (k.vis('front')) {
-        const S = k.cara('front', .03, .39, .1, z0 + 3.3, z0 + 9.4);
+        const S = k.cara('front', .07, W - .04, .1, z0 + 3.3, z0 + 7.2);
         pantalla(S, o.estado || 'inactivo', o.t, seed, o.luz || 0);
-        const l = k.cara('front', 0, W, .1, z0 + 2.5, z0 + 10)(.9, .96); N.px(l[0], l[1], (EST[o.estado] || EST.inactivo).led);
+        const l = k.cara('front', 0, W, .1, z0 + 2.5, z0 + 7.9)(.93, .95); N.px(l[0], l[1], (EST[o.estado] || EST.inactivo).led);
       } else {
-        const S = k.cara('back', .1, .32, .06, z0 + 4, z0 + 8.5);
+        const S = k.cara('back', .12, W - .12, .06, z0 + 3.6, z0 + 6.8);
         qS(S, 0, 1, 0, 1, '#2e3039'); lS(S, .2, .3, .8, .3, '#1c1d23'); lS(S, .2, .5, .8, .5, '#1c1d23');
       }
     });
