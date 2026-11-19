@@ -37,7 +37,7 @@ export const clavesModelo = Object.keys(modelosPorDefecto) as ClaveModelo[]
 export const modelosValidos = Validar.modelos
 
 /** Cómo usan la memoria de la oficina los agentes: `completa` = la leen al empezar cada charla, tarea o consulta
- *  (oficina.md, decisiones.md, archivos.md: crecen con el uso); `liviana` = solo si lo que les piden lo necesita. */
+ *  (oficina.md, indice.md, decisiones.md y sus notas: con tope, el resto se busca); `liviana` = solo si lo que les piden lo necesita. */
 export type MemoriaIA = 'completa' | 'liviana'
 export const esMemoriaIA = (v: unknown): v is MemoriaIA => v === 'completa' || v === 'liviana'
 /** Consumo de IA por defecto de toda la app (clave `ia` de config.json). Los pisan el agente (esfuerzo) y cada charla o

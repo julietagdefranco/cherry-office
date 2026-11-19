@@ -2,6 +2,7 @@
 // Los textos son idénticos a los de Swift: los leen los agentes y los tests comparan contenido.
 import fs from 'node:fs'
 import path from 'node:path'
+import { agregarAlMes, carpetasMemoria, diaLocal, mesLocal, regenerarIndice } from './memoria-estructura.js'
 import type { Oficina } from './oficina.js'
 
 export const marcaMemoria = '## Memoria de la oficina'
@@ -13,18 +14,20 @@ const base = ['conocimiento/agentes', 'reuniones', 'archivos', '.claude/agents']
 
 /** Crea la estructura de una oficina nueva. Nunca pisa un archivo que ya existe. */
 export function crearEstructura(carpeta: string, oficina: Oficina) {
-  for (const d of [...base, ...carpetasBiblioteca, ...oficina.departamentos.map((x) => `archivos/${x.id}`)]) {
+  for (const d of [...base, ...carpetasBiblioteca, ...carpetasMemoria, ...oficina.departamentos.map((x) => `archivos/${x.id}`)]) {
     fs.mkdirSync(path.join(carpeta, d), { recursive: true })
   }
   escribirSiFalta(carpeta, 'conocimiento/archivos.md', archivosMD())
   escribirSiFalta(carpeta, 'conocimiento/oficina.md', oficinaMD(oficina.nombre, oficina.duenio))
   escribirSiFalta(carpeta, 'conocimiento/decisiones.md', decisionesMD(oficina.nombre))
+  if (!fs.existsSync(path.join(carpeta, 'conocimiento/indice.md'))) regenerarIndice(carpeta)
 }
 
 /** Al abrir una oficina existente: recrea las carpetas que falten (sin tocar contenido). */
 export function completarEstructura(carpeta: string) {
-  for (const d of [...base, ...carpetasBiblioteca]) fs.mkdirSync(path.join(carpeta, d), { recursive: true })
+  for (const d of [...base, ...carpetasBiblioteca, ...carpetasMemoria]) fs.mkdirSync(path.join(carpeta, d), { recursive: true })
   escribirSiFalta(carpeta, 'conocimiento/archivos.md', archivosMD())
+  if (!fs.existsSync(path.join(carpeta, 'conocimiento/indice.md'))) regenerarIndice(carpeta)
 }
 
 export function escribirSiFalta(carpeta: string, rel: string, texto: string) {
@@ -39,7 +42,7 @@ export function escribirSiFalta(carpeta: string, rel: string, texto: string) {
 export function oficinaMD(nombre: string, duenio: string): string {
   return `# ${nombre}
 
-Memoria común de la oficina. Todos los agentes la leen al empezar; la edita ${duenio === '' ? 'el dueño' : duenio} y se completa con las decisiones de las reuniones.
+Memoria común de la oficina. Todos los agentes la leen al empezar: que sea corta (lo que crece va a los temas). La edita ${duenio === '' ? 'el dueño' : duenio}.
 
 - **Oficina:** ${nombre}
 - **Dueño:** ${duenio === '' ? '(sin completar)' : duenio}
@@ -58,7 +61,7 @@ Memoria común de la oficina. Todos los agentes la leen al empezar; la edita ${d
 export function decisionesMD(nombre: string): string {
   return `# Decisiones de ${nombre}
 
-Decisiones confirmadas. Solo se agregan al final (nunca se borran ni se reescriben), con fecha.
+Decisiones vigentes. Las nuevas se agregan al final, con fecha. El histórico completo está en \`conocimiento/decisiones/AAAA-MM.md\`.
 
 Formato: \`- AAAA-MM-DD: decisión (contexto breve si hace falta).\`
 `
@@ -79,7 +82,7 @@ export function notasAgenteMD(nombre: string, rol: string): string {
 
 Rol: ${rol}
 
-Acá ${nombre} anota lo que va aprendiendo: en qué está, qué entregó, qué espera de quién. Solo hechos, breve.
+Estado actual de ${nombre}: en qué está, qué entregó último, qué espera de quién. Corto y al día: lo viejo pasa al historial.
 `
 }
 
@@ -88,6 +91,12 @@ export const lineaConsultas = 'Podés consultar a un colega con la herramienta c
 
 /** Documenta las herramientas de conocimiento compartido (conocimiento.ts). Su presencia también marca una sección al día. */
 export const lineaConocimiento = 'Antes de consultar, buscá si ya se sabe con buscar(pregunta) (notas, decisiones, actas, entregables y respuestas de colegas, lo más nuevo primero) y usá quien_sabe(tema) para saber a quién preguntarle. Si encontrás algo desactualizado, marcalo con marcar_obsoleto(ref, motivo).'
+
+/** Documenta el índice y los temas de la memoria. Su presencia también marca una sección al día. */
+export const lineaIndice = 'Al empezar leé `conocimiento/indice.md`: una línea por tema que la oficina tiene escrito. Abrí `conocimiento/temas/<slug>.md` solo de los temas que tengan que ver con lo que te piden. El histórico (`conocimiento/decisiones/`, `conocimiento/diario/`, `conocimiento/agentes/<id>/`) no lo leas entero: buscalo con buscar(pregunta).'
+
+/** Documenta la herramienta `anotar` (memoria.ts). Su presencia también marca una sección al día. */
+export const lineaAnotar = 'Si aprendés algo que la oficina tiene que recordar (un dato, un cambio, una preferencia de la persona), dejalo con anotar(tema, hecho): una línea, solo hechos, en un tema del índice si ya existe. No copies charlas enteras. Tus notas son para tu estado de trabajo; anotar es para lo que le sirve a todos.'
 
 /** Formato de los entregables: lo que se ve en la app es HTML (se dibuja al costado de la charla); los archivos de Office
  *  (.pptx, .docx, .xlsx) son binarios que la app no sabe mostrar, así que solo se hacen si la persona los pide. Su presencia
@@ -98,18 +107,20 @@ export const lineaFormato = 'Formato de lo que entregues: para presentaciones, i
 export function seccionMemoria(id: string): string {
   return `${marcaMemoria}
 Tu carpeta de trabajo es la raíz de la oficina; todas las rutas son relativas a ella.
-- Al empezar: leé \`conocimiento/oficina.md\` (contexto del negocio) y \`conocimiento/decisiones.md\` (decisiones confirmadas) y, si son relevantes para lo que te piden, las notas de otros agentes en \`conocimiento/agentes/<id>.md\`.
-- Al terminar algo concreto (una entrega, un pedido que quedó esperando a alguien, un cambio de plan): actualizá con Edit o Write SOLO tu archivo \`conocimiento/agentes/${id}.md\`. Breve y solo hechos: en qué estás, qué entregaste, qué esperás de quién. Sin suposiciones.
-- Conocimiento y archivos: \`conocimiento/archivos.md\` es el catálogo de documentos de la oficina (una línea por documento); leelo al empezar. Cada documento tiene su ficha en \`conocimiento/fuentes/<slug>.md\` y su texto en \`archivos/.texto/<slug>.md\`; el material original está en \`archivos/\` (\`compartido/\` es de todos, el resto por departamento). Para citar un documento, usá la ficha.
+- Al empezar: leé \`conocimiento/oficina.md\` (contexto del negocio), \`conocimiento/decisiones.md\` (decisiones vigentes) y tus notas \`conocimiento/agentes/${id}.md\`. Las notas de otros agentes, solo si vienen al caso.
+- ${lineaIndice}
+- Tus notas son tu estado actual: en qué estás, qué entregaste, qué esperás de quién. Actualizalas con Edit o Write SOLO en \`conocimiento/agentes/${id}.md\`, al terminar algo concreto, y mantenelas cortas (unas 40 líneas): reemplazá lo que ya no vale en vez de acumular. No borres las líneas \`- [ ]\` de «Pendientes de reuniones»: marcalas \`- [x]\` cuando estén hechas. Breve y solo hechos, sin suposiciones.
+- Conocimiento y archivos: \`conocimiento/archivos.md\` es el catálogo de documentos de la oficina (una línea por documento): leelo cuando necesites un documento, no al empezar. Cada documento tiene su ficha en \`conocimiento/fuentes/<slug>.md\` y su texto en \`archivos/.texto/<slug>.md\`; el material original está en \`archivos/\` (\`compartido/\` es de todos, el resto por departamento). Para citar un documento, usá la ficha.
 - Lo que produzcas para el usuario (informes, borradores, archivos) guardalo con Write en \`archivos/entregables/${id}/\`; esa es la única carpeta de archivos donde podés escribir.
 - No podés escribir ningún otro archivo (el sistema lo impide igual). Si algo debería quedar como decisión, proponelo en una reunión o decile al usuario que lo registre.
 - ${lineaConsultas}
 - ${lineaConocimiento}
+- ${lineaAnotar}
 - ${lineaFormato}`
 }
 
 /** Al abrir una oficina: reescribe la sección de memoria de los `.md` de agente desactualizados (sin la línea de
- *  consultas, la de conocimiento o la de formato). Solo toca desde la marca hasta el final. Idempotente. Devuelve cuántos reescribió. */
+ *  consultas, la de conocimiento, la de formato, la del índice o la de anotar). Solo toca desde la marca hasta el final. Idempotente. Devuelve cuántos reescribió. */
 export function actualizarMemoria(carpeta: string, ids: string[]): number {
   let n = 0
   for (const id of ids) {
@@ -121,7 +132,7 @@ export function actualizarMemoria(carpeta: string, ids: string[]): number {
       continue
     }
     const i = t.indexOf(marcaMemoria)
-    if (i < 0 || (t.includes(lineaConsultas) && t.includes(lineaConocimiento) && t.includes(lineaFormato))) continue
+    if (i < 0 || (t.includes(lineaConsultas) && t.includes(lineaConocimiento) && t.includes(lineaFormato) && t.includes(lineaIndice) && t.includes(lineaAnotar))) continue
     try {
       const tmp = `${p}.tmp`
       fs.writeFileSync(tmp, t.slice(0, i) + seccionMemoria(id) + '\n')
@@ -250,25 +261,34 @@ export function promptDe(cuerpo: string): string {
 
 // MARK: decisiones (para reuniones)
 
-/** Agrega líneas `- AAAA-MM-DD: texto` al final de `conocimiento/decisiones.md` (append-only). */
-export function anexarDecisiones(carpeta: string, decisiones: string[], fecha = new Date()) {
+/** Agrega líneas `- AAAA-MM-DD: texto` al final de `conocimiento/decisiones.md` y, si la oficina ya tiene
+ *  `conocimiento/decisiones/`, también al histórico del mes (`nombre` es el de la oficina, para el encabezado del mes). */
+export function anexarDecisiones(carpeta: string, decisiones: string[], fecha = new Date(), nombre = '') {
   if (decisiones.length === 0) return
   const p = path.join(carpeta, 'conocimiento/decisiones.md')
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const dia = `${fecha.getFullYear()}-${pad(fecha.getMonth() + 1)}-${pad(fecha.getDate())}`
+  const dia = diaLocal(fecha)
+  const nuevas: string[] = []
   let actual = ''
   try {
     actual = fs.readFileSync(p, 'utf8')
   } catch {}
   if (actual !== '' && !actual.endsWith('\n')) actual += '\n'
+  // si el bibliotecario dejó una sección «Sin decidir» al final, las decisiones nuevas van antes
+  const cola = actual.indexOf('\n## Sin decidir')
+  const sinDecidir = cola >= 0 ? actual.slice(cola + 1) : ''
+  if (cola >= 0) actual = actual.slice(0, cola + 1)
   for (const d of decisiones) {
     const una = d.split(/\r\n|[\n\r\u2028\u2029\u0085\u000b\u000c]/).filter((x) => x !== '').join(' ').trim()
-    if (una !== '') actual += `- ${dia}: ${una}\n`
+    if (una === '') continue
+    actual += `- ${dia}: ${una}\n`
+    nuevas.push(`- ${dia}: ${una}`)
   }
+  if (sinDecidir !== '') actual += `\n${sinDecidir}`
   fs.mkdirSync(path.dirname(p), { recursive: true })
   const tmp = `${p}.tmp`
   fs.writeFileSync(tmp, actual)
   fs.renameSync(tmp, p)
+  if (fs.existsSync(path.join(carpeta, 'conocimiento/decisiones'))) agregarAlMes(carpeta, nombre, mesLocal(fecha), nuevas)
 }
 
 // MARK: el Creador

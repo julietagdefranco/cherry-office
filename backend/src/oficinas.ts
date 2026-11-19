@@ -12,6 +12,7 @@ import {
   OficinaStore, ValidarAgenteExtra, clavesAvatar, escribirAtomico, validarOficina,
   type Avatar, type Departamento, type Oficina,
 } from './oficina.js'
+import { migrarMemoria } from './memoria-estructura.js'
 import { actualizarMemoria, completarEstructura, crearEstructura } from './plantillas.js'
 import { Slug, Validar, largo } from './validar.js'
 
@@ -194,7 +195,7 @@ export class Oficinas {
     } else {
       dir = Oficinas.carpetaLibre(this.config.oficinasDir, n)
     }
-    const of: Oficina = { version: 1, nombre: n, duenio: d, departamentos: deps, agentes: [] }
+    const of: Oficina = { version: 1, nombre: n, duenio: d, departamentos: deps, agentes: [], memoria: { version: 2 } }
     validarOficina(of)
     try {
       crearEstructura(dir, of)
@@ -230,13 +231,39 @@ export class Oficinas {
       esDir = fs.statSync(dir).isDirectory()
     } catch {}
     if (!esDir) throw new ErrorAPI(404, 'No encuentro esa carpeta.')
-    const o = OficinaStore.leer(dir)
+    const o = this.prepararCarpeta(dir)
+    this.activar(dir, o.nombre)
+    return new OficinaActiva(dir, o)
+  }
+
+  /** Lo que se hace con una oficina al abrirla: completa la estructura, migra la memoria a la estructura nueva (con
+   *  respaldo; un error no impide abrir) y pone al día la sección de memoria de los agentes. Devuelve la oficina leída. */
+  private prepararCarpeta(dir: string): Oficina {
+    let o = OficinaStore.leer(dir)
     try {
       completarEstructura(dir)
     } catch {}
+    try {
+      const m = migrarMemoria(dir, o)
+      if (m.migrada) {
+        OficinaStore.escribir(m.oficina, dir)
+        o = m.oficina
+        this.log.info(`memoria migrada respaldo=${m.respaldo}`)
+      } else if (m.fallo) this.log.warn('no pude migrar la memoria: falló el respaldo (se reintenta al abrir)')
+    } catch {
+      this.log.warn('no pude migrar la memoria de la oficina')
+    }
     actualizarMemoria(dir, o.agentes.map((a) => a.id))
-    this.activar(dir, o.nombre)
-    return new OficinaActiva(dir, o)
+    return o
+  }
+
+  /** Al arrancar con una oficina activa (`abrir` no se llama): hace lo mismo que `abrir`, sin activar. */
+  prepararActiva() {
+    const c = this.activaCarpeta
+    if (!c) return
+    try {
+      this.prepararCarpeta(c)
+    } catch {}
   }
 
   /** Borra la oficina `dir` de la app: deja de estar activa y en recientes, olvida lo guardado en hq.db y borra la

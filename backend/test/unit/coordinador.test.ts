@@ -44,10 +44,10 @@ describe('Coordinador', () => {
   test('el perfil agente no ve las herramientas del coordinador, ni siquiera llamándolas por nombre', async () => {
     const { tools, s, carpeta } = await preparar()
     const h = tools('marce', 'agente')
-    expect(nombres(h)).toEqual(['colegas', 'consultar', 'quien_sabe', 'buscar', 'marcar_obsoleto', 'pedir', 'quedo_esperando', 'cancelar_espera'])
+    expect(nombres(h)).toEqual(['colegas', 'consultar', 'quien_sabe', 'buscar', 'marcar_obsoleto', 'anotar', 'pedir', 'quedo_esperando', 'cancelar_espera'])
     for (const n of Coordinador.nombresMCP) expect(await h.llamar(n, {})).toBeUndefined()
     const c = tools('coordi', 'coordinador')
-    expect(nombres(c)).toEqual(['colegas', 'consultar', 'quien_sabe', 'buscar', 'marcar_obsoleto', 'estado_oficina', 'entregas', 'corridas', 'bloqueos', 'encargar', 'pedir', 'quedo_esperando', 'cancelar_espera'])
+    expect(nombres(c)).toEqual(['colegas', 'consultar', 'quien_sabe', 'buscar', 'marcar_obsoleto', 'anotar', 'estado_oficina', 'entregas', 'corridas', 'bloqueos', 'encargar', 'pedir', 'quedo_esperando', 'cancelar_espera'])
     expect(herramientasCoordinador(s, 't', { oficina: carpeta, agente: 'marce', sid: U.a, perfil: 'agente' })).toBeUndefined()
   })
 

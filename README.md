@@ -34,6 +34,9 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
   cada corrida en vivo y una pieza viaja por la maqueta.
 - **Tareas programadas, Parte del día y Biblioteca:** tareas repetidas o de una sola vez, un resumen de lo que pasó y
   qué está trabado, y una biblioteca de documentos con fichas que los agentes pueden consultar.
+  La memoria de la oficina se guarda por tema y por fecha: los agentes leen al empezar solo lo corto (`oficina.md`, un índice
+  de temas, las decisiones vigentes y sus notas) y el resto, el histórico incluido, se busca. Los agentes dejan lo que
+  aprenden con `anotar` y un bibliotecario interno lo ordena por tema (la primera vez, con una propuesta que revisás vos).
 - **Tiempo libre:** cuando no tienen trabajo, los agentes van a la sala de juegos y café.
 
 ## Estructura del repo

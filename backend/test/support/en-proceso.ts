@@ -8,7 +8,7 @@ export type Resp = { status: number; obj: Record<string, any> }
 
 /** Backend sin bucles de fondo (HQ_PROGRAMADOR=0) que se cierra solo al terminar el test. */
 export function arrancar(sb: Sandbox, env: Record<string, string> = {}): Backend {
-  const e = { ...process.env, HOME: sb.home, HQ_HOME: sb.home, HQ_DATA_DIR: sb.datos, HQ_OFICINAS_DIR: sb.oficinasDir, HQ_PROGRAMADOR: '0', ...env } as NodeJS.ProcessEnv
+  const e = { ...process.env, HOME: sb.home, HQ_HOME: sb.home, HQ_DATA_DIR: sb.datos, HQ_OFICINAS_DIR: sb.oficinasDir, HQ_PROGRAMADOR: '0', HQ_MEMORIA: '0', ...env } as NodeJS.ProcessEnv
   fs.mkdirSync(sb.datos, { recursive: true })
   const b = createBackend({ config: Config.load(sb.home, e), claudePath: sb.bin, env: e })
   // lo cierra el sandbox antes de borrar su temporal (onTestFinished no garantiza el orden)

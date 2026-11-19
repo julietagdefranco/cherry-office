@@ -184,7 +184,7 @@ function recorrer(base: string): [string, fs.Stats][] {
   return out
 }
 
-/** Copia la carpeta de la oficina a `destino` sin seguir enlaces simbólicos y sin la papelera ni los `.DS_Store`.
+/** Copia la carpeta de la oficina a `destino` sin seguir enlaces simbólicos y sin la papelera, los respaldos de la memoria (`conocimiento/.respaldo-*`) ni los `.DS_Store`.
  *  Devuelve true si la papelera tenía algo (quedó afuera). */
 export function copiar(origen: string, destino: string): boolean {
   fs.mkdirSync(destino, { recursive: true })
@@ -203,6 +203,11 @@ export function copiar(origen: string, destino: string): boolean {
       try { papelera = fs.readdirSync(path.join(origen, 'archivos', '.papelera')).length > 0 } catch {}
       omitidos.push(rel)
       fs.mkdirSync(path.join(destino, ...rel.split('/')), { recursive: true })
+      continue
+    }
+    // el respaldo de la migración de la memoria es de esta compu: no viaja
+    if (/^conocimiento\/\.respaldo-[^/]+$/.test(rel)) {
+      omitidos.push(rel)
       continue
     }
     if (nombre === '.DS_Store' || st.isSymbolicLink()) continue

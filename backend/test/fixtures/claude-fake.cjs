@@ -54,7 +54,10 @@ async function main() {
 
   let kind = ''
   if (agent === '') {
-    if (m.includes('ador de equipos')) kind = 'borrador'
+    // primero las de la memoria: su material puede traer cualquier texto (actas, notas…)
+    if (m.includes('Ordenás la memoria de la oficina')) kind = 'memoria'
+    else if (m.includes('Te consultan sobre la memoria de la oficina')) kind = 'preguntale'
+    else if (m.includes('ador de equipos')) kind = 'borrador'
     else if (m.includes('secretario de actas')) kind = 'acta'
     else if (m.includes('Sos quien ordena el trabajo')) kind = 'tareaschat'
     else if (m.includes('Sos el bibliotecario')) kind = 'ficha'
@@ -107,6 +110,8 @@ async function main() {
     switch (kind) {
       case 'borrador': salida(String.raw`{"type":"result","result":"Acá va el borrador:\n` + '```' + String.raw`json\n{\"id\":\"valentina\",\"nombre\":\"Valentina\",\"rol\":\"Analista de datos\",\"description\":\"Analista de datos. Usala cuando haga falta medir resultados.\",\"prompt\":\"Sos Valentina, analista de datos.\",\"chips\":[\"¿Cómo vamos?\",\"Armame un informe\",\"¿Qué medimos?\"],\"modelo\":\"sonnet\"}\n` + '```' + '","is_error":false}'); break
       case 'acta': salida(String.raw`{"type":"result","result":"{\"resumen\":\"Se acordó avanzar con el plan.\",\"decisiones\":[\"Lanzar en diciembre\",\"Priorizar los reels\"],\"pendientes\":[{\"quien\":\"Marce\",\"que\":\"Armar el calendario\"}]}","is_error":false}`); break
+      case 'memoria': salida(String.raw`{"type":"result","result":"{\"temas\":[],\"no_vigentes\":[],\"agentes\":[],\"choques\":[],\"oficina\":null,\"resumen\":\"Nada para ordenar.\"}","is_error":false,"total_cost_usd":0.05}`); break
+      case 'preguntale': salida(String.raw`{"type":"result","result":"{\"respuesta\":\"Según lo escrito, no hay más datos. [1]\",\"citas\":[1]}","is_error":false,"total_cost_usd":0.04}`); break
       case 'tareaschat': salida(String.raw`{"type":"result","result":"{\"pendientes\":[{\"quien\":\"Marce\",\"nombre\":\"Calendario de diciembre\",\"consigna\":\"Armá el calendario de publicaciones de diciembre con los reels acordados.\",\"depende_de\":[]},{\"quien\":\"\",\"consigna\":\"Aprobar el presupuesto con el cliente\",\"necesita_usuario\":true,\"depende_de\":[1]}]}","is_error":false,"total_cost_usd":0.01}`); break
       case 'ficha': salida(String.raw`{"type":"result","result":"{\"titulo\":\"Ficha de prueba\",\"resumen\":\"Resumen de prueba del documento.\",\"datos_clave\":[\"dato uno\"],\"temas\":[\"pruebas\"],\"util_para\":[\"direccion\"],\"fechas\":[],\"contradicciones\":[]}","is_error":false}`); break
       case 'imagen': salida('{"type":"result","result":"Una imagen de prueba con el texto HOLA MUNDO.","is_error":false}'); break

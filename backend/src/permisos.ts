@@ -60,7 +60,7 @@ export const herramientasColegas = ['consultar', 'colegas', 'quien_sabe', 'pedir
 
 /** Se suma a las instrucciones con la memoria en modo liviano: la plantilla del agente le pide leer la memoria al empezar
  *  (verificado con el claude real: esto lo pisa y el mensaje sale en un solo viaje). */
-export const textoMemoriaLiviana = '## Memoria (modo liviano)\nEn esta corrida NO leas al empezar conocimiento/oficina.md, conocimiento/decisiones.md ni conocimiento/archivos.md. Respondé con lo que ya sabés; buscá (buscar) o leé un archivo puntual solo si lo que te piden no se puede resolver sin eso.'
+export const textoMemoriaLiviana = '## Memoria (modo liviano)\nEn esta corrida NO leas al empezar conocimiento/oficina.md, conocimiento/indice.md ni conocimiento/decisiones.md. Respondé con lo que ya sabés; buscá (buscar) o leé un archivo puntual solo si lo que te piden no se puede resolver sin eso.'
 
 /** Instrucciones + el aviso de memoria liviana si corresponde. */
 export function conMemoria(instrucciones: string | undefined, memoria: MemoriaIA): string | undefined {
@@ -111,7 +111,7 @@ export type ServidorConector = { nombre: string; prefijo: string; estado: string
 
 /** Herramientas MCP del servidor propio (`hq`): consultar a un colega, ver quiénes son, saber quién sabe de un tema,
  *  buscar en lo que ya se sabe y marcar algo como desactualizado (estas tres las sirve conocimiento.ts). */
-export const herramientasMCP = ['mcp__hq__consultar', 'mcp__hq__colegas', 'mcp__hq__quien_sabe', 'mcp__hq__buscar', 'mcp__hq__marcar_obsoleto']
+export const herramientasMCP = ['mcp__hq__consultar', 'mcp__hq__colegas', 'mcp__hq__quien_sabe', 'mcp__hq__buscar', 'mcp__hq__marcar_obsoleto', 'mcp__hq__anotar']
 /** Variable de entorno con el token del servidor MCP (así no aparece en los argumentos del proceso). */
 export const variableTokenMCP = 'HQ_MCP_TOKEN'
 /** Lo que un agente puede pedir en un chat (además de lo que ya tiene): comandos y escribir archivos. */

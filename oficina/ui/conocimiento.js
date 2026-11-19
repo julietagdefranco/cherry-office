@@ -4,7 +4,7 @@
 (function () {
   'use strict';
   var h = App.h, api = App.api;
-  var TIPOS = { oficina: 'Memoria común', decision: 'Decisión', notas: 'Notas', acta: 'Acta', ficha: 'Documento', entregable: 'Entregable', pregunta: 'Pregunta frecuente' };
+  var TIPOS = { oficina: 'Memoria común', decision: 'Decisión', notas: 'Notas', acta: 'Acta', ficha: 'Documento', entregable: 'Entregable', pregunta: 'Pregunta frecuente', tema: 'Tema', diario: 'Diario' };
   var VENCE = [['', 'No vence'], ['30', '30 días'], ['60', '60 días'], ['90', '90 días'], ['180', '6 meses'], ['365', '1 año']];
   var reloj = null;
 
@@ -150,7 +150,7 @@
           res.appendChild(h('div.con-item' + (x.obsoleto ? '.obsoleto' : ''),
             h('div.con-cab', h('span.insignia', TIPOS[x.tipo] || x.tipo), h('span.con-tit', x.titulo || App.humano.ruta(x.ruta).corta),
               x.vencida ? h('span.insignia.aviso', 'Vencida') : null,
-              h('span.con-meta', (x.autorNombre ? x.autorNombre + ' · ' : '') + x.fecha)),
+              h('span.con-meta', (x.autorNombre ? x.autorNombre + ' · ' : '') + x.fecha + (x.historico ? ' · histórico' : ''))),
             fragmento(x.fragmento),
             x.obsoleto ? h('div.ayuda', 'Desactualizado' + (x.obsoleto.motivo ? ': ' + x.obsoleto.motivo : '') + ' (marcado por ' + x.obsoleto.por + ', ' + x.obsoleto.fecha + ')') : null,
             h('div.con-acciones', h('span.con-ruta'), x.tipo === 'pregunta' ? null : botonAbrir(x.ruta), marcar)));
