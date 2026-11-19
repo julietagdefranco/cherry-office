@@ -60,7 +60,7 @@ export const herramientasColegas = ['consultar', 'colegas', 'quien_sabe', 'pedir
 
 /** Se suma a las instrucciones con la memoria en modo liviano: la plantilla del agente le pide leer la memoria al empezar
  *  (verificado con el claude real: esto lo pisa y el mensaje sale en un solo viaje). */
-export const textoMemoriaLiviana = '## Memoria (modo liviano)\nEn esta corrida NO leas al empezar conocimiento/oficina.md, conocimiento/decisiones.md ni conocimiento/archivos.md. Respondé con lo que ya sabés; buscá (buscar) o leé un archivo puntual solo si lo que te piden no se puede resolver sin eso.'
+export const textoMemoriaLiviana = '## Memoria (modo liviano)\nEn esta corrida NO leas al empezar conocimiento/oficina.md, conocimiento/indice.md ni conocimiento/decisiones.md. Respondé con lo que ya sabés; buscá (buscar) o leé un archivo puntual solo si lo que te piden no se puede resolver sin eso.'
 
 /** Instrucciones + el aviso de memoria liviana si corresponde. */
 export function conMemoria(instrucciones: string | undefined, memoria: MemoriaIA): string | undefined {

@@ -310,6 +310,20 @@ describe('Consultas entre agentes (MCP)', () => {
     expect(f.leer(rel)).toBe(hoy)                                  // idempotente
   })
 
+  test('seccionMemoria: lleva la línea del índice; un .md sin ella se actualiza al abrir (y el nuevo la trae)', async () => {
+    const lineaIndice = 'Al empezar leé `conocimiento/indice.md`'
+    const f = await fix()
+    const rel = '.claude/agents/marce.md'
+    const nuevo = f.leer(rel)
+    expect(nuevo).toContain(lineaIndice)
+    expect(nuevo).toContain('es el catálogo de documentos de la oficina (una línea por documento): leelo cuando necesites un documento, no al empezar')
+    const viejo = nuevo.split(/^- Al empezar leé `conocimiento\/indice\.md`.*\n/m).join('')
+    expect(viejo).not.toContain(lineaIndice)
+    escribirArchivo(viejo, f.ruta(rel))
+    await f.post('/api/oficinas/abrir', { carpeta: f.carpeta })
+    expect(f.leer(rel)).toBe(nuevo)
+  })
+
   test('la sección de memoria pide entregables en HTML y pptx/docx/xlsx solo a pedido; los .md viejos sin esa línea se actualizan', async () => {
     const f = await fix()
     const rel = '.claude/agents/marce.md'

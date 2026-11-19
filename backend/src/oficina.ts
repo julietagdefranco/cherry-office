@@ -61,6 +61,22 @@ export type Vinculo = { id: string; ruta: string; alcance: AlcanceVinculo }
 export type CarpetaTrabajo = Vinculo
 export type BibliotecaCfg = { lecturaAutomatica?: boolean; maxMB?: number; maxArchivos?: number; maxTotalMB?: number }
 
+export type ConsolidarMemoria = 'diaria' | 'semanal' | 'manual'
+export const frecuenciasMemoria: readonly ConsolidarMemoria[] = ['diaria', 'semanal', 'manual']
+/** Estado de la memoria de la oficina (memoria-estructura.ts, memoria.ts). Sin el campo, la oficina es de la estructura vieja (versión 1). */
+export type MemoriaOficina = {
+  /** 2 = estructura nueva (temas, histórico por mes, diario, índice). */
+  version: number
+  /** Fecha en que se migró una oficina vieja. */
+  migrada?: string
+  /** La persona ya aplicó o descartó la primera propuesta del bibliotecario (solo importa si hay `migrada`). */
+  revisada?: boolean
+  /** Cada cuánto ordena la memoria el bibliotecario (por defecto semanal). */
+  consolidar?: ConsolidarMemoria
+  /** Tokens de lo que se lee siempre a partir de los cuales ordena (2000 a 50000; 0 = sin disparo por tope; por defecto 6000). */
+  topeTokens?: number
+}
+
 export type Oficina = {
   version: number
   nombre: string
@@ -76,6 +92,7 @@ export type Oficina = {
   reglas?: Regla[]
   /** Skills, MCP de Claude Code y conectores de claude.ai habilitados para los agentes de esta oficina (habilitados.ts). */
   ia?: IAOficina
+  memoria?: MemoriaOficina
 }
 
 // MARK: - decodificación (como Codable)
@@ -156,6 +173,13 @@ function decodificarOficina(v: unknown): Oficina {
     flujos: lista(o.flujos)?.map(decodificarFlujo),
     reglas: lista(o.reglas)?.map(decodificarRegla),
     ia: opt(o.ia, (x) => { const d = obj(x); return sinUndefined({ skills: optStrs(d.skills), mcp: optStrs(d.mcp), conectores: optStrs(d.conectores) }) }),
+    memoria: opt(o.memoria, (x) => {
+      const m = obj(x)
+      return sinUndefined({
+        version: optInt(m.version) ?? 1, migrada: optStr(m.migrada), revisada: optBool(m.revisada),
+        consolidar: optStr(m.consolidar) as ConsolidarMemoria | undefined, topeTokens: optInt(m.topeTokens),
+      })
+    }),
   })
 }
 
@@ -257,6 +281,20 @@ export const ValidarAgenteExtra = {
   },
 }
 
+export const topesMemoria = { minTokens: 2000, maxTokens: 50000 }
+
+/** `memoria` de oficina.json: versión 1 o más, frecuencia conocida y tope de 2000 a 50000 tokens (o 0 = sin tope). */
+export function validarMemoria(m: MemoriaOficina) {
+  if (m.version < 1) throw new ErrorAPI(400, 'oficina.json: la versión de la memoria no es válida.')
+  if (m.consolidar !== undefined && !frecuenciasMemoria.includes(m.consolidar)) {
+    throw new ErrorAPI(400, '«consolidar» tiene que ser «diaria», «semanal» o «manual».')
+  }
+  if (m.topeTokens !== undefined && m.topeTokens !== 0 && (m.topeTokens < topesMemoria.minTokens || m.topeTokens > topesMemoria.maxTokens)) {
+    throw new ErrorAPI(400, `«topeTokens» tiene que ser 0 (sin tope) o un número entre ${topesMemoria.minTokens} y ${topesMemoria.maxTokens}.`)
+  }
+  if (m.migrada !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(m.migrada)) throw new ErrorAPI(400, 'oficina.json: la fecha de migración de la memoria no es válida.')
+}
+
 /** Validaciones extra de secciones que se portan después (tareas, flujos, reglas): se registran al portarlas. */
 export const validacionesExtra: ((o: Oficina) => void)[] = []
 
@@ -289,6 +327,7 @@ export function validarOficina(o: Oficina) {
     if (a.mcp) Habilitados.lista(a.mcp, `mcp de ${a.id}`)
   }
   if (o.ia) Habilitados.validarOficina(o.ia)
+  if (o.memoria) validarMemoria(o.memoria)
   const vins = new Set<string>()
   for (const v of o.vinculos ?? []) {
     if (!Slug.valido(v.id) || vins.has(v.id)) throw new ErrorAPI(400, `Carpeta vinculada con id inválido o repetido: ${v.id}.`)

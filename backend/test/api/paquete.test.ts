@@ -275,4 +275,26 @@ describe('Exportar e importar oficinas', () => {
   })
 
   // interno: PaqueteRouter.rutasAbsolutas y el tope de tamaño descomprimido, reescritos como unit tests en test/unit/paquete.test.ts
+
+  test('memoria: exportar no lleva los respaldos de la migración; importar un .zip de una oficina v1 la migra', async () => {
+    const f = await oficinaConTodo()
+    escribir('respaldo de esta compu', f.ruta('conocimiento/.respaldo-2026-11-19/decisiones.md'))
+    const zip = str((await exportar(f)).obj.archivo)
+    expect(entradas(zip).some((n) => n.includes('.respaldo-'))).toBe(false)
+    expect(entradas(zip).some((n) => n.endsWith('conocimiento/indice.md'))).toBe(true)
+    // el zip de una oficina vieja: sin `memoria` ni estructura nueva
+    const sb2 = new Sandbox()
+    const b2 = await sb2.backend({ oficina: false })
+    const dir = sb2.root + '/vieja'
+    escribir('{"version":1,"nombre":"Vieja","duenio":"Eva","departamentos":[{"id":"d","nombre":"D","color":"#ffffff"}],"agentes":[]}', dir + '/oficina.json')
+    escribir('# D\n\n- 2026-10-03: Lanzar.\n', dir + '/conocimiento/decisiones.md')
+    const zipVieja = sb2.root + '/vieja.zip'
+    zipearCarpeta(dir, zipVieja)
+    const r = await importar(b2, zipVieja)
+    expect(r.status, JSON.stringify(r.obj)).toBe(200)
+    const carpeta = str(r.obj.carpeta)
+    expect(dict(JSON.parse(leerTexto(carpeta + '/oficina.json')).memoria).version).toBe(2)
+    expect(existe(carpeta + '/conocimiento/indice.md')).toBe(true)
+    expect(leerTexto(carpeta + '/conocimiento/decisiones/2026-10.md')).toContain('Lanzar')
+  })
 })

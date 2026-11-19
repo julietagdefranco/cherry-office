@@ -74,6 +74,7 @@ export function createBackend({ config, claudePath, env = process.env }: Opcione
   validacionesExtra.length = 0
   validacionesExtra.push(...s.validaciones)
 
+  s.alArrancar.unshift(() => oficinas.prepararActiva())
   log.info(`arranque oficinasDir=${config.oficinasDir} claude=${runner.claudePath ?? 'no'}`)
   void (async () => {
     for (const f of s.alArrancar) {

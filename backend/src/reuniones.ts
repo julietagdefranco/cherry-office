@@ -1179,7 +1179,7 @@ export class ReunionesRouter implements SubRouter {
     let salidaFinal: string | undefined
     try {
       rel = this.escribirActa(a, f, textoActa, hoy)
-      if (sintesis && sintesis.decisiones.length > 0) anexarDecisiones(a.carpeta, sintesis.decisiones, hoy)
+      if (sintesis && sintesis.decisiones.length > 0) anexarDecisiones(a.carpeta, sintesis.decisiones, hoy, of.nombre)
       if (sintesis && sintesis.pendientes.length > 0) {
         PendientesReunion.repartir(a.carpeta, of, f.titulo, sintesis.pendientes, hoy)
         // lo que necesita a la persona (asignado a ella o marcado) deja un aviso «te necesita»

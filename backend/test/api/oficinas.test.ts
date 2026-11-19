@@ -251,6 +251,64 @@ describe('Oficinas y departamentos', () => {
     expect(str(tilde.obj.carpeta)).toBe(dir)
   })
 
+  const vieja = '{"version":1,"nombre":"Vieja","duenio":"Eva","departamentos":[{"id":"d","nombre":"D","color":"#ffffff"}],"agentes":[{"id":"marce","nombre":"Marce","rol":"r","departamento":"d"}]}'
+  const respaldos = (dir: string) => listar(dir + '/conocimiento').filter((n) => n.startsWith('.respaldo-'))
+
+  test('memoria: abrir una oficina v1 la migra (versión 2, respaldo, índice y carpetas); abrirla otra vez no crea otro respaldo', async () => {
+    const sb = new Sandbox()
+    const b = await sb.backend({ oficina: false })
+    const dir = ruta(sb.root, 'vieja')
+    escribir(vieja, dir + '/oficina.json')
+    escribir('# D\n\n- 2026-10-03: Lanzar.\n', dir + '/conocimiento/decisiones.md')
+    escribir('# Marce: notas\n\nalgo\n', dir + '/conocimiento/agentes/marce.md')
+    const r = await llamar(b, 'POST', '/api/oficinas/abrir', { body: { carpeta: dir } })
+    expect(r.status).toBe(200)
+    const m = dict(leerJSON(dir + '/oficina.json').memoria)
+    expect(m.version).toBe(2)
+    expect(str(m.migrada)).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(dict(r.obj.oficina).memoria).toEqual(m)
+    expect(respaldos(dir)).toHaveLength(1)
+    expect(leerTexto(`${dir}/conocimiento/${respaldos(dir)[0]}/decisiones.md`)).toContain('Lanzar')
+    expect(existe(dir + '/conocimiento/indice.md')).toBe(true)
+    for (const d of ['temas', 'decisiones', 'diario']) expect(esDir(`${dir}/conocimiento/${d}`)).toBe(true)
+    expect(leerTexto(dir + '/conocimiento/decisiones/2026-10.md')).toContain('- 2026-10-03: Lanzar.')
+    expect(existe(dir + '/conocimiento/agentes/marce')).toBe(true)
+    await llamar(b, 'POST', '/api/oficinas/abrir', { body: { carpeta: dir } })
+    expect(respaldos(dir)).toHaveLength(1)
+  })
+
+  test('memoria: una oficina nueva nace en versión 2 con índice y carpetas, sin respaldo', async () => {
+    const sb = new Sandbox()
+    const b = await sb.backend({ oficina: false })
+    const r = await nueva(b, { nombre: 'Taller', duenio: 'Ana' })
+    const carpeta = str(r.obj.carpeta)
+    expect(dict(dict(r.obj.oficina).memoria)).toEqual({ version: 2 })
+    expect(leerJSON(carpeta + '/oficina.json').memoria).toEqual({ version: 2 })
+    expect(leerTexto(carpeta + '/conocimiento/indice.md')).toContain('(Todavía no hay temas.)')
+    for (const d of ['temas', 'decisiones', 'diario']) expect(esDir(`${carpeta}/conocimiento/${d}`)).toBe(true)
+    expect(respaldos(carpeta)).toEqual([])
+  })
+
+  test('memoria: arrancar con una oficina v1 como activa (sin llamar a abrir) también la migra', async () => {
+    const sb = new Sandbox()
+    escribir('# D\n\n- 2026-10-03: Lanzar.\n', sb.proyecto + '/conocimiento/decisiones.md')
+    await sb.backend()
+    const o = leerJSON(sb.proyecto + '/oficina.json')
+    expect(dict(o.memoria).version).toBe(2)
+    expect(respaldos(sb.proyecto)).toHaveLength(1)
+    expect(existe(sb.proyecto + '/conocimiento/indice.md')).toBe(true)
+    expect(leerTexto(sb.proyecto + '/conocimiento/decisiones/2026-10.md')).toContain('Lanzar')
+  })
+
+  test('memoria: oficina.json con «memoria» inválida -> 400 al abrir', async () => {
+    const sb = new Sandbox()
+    const b = await sb.backend({ oficina: false })
+    const dir = ruta(sb.root, 'rara')
+    escribir(vieja.replace('"agentes"', '"memoria":{"version":2,"consolidar":"nunca"},"agentes"'), dir + '/oficina.json')
+    const r = await llamar(b, 'POST', '/api/oficinas/abrir', { body: { carpeta: dir } })
+    expect(r.status).toBe(400)
+  })
+
   // MARK: recientes y persistencia
 
   test('recientes: la más reciente primero, solo una activa, salta las borradas, máximo 10', async () => {

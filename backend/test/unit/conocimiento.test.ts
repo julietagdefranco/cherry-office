@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
-  ConocimientoDatos, analizar, claves, fuentes, quienSabe, similitud, trozos, venceDefecto,
+  ConocimientoDatos, analizar, claves, esHistorico, fuentes, quienSabe, similitud, trozos, venceDefecto,
 } from '../../src/conocimiento.js'
 import { sabeDeValido } from '../../src/agentes.js'
 import { validarOficina, type AgenteDef, type Oficina } from '../../src/oficina.js'
@@ -85,6 +85,54 @@ describe('texto', () => {
       'ficha::conocimiento/fuentes/precios.md', 'acta::reuniones/2026-11-02-lanzamiento.md',
       'entregable:marce:archivos/entregables/marce/plan.md', 'entregable:marce:archivos/entregables/marce/sub/datos.csv',
     ])
+  })
+})
+
+describe('memoria por capas', () => {
+  test('fuentes: temas, diario, decisiones por mes e historial del agente; no .respaldo-*, .fusionados ni indice.md', () => {
+    const c = tmp()
+    escribir(c, 'conocimiento/oficina.md', '# Taller')
+    escribir(c, 'conocimiento/indice.md', '# Índice')
+    escribir(c, 'conocimiento/temas/precios.md', '# Precios')
+    escribir(c, 'conocimiento/temas/.fusionados/viejo-2026-11-19.md', '# Viejo')
+    escribir(c, 'conocimiento/diario/2026-11-19.md', '# Diario')
+    escribir(c, 'conocimiento/decisiones/2026-11.md', '# Mes')
+    escribir(c, 'conocimiento/agentes/marce/2026-11.md', '# Historial')
+    escribir(c, 'conocimiento/agentes/No Valido/2026-11.md', 'x')
+    escribir(c, 'conocimiento/.respaldo-2026-11-19/oficina.md', '# Respaldo')
+    escribir(c, 'conocimiento/.respaldo-2026-11-19/agentes/marce.md', '# Respaldo')
+    expect(fuentes(c).map((f) => `${f.tipo}:${f.autor}:${f.ruta}`)).toEqual([
+      'oficina::conocimiento/oficina.md', 'notas:marce:conocimiento/agentes/marce/2026-11.md',
+      'tema::conocimiento/temas/precios.md', 'diario::conocimiento/diario/2026-11-19.md', 'decision::conocimiento/decisiones/2026-11.md',
+    ])
+  })
+
+  test('esHistorico: solo decisiones por mes e historial del agente', () => {
+    expect(esHistorico('conocimiento/decisiones/2026-11.md')).toBe(true)
+    expect(esHistorico('conocimiento/agentes/marce/2026-11.md')).toBe(true)
+    for (const r of ['conocimiento/decisiones.md', 'conocimiento/agentes/marce.md', 'conocimiento/temas/2026-11.md', 'conocimiento/diario/2026-11-19.md']) expect(esHistorico(r)).toBe(false)
+  })
+
+  test('buscar: deduplica por hash (queda la vigente), baja lo histórico y lo marca; el diario toma la fecha del nombre', () => {
+    for (const sinFTS of [false, true]) {
+      const { d, ahora } = datos(sinFTS)
+      ahora.t = Date.now() / 1000
+      const c = tmp()
+      escribir(c, 'conocimiento/decisiones.md', '- 2026-11-02: El curso Glow cuesta 100 dólares.')
+      escribir(c, 'conocimiento/decisiones/2026-11.md', '# Decisiones\n\n- 2026-11-02: El curso Glow cuesta 100 dólares.\n- 2026-11-05: La entrega del curso Glow es en enero.')
+      escribir(c, 'conocimiento/diario/2026-11-19.md', '# Diario 2026-11-19\n\n- 10:42 · Marce: El proveedor del curso Glow se atrasa.')
+      d.sincronizar(c, true)
+      const r = d.buscar(c, 'curso Glow')
+      const cuesta = r.filter((x) => x.fragmento.includes('100'))
+      expect(cuesta).toHaveLength(1)
+      expect(cuesta[0]!.ruta).toBe('conocimiento/decisiones.md')
+      expect(cuesta[0]!.historico).toBeUndefined()
+      const entrega = r.find((x) => x.fragmento.includes('enero'))!
+      expect(entrega.ruta).toBe('conocimiento/decisiones/2026-11.md')
+      expect(entrega.historico).toBe(true)
+      const diario = r.find((x) => x.tipo === 'diario')!
+      expect(diario.ts).toBe(Date.UTC(2026, 10, 19, 12) / 1000)
+    }
   })
 })
 
