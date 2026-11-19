@@ -258,6 +258,7 @@ export class Backend {
       HQ_OFICINAS_DIR: sb.oficinasDir,
       CLAUDE_BIN: op.claudePath ?? sb.bin,
       PORT: String(puerto),
+      HQ_MEMORIA: '0',
       LANG: 'en_US.UTF-8',
       TMPDIR: os.tmpdir(),
       ...(process.env.HQ_MENSAJE_STDIN ? { HQ_MENSAJE_STDIN: process.env.HQ_MENSAJE_STDIN } : {}),

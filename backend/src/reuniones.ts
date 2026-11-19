@@ -17,6 +17,7 @@ import type { OficinaActiva } from './oficinas.js'
 import { conMemoria, dirsTrabajo, dirsVinculos, esfuerzoDe, Instrucciones, turnoConPermiso } from './permisos.js'
 import { esMemoriaIA } from './config.js'
 import type { TurnoConPermiso } from './claude-runner.js'
+import { anotarEnDiario } from './memoria-estructura.js'
 import { anexarDecisiones } from './plantillas.js'
 import { eleccionCharla } from './agentes.js'
 import { dependenciasDe } from './dependencias.js'
@@ -29,6 +30,8 @@ import { num, txt, type Fila, type SQLiteDB, type SQLValor } from './sqlite.js'
 import { CajaCosto } from './stream.js'
 import { deReunion } from './tareas.js'
 import { Slug, Validar, largo, plegar, prefijo, uuidDe, uuidValido } from './validar.js'
+import { coincide, palabras, plano, vacias } from './texto-comun.js'
+export { coincide, palabras, plano, vacias }
 
 // MARK: - modelo
 
@@ -276,14 +279,6 @@ const sufijoG = (s: string, n: number) => {
 const saltos = /\r\n|[\n\r\u000b\u000c\u0085\u2028\u2029]/
 export const leer = (p: string): string => { try { return fs.readFileSync(p, 'utf8') } catch { return '' } }
 
-/** Minúsculas y sin acentos. */
-export const plano = (s: string) => plegar(s)
-
-/** Palabras ASCII alfanuméricas del texto plano. */
-export function palabras(s: string): string[] {
-  return plano(s).split(/[^0-9a-z]+/).filter((x) => x !== '')
-}
-
 /** Día local `AAAA-MM-DD`. */
 export function dia(f: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -296,19 +291,6 @@ export const maxTranscripcionTurno = 12_000
 export const maxTranscripcionActa = 40_000
 export const maxFicha = 2500
 export const maxFichas = 8000
-
-export const vacias = new Set([
-  'para', 'como', 'sobre', 'este', 'esta', 'esto', 'estos', 'estas', 'entre', 'desde', 'hasta', 'cuando', 'donde',
-  'porque', 'pero', 'tiene', 'tener', 'hacer', 'queremos', 'podemos', 'vamos', 'nuestro', 'nuestra', 'nuestros',
-  'nuestras', 'algo', 'cada', 'todo', 'toda', 'todos', 'todas', 'otro', 'otra', 'otros', 'otras', 'mucho', 'mucha',
-  'tambien', 'ademas', 'hacia', 'segun', 'tema', 'reunion', 'ronda',
-])
-
-export function coincide(a: string, b: string): boolean {
-  if (a === b) return true
-  if (a.length < 5 || b.length < 5) return false
-  return a.slice(0, 5) === b.slice(0, 5)
-}
 
 /** Agentes cuyo «sabe de», rol o departamento (peso 2) o brief/chips (peso 1) tienen más palabras del tema, primero; el resto detrás.
  *  Estable: a igual puntaje se respeta el orden en que vinieron. */
@@ -1190,6 +1172,11 @@ export class ReunionesRouter implements SubRouter {
             texto: paraVos === 1 ? `Quedó 1 pendiente de «${f.titulo}» que necesita tu parte` : `Quedaron ${paraVos} pendientes de «${f.titulo}» que necesitan tu parte`,
           })
         }
+      }
+      // bitácora del día (solo en oficinas con la estructura nueva de la memoria)
+      if (fs.existsSync(path.join(a.carpeta, 'conocimiento/diario'))) {
+        const nd = sintesis?.decisiones.length ?? 0, np = sintesis?.pendientes.length ?? 0
+        anotarEnDiario(a.carpeta, { autor: `Reunión «${f.titulo}»`, texto: `${nd} ${nd === 1 ? 'decisión' : 'decisiones'}, ${np} ${np === 1 ? 'pendiente' : 'pendientes'} (\`${rel}\`).`, fecha: hoy })
       }
     } catch (e) {
       errorActa = 'No pude guardar el acta o las decisiones en la carpeta de la oficina.'

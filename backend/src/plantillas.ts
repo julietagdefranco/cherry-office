@@ -95,6 +95,9 @@ export const lineaConocimiento = 'Antes de consultar, buscá si ya se sabe con b
 /** Documenta el índice y los temas de la memoria. Su presencia también marca una sección al día. */
 export const lineaIndice = 'Al empezar leé `conocimiento/indice.md`: una línea por tema que la oficina tiene escrito. Abrí `conocimiento/temas/<slug>.md` solo de los temas que tengan que ver con lo que te piden. El histórico (`conocimiento/decisiones/`, `conocimiento/diario/`, `conocimiento/agentes/<id>/`) no lo leas entero: buscalo con buscar(pregunta).'
 
+/** Documenta la herramienta `anotar` (memoria.ts). Su presencia también marca una sección al día. */
+export const lineaAnotar = 'Si aprendés algo que la oficina tiene que recordar (un dato, un cambio, una preferencia de la persona), dejalo con anotar(tema, hecho): una línea, solo hechos, en un tema del índice si ya existe. No copies charlas enteras. Tus notas son para tu estado de trabajo; anotar es para lo que le sirve a todos.'
+
 /** Formato de los entregables: lo que se ve en la app es HTML (se dibuja al costado de la charla); los archivos de Office
  *  (.pptx, .docx, .xlsx) son binarios que la app no sabe mostrar, así que solo se hacen si la persona los pide. Su presencia
  *  también marca una sección al día. */
@@ -112,11 +115,12 @@ Tu carpeta de trabajo es la raíz de la oficina; todas las rutas son relativas a
 - No podés escribir ningún otro archivo (el sistema lo impide igual). Si algo debería quedar como decisión, proponelo en una reunión o decile al usuario que lo registre.
 - ${lineaConsultas}
 - ${lineaConocimiento}
+- ${lineaAnotar}
 - ${lineaFormato}`
 }
 
 /** Al abrir una oficina: reescribe la sección de memoria de los `.md` de agente desactualizados (sin la línea de
- *  consultas, la de conocimiento, la de formato o la del índice). Solo toca desde la marca hasta el final. Idempotente. Devuelve cuántos reescribió. */
+ *  consultas, la de conocimiento, la de formato, la del índice o la de anotar). Solo toca desde la marca hasta el final. Idempotente. Devuelve cuántos reescribió. */
 export function actualizarMemoria(carpeta: string, ids: string[]): number {
   let n = 0
   for (const id of ids) {
@@ -128,7 +132,7 @@ export function actualizarMemoria(carpeta: string, ids: string[]): number {
       continue
     }
     const i = t.indexOf(marcaMemoria)
-    if (i < 0 || (t.includes(lineaConsultas) && t.includes(lineaConocimiento) && t.includes(lineaFormato) && t.includes(lineaIndice))) continue
+    if (i < 0 || (t.includes(lineaConsultas) && t.includes(lineaConocimiento) && t.includes(lineaFormato) && t.includes(lineaIndice) && t.includes(lineaAnotar))) continue
     try {
       const tmp = `${p}.tmp`
       fs.writeFileSync(tmp, t.slice(0, i) + seccionMemoria(id) + '\n')
@@ -269,12 +273,17 @@ export function anexarDecisiones(carpeta: string, decisiones: string[], fecha = 
     actual = fs.readFileSync(p, 'utf8')
   } catch {}
   if (actual !== '' && !actual.endsWith('\n')) actual += '\n'
+  // si el bibliotecario dejó una sección «Sin decidir» al final, las decisiones nuevas van antes
+  const cola = actual.indexOf('\n## Sin decidir')
+  const sinDecidir = cola >= 0 ? actual.slice(cola + 1) : ''
+  if (cola >= 0) actual = actual.slice(0, cola + 1)
   for (const d of decisiones) {
     const una = d.split(/\r\n|[\n\r\u2028\u2029\u0085\u000b\u000c]/).filter((x) => x !== '').join(' ').trim()
     if (una === '') continue
     actual += `- ${dia}: ${una}\n`
     nuevas.push(`- ${dia}: ${una}`)
   }
+  if (sinDecidir !== '') actual += `\n${sinDecidir}`
   fs.mkdirSync(path.dirname(p), { recursive: true })
   const tmp = `${p}.tmp`
   fs.writeFileSync(tmp, actual)

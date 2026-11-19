@@ -571,6 +571,9 @@ describe('Reuniones', () => {
     const dec = f.leer('conocimiento/decisiones.md')
     expect(dec.startsWith(previas)).toBe(true)
     expect(dec.endsWith(`- ${hoy()}: Lanzar en diciembre\n- ${hoy()}: Priorizar los reels\n`)).toBe(true)
+    // la oficina es de la estructura nueva: lo mismo queda en el histórico del mes y la reunión en el diario del día
+    expect(f.leer(`conocimiento/decisiones/${hoy().slice(0, 7)}.md`).endsWith(`- ${hoy()}: Lanzar en diciembre\n- ${hoy()}: Priorizar los reels\n`)).toBe(true)
+    expect(f.leer(`conocimiento/diario/${hoy()}.md`)).toMatch(new RegExp(`- \\d\\d:\\d\\d · Reunión «Plan de Lanzamiento: ¡Diciembre!»: 2 decisiones, 1 pendiente \\(\`${rel}\`\\)\\.`))
     // una sola llamada de síntesis: sin agente, sin herramientas, cwd en la oficina
     const ll = llamadasConPrompt(f, 'secretario de actas')
     expect(ll.length).toBe(1)

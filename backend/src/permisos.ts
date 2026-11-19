@@ -111,7 +111,7 @@ export type ServidorConector = { nombre: string; prefijo: string; estado: string
 
 /** Herramientas MCP del servidor propio (`hq`): consultar a un colega, ver quiénes son, saber quién sabe de un tema,
  *  buscar en lo que ya se sabe y marcar algo como desactualizado (estas tres las sirve conocimiento.ts). */
-export const herramientasMCP = ['mcp__hq__consultar', 'mcp__hq__colegas', 'mcp__hq__quien_sabe', 'mcp__hq__buscar', 'mcp__hq__marcar_obsoleto']
+export const herramientasMCP = ['mcp__hq__consultar', 'mcp__hq__colegas', 'mcp__hq__quien_sabe', 'mcp__hq__buscar', 'mcp__hq__marcar_obsoleto', 'mcp__hq__anotar']
 /** Variable de entorno con el token del servidor MCP (así no aparece en los argumentos del proceso). */
 export const variableTokenMCP = 'HQ_MCP_TOKEN'
 /** Lo que un agente puede pedir en un chat (además de lo que ya tiene): comandos y escribir archivos. */

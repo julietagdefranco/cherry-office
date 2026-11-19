@@ -4,6 +4,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { escribirAtomico, type Oficina } from './oficina.js'
+import { similitud } from './texto-comun.js'
 import { Slug, largo, prefijo } from './validar.js'
 
 export const LimitesMemoria = {
@@ -304,4 +305,58 @@ export function migrarMemoria(
   for (const a of oficina.agentes) archivarNotas(carpeta, a.id, a.nombre, fecha)
   regenerarIndice(carpeta)
   return { oficina: { ...oficina, memoria: { ...oficina.memoria, version: 2, migrada: diaLocal(fecha) } }, migrada: true, respaldo }
+}
+
+// MARK: anotar (los agentes solo agregan)
+
+/** Error con mensaje para quien anota (la herramienta MCP lo devuelve tal cual). */
+export class ErrorMemoria extends Error {}
+
+export type TemaResuelto = { slug: string; titulo: string; nuevo: boolean }
+
+/** A qué tema va `tema`: el de ese slug, o el existente parecido (similitud ≥ 0,75 con el título), o uno nuevo. */
+export function resolverTema(carpeta: string, tema: string): TemaResuelto {
+  const limpio = prefijo(tema.trim(), LimitesMemoria.maxTema)
+  const slug = Slug.de(limpio) || 'general'
+  const p = ruta(carpeta, `conocimiento/temas/${slug}.md`)
+  if (fs.existsSync(p)) return { slug, titulo: parsearTema(leer(p)).titulo || limpio || slug, nuevo: false }
+  const temas = listarTemas(carpeta)
+  let mejor: { t: InfoTema; s: number } | undefined
+  for (const t of temas) {
+    const s = similitud(t.titulo, limpio)
+    if (s >= 0.75 && (!mejor || s > mejor.s)) mejor = { t, s }
+  }
+  if (mejor) return { slug: mejor.t.slug, titulo: mejor.t.titulo, nuevo: false }
+  if (temas.length >= LimitesMemoria.maxTemas) throw new ErrorMemoria(`La oficina ya tiene ${LimitesMemoria.maxTemas} temas: usá uno del índice.`)
+  return { slug, titulo: limpio === '' ? 'General' : limpio, nuevo: true }
+}
+
+export const lineaAporte = (fecha: Date, autor: string, hecho: string) => `${diaLocal(fecha)} · ${autor}: ${hecho}`
+
+/** Agrega un aporte a `## Aportes sin consolidar` del tema (lo crea si es nuevo) y regenera el índice. */
+export function anotarEnTema(carpeta: string, p: { tema: string; hecho: string; autor: string; fecha?: Date }): TemaResuelto {
+  const r = resolverTema(carpeta, p.tema)
+  const archivo = ruta(carpeta, `conocimiento/temas/${r.slug}.md`)
+  const t: Tema = r.nuevo ? { titulo: r.titulo, aportes: 0, cuerpo: '', sinDecidir: [], pendientes: [] } : parsearTema(leer(archivo))
+  if (t.titulo === '') t.titulo = r.titulo
+  if (t.pendientes.length >= LimitesMemoria.maxPendientes) {
+    throw new ErrorMemoria(`El tema «${t.titulo}» ya tiene ${LimitesMemoria.maxPendientes} aportes sin ordenar: esperá al bibliotecario o anotalo en otro tema.`)
+  }
+  t.pendientes.push(lineaAporte(p.fecha ?? new Date(), p.autor, p.hecho))
+  fs.mkdirSync(path.dirname(archivo), { recursive: true })
+  escribirAtomico(armarTema(t), archivo)
+  regenerarIndice(carpeta)
+  return r
+}
+
+/** Agrega `- HH:MM · autor: texto` al diario del día (con su encabezado si falta). */
+export function anotarEnDiario(carpeta: string, p: { texto: string; autor: string; fecha?: Date }) {
+  const f = p.fecha ?? new Date()
+  const archivo = ruta(carpeta, `conocimiento/diario/${diaLocal(f)}.md`)
+  let actual = leer(archivo)
+  if (actual === '') actual = `# Diario ${diaLocal(f)}\n\n`
+  else if (!actual.endsWith('\n')) actual += '\n'
+  actual += `- ${horaLocal(f)} · ${p.autor}: ${p.texto}\n`
+  fs.mkdirSync(path.dirname(archivo), { recursive: true })
+  escribirAtomico(actual, archivo)
 }
