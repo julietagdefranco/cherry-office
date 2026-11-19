@@ -582,13 +582,13 @@ App.Ajustes = (function () {
       nav.appendChild(h('div.aj-grupo', titulo));
       ss.forEach(function (s) {
         var nota = s.nota ? s.nota() : '';
-        nav.appendChild(h('button.aj-item', { 'data-id': s.id, onclick: function () { ir(s.id); } }, App.icono(s.icono), h('span', s.texto),
+        nav.appendChild(h('button.aj-item', { 'data-id': s.id, title: s.texto, onclick: function () { ir(s.id); } }, App.icono(s.icono), h('span', s.texto),
           s.nota ? h('small', nota) : null, h('span.aj-flecha', App.icono('flecha'))));
       });
     }
     grupo('oficina', App.E.oficina.nombre);
     grupo('app', 'Toda la app');
-    if (App.nativo.hay) App.add(nav, h('div', { style: { flex: 1 } }), h('button.aj-item.aj-tenue', { onclick: App.nativo.acerca }, App.icono('chispa'), h('span', 'Acerca de')));
+    if (App.nativo.hay) App.add(nav, h('div', { style: { flex: 1 } }), h('button.aj-item.aj-tenue', { title: 'Acerca de', onclick: App.nativo.acerca }, App.icono('chispa'), h('span', 'Acerca de')));
 
     function soltar() { if (actual && actual.alCerrar) actual.alCerrar(); actual = null; }
     /* reemplazo de App.hoja para las secciones */

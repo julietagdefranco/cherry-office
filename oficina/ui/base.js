@@ -199,9 +199,11 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     var cab = h('div.hoja-cab', h('h2', op.titulo || ''), h('button.btn.fantasma.icono', { title: 'Cerrar', onclick: function () { cerrar(); } }, App.icono('cerrar')));
     var caja = h('div.hoja', { style: { width: (op.ancho || 560) + 'px', height: op.alto || null } }, cab, cuerpo, op.sinPie ? null : pie);
     var velo = h('div.velo', caja);
+    var ajuste = moverYAgrandar(caja, cab, op);
     velo.addEventListener('mousedown', function (e) { if (e.target === velo && !op.modal) cerrar(); });
     document.body.appendChild(velo);
-    var obj = { el: caja, cuerpo: cuerpo, pie: pie, cab: cab, cerrar: cerrar, titulo: function (t) { cab.firstChild.textContent = t; } };
+    var obj = { el: caja, cuerpo: cuerpo, pie: pie, cab: cab, cerrar: cerrar, titulo: function (t) { cab.firstChild.textContent = t; },
+      restaurar: ajuste.restaurar };
     pila.push(obj);
     var cerrada = false;
     function cerrar() {
@@ -214,6 +216,98 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     return obj;
   };
   App.hojaAbierta = function () { return pila.length > 0; };
+
+  /* Hojas que se mueven (arrastrando la barra) y cambian de tamaño (desde los bordes y las esquinas). Sólo en la compu:
+     en el celular son paneles que suben desde abajo. Al tocarla por primera vez la hoja deja de estar centrada y pasa a
+     una posición fija (.suelta). Doble clic en la barra la devuelve a su tamaño y lugar de siempre.
+     El tamaño se recuerda por tipo de hoja: `op.clave` o, si no hay, su ancho y alto pedidos (las que tienen alto fijo
+     recuerdan el alto; las que crecen con su contenido, sólo el ancho). Lo de adentro se acomoda solo al ancho con
+     container queries (container «hoja» en estilo.css). */
+  var COMPU = window.matchMedia ? window.matchMedia('(min-width: 721px)') : { matches: true };
+  var HOJA_MIN_W = 300, HOJA_MIN_H = 180, HOJA_ASOMA = 80;   // ASOMA: lo que queda siempre a la vista al sacarla del borde
+  var BORDES = ['n', 's', 'e', 'o', 'ne', 'no', 'se', 'so'];
+  function tamHoja(clave) { try { return JSON.parse(localStorage.getItem('oficina.hoja.' + clave) || 'null'); } catch (e) { return null; } }
+  function guardarTamHoja(clave, t) { try { if (t) localStorage.setItem('oficina.hoja.' + clave, JSON.stringify(t)); else localStorage.removeItem('oficina.hoja.' + clave); } catch (e) {} }
+  function entre(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function moverYAgrandar(caja, cab, op) {
+    var clave = op.clave || ((op.ancho || 560) + 'x' + (op.alto || 'auto'));
+    var anchoBase = (op.ancho || 560) + 'px', altoBase = op.alto || '';
+    var guardado = COMPU.matches ? tamHoja(clave) : null;
+    if (guardado && guardado.w) caja.style.width = guardado.w + 'px';
+    if (guardado && guardado.h && op.alto) caja.style.height = guardado.h + 'px';
+    BORDES.forEach(function (d) { caja.appendChild(h('div.hoja-borde', { 'data-dir': d })); });
+
+    function poner(x, y, w, alto) {
+      caja.style.left = Math.round(x) + 'px'; caja.style.top = Math.round(y) + 'px';
+      caja.style.width = Math.round(w) + 'px'; caja.style.height = Math.round(alto) + 'px';
+    }
+    function soltar() {
+      if (caja.classList.contains('suelta')) return;
+      var r = caja.getBoundingClientRect();
+      caja.classList.add('suelta');
+      poner(r.left, r.top, r.width, r.height);
+    }
+    function restaurar() {
+      caja.classList.remove('suelta');
+      caja.style.left = ''; caja.style.top = '';
+      caja.style.width = anchoBase; caja.style.height = altoBase;
+      guardarTamHoja(clave, null);
+    }
+    /* si la ventana de la app se achica, la hoja suelta vuelve a entrar */
+    function encajar() {
+      if (!caja.isConnected) { window.removeEventListener('resize', encajar); COMPU.removeEventListener && COMPU.removeEventListener('change', alCambiar); return; }
+      if (!caja.classList.contains('suelta')) return;
+      var r = caja.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+      var w = Math.min(r.width, vw), alto = Math.min(r.height, vh);
+      poner(entre(r.left, HOJA_ASOMA - w, vw - HOJA_ASOMA), entre(r.top, 0, vh - cab.offsetHeight), w, alto);
+    }
+    function alCambiar() { if (!COMPU.matches && caja.classList.contains('suelta')) { caja.classList.remove('suelta'); caja.style.left = ''; caja.style.top = ''; } }
+    window.addEventListener('resize', encajar);
+    if (COMPU.addEventListener) COMPU.addEventListener('change', alCambiar);
+
+    /* un arrastre: `paso(dx, dy, r0)` en cada movimiento, `fin()` al soltar */
+    function arrastrar(e, cursor, paso, fin) {
+      if (e.button !== 0 || !COMPU.matches) return;
+      e.preventDefault();
+      soltar();
+      var x0 = e.clientX, y0 = e.clientY, r0 = caja.getBoundingClientRect(), el = e.currentTarget;
+      el.setPointerCapture && el.setPointerCapture(e.pointerId);
+      document.body.classList.add('arrastrando-hoja'); document.body.style.cursor = cursor;
+      function mover(ev) { paso(ev.clientX - x0, ev.clientY - y0, r0); }
+      function soltarle() {
+        el.removeEventListener('pointermove', mover); el.removeEventListener('pointerup', soltarle); el.removeEventListener('pointercancel', soltarle);
+        document.body.classList.remove('arrastrando-hoja'); document.body.style.cursor = '';
+        if (fin) fin();
+      }
+      el.addEventListener('pointermove', mover); el.addEventListener('pointerup', soltarle); el.addEventListener('pointercancel', soltarle);
+    }
+    cab.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('button, a, input, select, textarea')) return;
+      arrastrar(e, 'grabbing', function (dx, dy, r0) {
+        var vw = window.innerWidth, vh = window.innerHeight;
+        poner(entre(r0.left + dx, HOJA_ASOMA - r0.width, vw - HOJA_ASOMA), entre(r0.top + dy, 0, vh - cab.offsetHeight), r0.width, r0.height);
+      });
+    });
+    cab.addEventListener('dblclick', function (e) { if (!e.target.closest('button, a, input, select, textarea') && COMPU.matches) restaurar(); });
+    Array.prototype.forEach.call(caja.querySelectorAll(':scope > .hoja-borde'), function (b) {
+      var d = b.getAttribute('data-dir');
+      b.addEventListener('pointerdown', function (e) {
+        arrastrar(e, getComputedStyle(b).cursor, function (dx, dy, r0) {
+          var vw = window.innerWidth, vh = window.innerHeight;
+          var l = r0.left, r = r0.right, t = r0.top, bo = r0.bottom;
+          if (d.indexOf('o') >= 0) l = entre(r0.left + dx, 0, r - HOJA_MIN_W);
+          if (d.indexOf('e') >= 0) r = entre(r0.right + dx, l + HOJA_MIN_W, vw);
+          if (d.indexOf('n') >= 0) t = entre(r0.top + dy, 0, bo - HOJA_MIN_H);
+          if (d.indexOf('s') >= 0) bo = entre(r0.bottom + dy, t + HOJA_MIN_H, vh);
+          poner(l, t, r - l, bo - t);
+        }, function () {
+          var r = caja.getBoundingClientRect();
+          guardarTamHoja(clave, { w: Math.round(r.width), h: op.alto ? Math.round(r.height) : null });
+        });
+      });
+    });
+    return { restaurar: restaurar };
+  }
   /* Para ver un archivo: al costado de la charla si hay una abierta (compu, sin otra hoja encima); si no, en una hoja */
   App.visor = function (op) {
     var v = !pila.length && App.Agente && App.Agente.abrirVisor ? App.Agente.abrirVisor(op) : null;
