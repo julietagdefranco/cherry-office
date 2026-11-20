@@ -6,6 +6,9 @@
 //   GET        /api/flujos/corridas?estado=&flujo=&entrega=&limite=
 //   GET        /api/flujos/corridas/:id                    → {corrida, pasos}
 //   POST       /api/flujos/corridas/:id/hecho|reintentar|saltar|cancelar|volver → {corrida}
+// `siguiente` (id de otro flujo, en POST/PATCH; `null` lo saca): al terminar una corrida, arranca una del otro flujo con la
+// última entrega como contexto y sus archivos como adjuntos. Cancelada o trabada no sigue; si el otro está pausado o ya no
+// existe, deja un aviso. Se valida que exista, que no sea el mismo y que no haya círculos.
 import './coordinador.js'
 import { consultasDe } from './consultas.js'
 import {
@@ -56,6 +59,13 @@ function base64(t: string): Buffer | undefined {
 
 /** Ids de pasos cuyo agente ya no está en la oficina. */
 const sinAsignar = (pasos: PasoFlujo[], o: Oficina) => pasos.filter((p) => p.quien !== 'persona' && !o.agentes.some((a) => a.id === p.quien)).map((p) => p.id)
+
+/** Al crear o editar, el flujo con el que sigue tiene que existir (después puede dejar de existir: el motor avisa). */
+function existeSiguiente(f: FlujoDef, o: Oficina) {
+  if (f.siguiente !== undefined && !(o.flujos ?? []).some((x) => x.id === f.siguiente)) {
+    throw new ErrorAPI(400, `No existe el flujo «${f.siguiente}» con el que seguir.`)
+  }
+}
 
 function vista(f: FlujoDef, o: Oficina): Obj {
   const j = flujoJSON(f)
@@ -212,6 +222,7 @@ export class FlujosRouter implements SubRouter {
     const [f] = this.s.oficinas.modificar((o) => {
       const usados = new Set([...(o.flujos ?? []).map((x) => x.id), ...ocupados])
       const f = flujoDesde(d, usados)
+      existeSiguiente(f, o)
       f.creado = f.creado ?? Programacion.iso(new Date())
       o.flujos = [...(o.flujos ?? []), f]
       return f
@@ -225,11 +236,12 @@ export class FlujosRouter implements SubRouter {
       const i = o.flujos?.findIndex((x) => x.id === id) ?? -1
       if (i < 0) throw new ErrorAPI(404, 'No existe ese flujo.')
       const mezcla = flujoJSON(o.flujos![i]!)
-      for (const k of ['nombre', 'descripcion', 'pasos', 'activo', 'origen']) if (d[k] !== undefined) mezcla[k] = d[k]
+      for (const k of ['nombre', 'descripcion', 'pasos', 'activo', 'origen', 'siguiente']) if (d[k] !== undefined) mezcla[k] = d[k]
       mezcla.id = id
       const otros = new Set(o.flujos!.map((x) => x.id))
       otros.delete(id)
       const nuevo = flujoDesde(mezcla, otros)
+      existeSiguiente(nuevo, o)
       o.flujos![i] = nuevo
       return nuevo
     })
@@ -241,6 +253,8 @@ export class FlujosRouter implements SubRouter {
       const i = o.flujos?.findIndex((x) => x.id === id) ?? -1
       if (i < 0) throw new ErrorAPI(404, 'No existe ese flujo.')
       o.flujos!.splice(i, 1)
+      // los que seguían con este quedan sin siguiente (si no, la oficina dejaría de validar)
+      for (const x of o.flujos!) if (x.siguiente === id) delete x.siguiente
       if (o.flujos!.length === 0) delete o.flujos
     })
     return [200, { ok: true }]

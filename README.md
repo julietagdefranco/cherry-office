@@ -31,7 +31,9 @@ En los dos casos hace falta **Claude Code** instalado y con la sesión iniciada.
   desde donde se llama a una nueva. Desde una charla, «Sacar tareas» propone
   el trabajo que quedó pendiente (para ese agente o para otros) y, después de revisarlo, lo crea como tareas.
 - **Flujos:** procesos de varios pasos que pasan de agente en agente, con aprobaciones tuyas donde haga falta. Ves
-  cada corrida en vivo y una pieza viaja por la maqueta.
+  cada corrida en vivo y una pieza viaja por la maqueta. Un flujo puede **seguir con otro** al terminar («Al terminar,
+  seguir con…»): arranca solo una corrida del segundo con lo último que se entregó, y los cambios del segundo valen
+  también cuando se corre solo.
 - **Tareas programadas, Parte del día y Biblioteca:** tareas repetidas o de una sola vez, un resumen de lo que pasó y
   qué está trabado, y una biblioteca de documentos con fichas que los agentes pueden consultar.
   La memoria de la oficina se guarda por tema y por fecha: los agentes leen al empezar solo lo corto (`oficina.md`, un índice

@@ -33,6 +33,9 @@ export type FlujoDef = {
   activo: boolean
   creado?: string
   origen?: string
+  /** Id de otro flujo: al terminar una corrida de este (último paso aprobado), arranca una corrida de ese con la última
+   *  entrega como contexto. Se lee de la oficina al momento de arrancar, así que los cambios de ese flujo valen para los dos usos. */
+  siguiente?: string
 }
 
 export type Regla = { id: string; texto: string; origen?: string }
@@ -70,7 +73,7 @@ export function decodificarFlujo(v: unknown): FlujoDef {
   return sinUndefined({
     id: str(o.id), nombre: str(o.nombre), descripcion: optStr(o.descripcion), pasos,
     activo: o.activo === undefined || o.activo === null ? true : typeof o.activo === 'boolean' ? o.activo : falla(),
-    creado: optStr(o.creado), origen: optStr(o.origen),
+    creado: optStr(o.creado), origen: optStr(o.origen), siguiente: optStr(o.siguiente),
   })
 }
 
@@ -166,6 +169,7 @@ export function flujoDesde(d: Obj, idsUsados: Set<string>): FlujoDef {
     activo: LecturaAPI.bool(d.activo, 'activo') ?? true,
     creado: LecturaAPI.texto(d.creado, 'creado', 40),
     origen: LecturaAPI.texto(d.origen, 'origen', 600),
+    siguiente: LecturaAPI.texto(d.siguiente, 'siguiente', 41),
   })
   ValidarFlujos.validarFlujo(f)
   return f
@@ -205,6 +209,10 @@ export const ValidarFlujos = {
       throw new ErrorAPI(400, `La descripción del flujo ${f.id} es demasiado larga (máximo ${this.maxCorto} caracteres).`)
     }
     if (f.pasos.length < 1 || f.pasos.length > this.maxPasos) throw new ErrorAPI(400, `El flujo ${f.id} tiene que tener entre 1 y ${this.maxPasos} pasos.`)
+    if (f.siguiente !== undefined) {
+      if (!Slug.valido(f.siguiente)) throw new ErrorAPI(400, `El flujo ${f.id} sigue con un flujo de id inválido: ${f.siguiente}.`)
+      if (f.siguiente === f.id) throw new ErrorAPI(400, `El flujo ${f.id} no puede seguir con él mismo.`)
+    }
     const anteriores = new Set<string>()
     for (const p of f.pasos) {
       const donde = `paso ${p.id} del flujo ${f.id}`
@@ -233,6 +241,16 @@ export const ValidarFlujos = {
       if (ids.has(f.id)) throw new ErrorAPI(400, `Flujo repetido: ${f.id}.`)
       ids.add(f.id)
       this.validarFlujo(f)
+    }
+    // `siguiente` hacia un flujo que ya no existe NO es error (la oficina tiene que seguir abriendo): el motor avisa al llegar.
+    // Lo que sí no puede haber es un círculo: cada flujo sigue como mucho a uno, así que alcanza con recorrer la cadena.
+    const sig = new Map(fs.map((f) => [f.id, f.siguiente]))
+    for (const f of fs) {
+      const vistos = new Set<string>([f.id])
+      for (let s = f.siguiente; s !== undefined; s = sig.get(s)) {
+        if (vistos.has(s)) throw new ErrorAPI(400, `Los flujos siguen uno a otro en círculo (${[...vistos, s].join(' → ')}).`)
+        vistos.add(s)
+      }
     }
   },
 }

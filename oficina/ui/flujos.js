@@ -477,13 +477,13 @@ App.Flujos = (function () {
     }
 
     function vacioEd() {
-      return { id: null, nombre: '', descripcion: '', activo: true, pasos: [pasoNuevo()] };
+      return { id: null, nombre: '', descripcion: '', activo: true, siguiente: '', pasos: [pasoNuevo()] };
     }
     function pasoNuevo() {
       return { id: null, nombre: '', quien: '', consigna: '', recibe: '', entrega: '', aprobacion: false, plazoDias: '', esperaDias: '', recibeDe: [], recibeNada: false, abierto: true };
     }
     function desdeFlujo(f) {
-      return { id: f.id, nombre: f.nombre || '', descripcion: f.descripcion || '', activo: f.activo !== false, origen: f.origen,
+      return { id: f.id, nombre: f.nombre || '', descripcion: f.descripcion || '', activo: f.activo !== false, origen: f.origen, siguiente: f.siguiente || '',
         pasos: (f.pasos || []).map(function (p) {
           return { id: p.id, nombre: p.nombre || '', quien: p.quien || '', consigna: p.consigna || '', recibe: p.recibe || '', entrega: p.entrega || '',
             aprobacion: !!p.aprobacion, plazoDias: p.plazoDias || '', esperaDias: p.esperaDias || '', recibeDe: (p.recibeDe || []).slice(),
@@ -545,10 +545,16 @@ App.Flujos = (function () {
       var estado = App.elegir({ forma: 'chips', etiqueta: 'Estado', valor: ed.activo,
         opciones: [{ valor: true, titulo: 'Activo' }, { valor: false, titulo: 'Pausado' }],
         alCambiar: function (v) { ed.activo = v; sucio = true; } });
+      /* «Al terminar, seguir con…»: otro flujo de la oficina (no este) que arranca solo con la última entrega como contexto */
+      var otros = flujos.filter(function (x) { return x.id !== ed.id; });
+      var siguiente = App.elegir({ forma: 'chips', etiqueta: 'Al terminar, seguir con', valor: ed.siguiente || '',
+        opciones: [{ valor: '', titulo: 'Ninguno' }].concat(otros.map(function (x) { return { valor: x.id, titulo: x.nombre + (x.activo === false ? ' · pausado' : ''), icono: 'flujo' }; })),
+        alCambiar: function (v) { ed.siguiente = v; sucio = true; } });
       App.add(formulario,
         campo('Nombre', null, nombre),
         campo('Descripción', null, desc),
         campo('Estado', 'Un flujo pausado queda guardado pero no se puede correr.', estado),
+        otros.length ? campo('Al terminar, seguir con', 'Cuando una corrida de este flujo termina (con su último paso aprobado), arranca sola una corrida de ese flujo con lo último que se entregó. Si cambiás ese flujo, el cambio vale también por acá.', siguiente) : null,
         h('div.etiqueta-campo', { style: { marginTop: '12px' } }, 'Pasos'),
         h('div.ayuda', 'Tocá un paso para ver o cambiar sus detalles.'));
       var lista = h('div.lista-ed.flu-pasos-ed');
@@ -673,6 +679,7 @@ App.Flujos = (function () {
       if (!ed.nombre.trim()) throw new Error('Ponele un nombre al flujo.');
       var cuerpo = { nombre: ed.nombre.trim(), pasos: pasos, activo: !!ed.activo };
       cuerpo.descripcion = ed.descripcion.trim();
+      cuerpo.siguiente = ed.siguiente || null;
       if (!ed.id && ed.origen) cuerpo.origen = ed.origen;   // un flujo nuevo armado desde una reunión o desde esperas recuerda de dónde salió
       return cuerpo;
     }

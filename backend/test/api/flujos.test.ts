@@ -297,6 +297,78 @@ describe('Flujos: motor, corridas y API', () => {
     expect(str((await corrida(f, c)).pasoNombre)).toBe('B')
   })
 
+  // MARK: seguir con otro flujo
+
+  const unPaso = (nombre: string, quien: string): Obj[] => [{ id: 'p', nombre, quien, entrega: 'algo' }]
+  const corridasDe = async (f: Fix, flujo: string, estado = 'todas'): Promise<Obj[]> => lista((await f.get('/api/flujos/corridas', { flujo, estado })).obj.corridas)
+
+  test('siguiente: al terminar arranca el otro flujo con la última entrega como contexto, y toma su definición vigente', async () => {
+    const f = await fix()
+    const dev = await definir(f, [{ id: 'p', nombre: 'Primera versión', quien: 'armando', consigna: 'Desarrollá', entrega: 'El código' }], 'Desarrollo')
+    const inv = (await f.post('/api/flujos', { nombre: 'Investigación', pasos: unPaso('Investigar', 'persona'), siguiente: dev }))
+    expect(inv.status, JSON.stringify(inv.obj)).toBe(200)
+    expect(dict(inv.obj.flujo).siguiente).toBe(dev)
+    const idInv = str(dict(inv.obj.flujo).id)
+
+    // se cambia el flujo de desarrollo DESPUÉS de definir la conexión: la corrida nueva usa la versión vigente
+    expect((await f.patch(`/api/flujos/${dev}`, { pasos: [{ id: 'p', nombre: 'Segunda versión', quien: 'armando', consigna: 'Desarrollá mejor', entrega: 'El código' }] })).status).toBe(200)
+
+    const c = await correr(f, idInv, 'Tema 1')
+    expect(await corridasDe(f, dev)).toEqual([])
+    expect((await post(f, c, 'hecho', { nota: 'Hallazgo: usar SQLite' })).status).toBe(200)
+    expect(str((await corrida(f, c)).estado)).toBe('terminada')
+
+    const hijas = await corridasDe(f, dev)
+    expect(hijas.length).toBe(1)
+    expect(str(hijas[0]!.nombre)).toBe('Tema 1 · Desarrollo')
+    const ctx = str((await corrida(f, Number(hijas[0]!.id))).contexto)
+    expect(ctx.includes('corrida «Tema 1»') && ctx.includes('Hallazgo: usar SQLite')).toBe(true)
+    // el agente del primer paso la recibe en su consigna, con la definición nueva del flujo
+    expect(await esperaEstado(f, Number(hijas[0]!.id), 'terminada')).toBe(true)
+    const consigna = prompts(f).find((p) => p.includes('Segunda versión'))
+    expect(consigna, 'la consigna usa la definición vigente').toBeDefined()
+    expect(consigna!.includes('Hallazgo: usar SQLite') && consigna!.includes('Desarrollá mejor')).toBe(true)
+  })
+
+  test('siguiente: cancelar la corrida no arranca el siguiente; con el siguiente pausado o borrado avisa', async () => {
+    const f = await fix()
+    const dev = await definir(f, unPaso('Dev', 'persona'), 'Desarrollo')
+    const inv = str(dict((await f.post('/api/flujos', { nombre: 'Investigación', pasos: unPaso('Investigar', 'persona'), siguiente: dev })).obj.flujo).id)
+
+    const c1 = await correr(f, inv, 'Uno')
+    expect((await post(f, c1, 'cancelar')).status).toBe(200)
+    expect(await corridasDe(f, dev)).toEqual([])
+
+    expect((await f.patch(`/api/flujos/${dev}`, { activo: false })).status).toBe(200)
+    const c2 = await correr(f, inv, 'Dos')
+    expect((await post(f, c2, 'hecho')).status).toBe(200)
+    expect(str((await corrida(f, c2)).estado)).toBe('terminada')
+    expect(await corridasDe(f, dev)).toEqual([])
+    const av = lista((await f.get('/api/avisos')).obj.avisos).find((x) => str(x.tipo) === 'flujo' && str(x.texto).includes('pausado'))
+    expect(av, 'avisa que el siguiente está pausado').toBeDefined()
+
+    // si se borra el siguiente, el flujo queda sin conexión y la oficina sigue validando
+    expect((await f.delete(`/api/flujos/${dev}`)).status).toBe(200)
+    expect(dict((await f.get(`/api/flujos/${inv}`)).obj.flujo).siguiente).toBeUndefined()
+    const c3 = await correr(f, inv, 'Tres')
+    expect((await post(f, c3, 'hecho')).status).toBe(200)
+    expect(str((await corrida(f, c3)).estado)).toBe('terminada')
+  })
+
+  test('siguiente: tiene que existir, no puede ser el mismo flujo ni formar un círculo; null lo saca', async () => {
+    const f = await fix()
+    const a = await definir(f, unPaso('A', 'persona'), 'Alfa')
+    const b = str(dict((await f.post('/api/flujos', { nombre: 'Beta', pasos: unPaso('B', 'persona'), siguiente: a })).obj.flujo).id)
+    expect((await f.post('/api/flujos', { nombre: 'Gamma', pasos: unPaso('G', 'persona'), siguiente: 'no-existe' })).status).toBe(400)
+    expect((await f.patch(`/api/flujos/${a}`, { siguiente: a })).status).toBe(400)
+    // a → b y b → a es un círculo
+    expect((await f.patch(`/api/flujos/${a}`, { siguiente: b })).status).toBe(400)
+    expect(dict((await f.get(`/api/flujos/${a}`)).obj.flujo).siguiente).toBeUndefined()
+    const sacar = await f.patch(`/api/flujos/${b}`, { siguiente: null })
+    expect(sacar.status === 200 && dict(sacar.obj.flujo).siguiente === undefined).toBe(true)
+    expect((await f.patch(`/api/flujos/${a}`, { siguiente: b })).status).toBe(200)
+  })
+
   // MARK: consigna
 
   // interno: llama a FlujoTexto.consigna con structs Swift (recorte a 3000, saneo, carpeta de entrega); unit test del port.
