@@ -599,9 +599,14 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     return obj;
   };
   document.addEventListener('keydown', function (e) {
-    if (e.key !== 'Escape') return;
-    if (emergente) { cerrarEmergente(); return; }
+    if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+    if (emergente) { cerrarEmergente(); e.preventDefault(); return; }
     if (pila.length) { pila[pila.length - 1].cerrar(); e.preventDefault(); return; }
+    var paleta = document.querySelector('.cmdk-velo');
+    if (paleta) { paleta.remove(); e.preventDefault(); return; }
+    /* escribiendo en un campo, el primer Esc sólo lo suelta (no se pierde lo escrito); el siguiente cierra la ventana */
+    var a = document.activeElement;
+    if (a && a !== document.body && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || (a && a.isContentEditable)) { a.blur(); e.preventDefault(); return; }
     if (App.alEscape) App.alEscape();
   });
 

@@ -454,8 +454,9 @@
     }, 'Guardar'));
   }
 
-  /* Esc cierra el panel solo sobre la maqueta; en las secciones el panel es la pantalla */
-  App.alEscape = function () { if (dom.derecho && dom.derecho.classList.contains('abierto') && !App.Nav.enSeccion()) App.cerrarDerecho(); };
+  /* Esc hace lo mismo que la × de la ventana abierta (la del panel, que sabe limpiar lo suyo; en una sección, volver a la
+     oficina). Lo llama el Esc global de base.js cuando no queda ningún menú ni hoja por cerrar. */
+  App.alEscape = function () { cerrarDesdeBarra(); };
   App.abrirDerecho = function (modo) {
     var antes = App.modoDerecho();
     dom.derecho.classList.add('abierto'); dom.derecho.setAttribute('data-modo', modo); App.Nav.alAbrir(modo);
