@@ -417,7 +417,9 @@ App.OficinaPixel = (function () {
   function caja(it) { var b = it.b, l = iso(b[0], b[3])[0], r = iso(b[2], b[1])[0], tp = iso(b[0], b[1])[1] - b[4] * S - 6, bt = iso(b[2], b[3])[1] + 2; return [l, tp, r, bt]; }
   function solapa(p, q) { return p[0] < q[2] && q[0] < p[2] && p[1] < q[3] && q[1] < p[3]; }
   function atras(A, B) { return A[2] <= B[0] + 1e-6 || A[3] <= B[1] + 1e-6; }
-  function antes(A, B) { var ab = atras(A.b, B.b), ba = atras(B.b, A.b); if (ab && !ba) return true; if (ba && !ab) return false; return A.d < B.d; }
+  function antes(A, B) { var ab = atras(A.b, B.b), ba = atras(B.b, A.b); if (ab && !ba) return true; if (ba && !ab) return false;
+    if (!ab && !ba && A.enSofa !== B.enSofa) return !!B.enSofa;   // quien está sentado en un sillón queda dentro de su caja: se dibuja encima de él
+    return A.d < B.d; }
   function prepararEstaticos() {
     var Ls = items.filter(function (i) { return i.b; });
     Ls.forEach(function (i) { i.sb = caja(i); i.sal = []; i.ent0 = 0; });
@@ -427,7 +429,7 @@ App.OficinaPixel = (function () {
   function ordenar() {
     if (!EST) prepararEstaticos();
     var Ls = EST.L, n0 = Ls.length;
-    var ags = Object.keys(figs).map(function (id) { var f = figs[id]; return { b: [f.x - .07, f.y - .07, f.x + .07, f.y + .07, 18], d: f.x + f.y, f: function (t) { dibujarFigura(f, t); } }; });
+    var ags = Object.keys(figs).map(function (id) { var f = figs[id]; return { b: [f.x - .07, f.y - .07, f.x + .07, f.y + .07, 18], d: f.x + f.y, enSofa: !!(f.sit && !f.ruta && f.spot && f.spot.sofa), f: function (t) { dibujarFigura(f, t); } }; });
     var todos = Ls.concat(ags), n = todos.length, ent = new Int32Array(n), extra = [];
     for (var i = 0; i < n; i++) { extra.push([]); if (i < n0) ent[i] = Ls[i].ent0; }
     ags.forEach(function (A, ai) { var ia = n0 + ai; A.sb = caja(A);
