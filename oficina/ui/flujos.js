@@ -726,10 +726,11 @@ App.Flujos = (function () {
       try { cuerpo = payload(); } catch (e) { pintar(); err.textContent = e.message; return; }
       btn.disabled = true;
       var pedido = ed.id ? api().patch('/api/flujos/' + ed.id, cuerpo) : api().post('/api/flujos', cuerpo);
-      pedido.then(function (r) {
+      pedido.then(function () {
         App.aviso('Flujo guardado.');
         sucio = false;
-        return cargar(r.flujo.id);
+        /* guardar cierra la edición: de vuelta a la lista de flujos (en una hoja suelta, se cierra la hoja) */
+        if (hj.enPanel) abrir(); else hj.cerrar();
       }).catch(function (e) { err.textContent = e.message; btn.disabled = false; });
     }
 

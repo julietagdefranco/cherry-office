@@ -452,6 +452,15 @@
   }
 
   /* ---------------- perfil ---------------- */
+  /* guardar el perfil cierra la edición: de vuelta a la charla (compu: la columna vuelve a los detalles; celular: se cierra
+     la columna; ficha por pestañas: a la charla) */
+  function cerrarPerfil() {
+    if (pestana === 'perfil') { pestana = 'chat'; if (App.Nav) App.Nav.alAbrir('agente'); }
+    else if (esCompu()) { lado = 'detalles'; ladoFiltro = ''; }
+    else cerrarLadoMovil();
+    pintar();
+  }
+
   function pintarPerfil(a, cuerpo, pie) {
     var cont = h('div', { style: { padding: '14px' } }, App.cargando('Trayendo el perfil…'));
     cuerpo.appendChild(cont);
@@ -471,7 +480,7 @@
           api.patch('/api/agentes/' + encodeURIComponent(a.id), v).then(function (r2) {
             App.guardado('Cambios guardados.');
             App.actualizar(r2.oficina);
-            pintar();
+            cerrarPerfil();
           }).catch(function (e) { err.textContent = e.message; guardar.disabled = false; });
         }
       }, 'Guardar cambios');
