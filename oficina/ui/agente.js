@@ -514,6 +514,7 @@
         chats[a.id] = (r.msgs || []).map(function (m) { return { r: m.r, t: m.t, e: !!m.e }; });
         App.ChipContexto.fijar(a.id, r.contexto);
         if (App.Nav) App.Nav.pintarLista();    // ya se sabe qué charla es: se marca en la lista
+        if (actual === a.id) repintarLado('charlas');   // y en Detalles (si no, queda «Charla nueva» aunque estés en la última)
         return cargarConsultas(a.id).then(function () { if (actual === a.id && pestana === 'chat') render(); });
       }).catch(function () { chats[a.id] = []; render(); });
     }
