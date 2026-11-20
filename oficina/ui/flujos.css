@@ -27,7 +27,8 @@ ol.pasos b { font-weight: inherit; }
 .paso::before { content: ''; position: absolute; left: 7px; top: 18px; bottom: -2px; width: 2px; background: var(--linea); }
 .paso:last-child { padding-bottom: 0; }
 .paso:last-child::before { display: none; }
-.paso-punto { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; background: var(--panel); border: 2px solid var(--linea-fuerte); z-index: 1; box-sizing: border-box; }
+/* `.paso .paso-punto` (no solo `.paso-punto`): chat-rico.css define otro .paso-punto de 6px que, a igual especificidad, lo pisaba y descentraba el punto de la línea */
+.paso .paso-punto { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; background: var(--panel); border: 2px solid var(--linea-fuerte); z-index: 1; box-sizing: border-box; transform: none; }
 .paso.hecho .paso-punto { background: var(--ok); border-color: var(--ok); }
 .paso.hecho::before { background: var(--ok); opacity: .5; }
 .paso.actual .paso-punto { border-color: var(--acento); box-shadow: 0 0 0 3px var(--foco); }
