@@ -1167,7 +1167,9 @@ button.adjunto:hover { background: var(--panel-2); }
   .app.lista-plegada.lista-ver .ventana > .lista-col { display: flex; position: absolute; z-index: 5; left: 0; top: var(--barra-v); bottom: 0; box-shadow: var(--sombra-alta); }
   /* la barra fina de la ventana: la cruza de lado a lado (lista, panel y columnas) con la ruta y la única ×, que
      cierra todo. Las × de cada panel quedan escondidas (la de la barra las aprieta: app.js cerrarDesdeBarra). */
-  .app.en-seccion .ventana { padding-top: var(--barra-v); }
+  .app.en-seccion .ventana { padding-top: var(--barra-v); translate: var(--mov-x, 0px) var(--mov-y, 0px); }
+  .ventana-barra { cursor: grab; user-select: none; }
+  .ventana-barra .btn { cursor: pointer; }
   .app.en-seccion .ventana-barra { display: flex; align-items: center; gap: 8px; position: absolute; z-index: 6; top: 0; left: 0; right: 0; height: var(--barra-v);
     padding: 0 4px 0 14px; background: var(--fondo); border-bottom: 1px solid var(--linea); font-size: 12px; color: var(--suave); }
   .ventana-ruta { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

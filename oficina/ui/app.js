@@ -300,6 +300,7 @@
       dom.barra = h('div.ventana-barra', dom.ruta,
         h('button.btn.fantasma.icono.ventana-cerrar', { title: 'Cerrar', onclick: cerrarDesdeBarra }, App.icono('cerrar')));
       dom.ventana = h('div.ventana', dom.barra, dom.lista, dom.derecho);
+      moverVentana(dom.ventana, dom.barra);
       var rutaPend = false, refrescarRuta = function () {
         if (rutaPend) return;
         rutaPend = true;
@@ -487,6 +488,45 @@
   function cerrarDesdeBarra() {
     var x = App.modoDerecho() ? dom.derecho.querySelector('.cerrar-panel') : null;
     if (x) x.click(); else App.cerrarVentana();
+  }
+  /* Mover la ventana del riel arrastrando su barra fina (sólo en la compu: en el celular ocupa la pantalla y la barra
+     está oculta). El corrimiento va en --mov-x/--mov-y y lo aplica el CSS con `translate`, así no toca el acomodo de
+     nav.js. Siempre queda a la vista un pedazo de la barra. Doble clic en la barra la devuelve a su lugar. */
+  function moverVentana(ven, barra) {
+    var ASOMA = 80, ox = 0, oy = 0;
+    function poner(x, y) {
+      ox = Math.round(x); oy = Math.round(y);
+      ven.style.setProperty('--mov-x', ox + 'px'); ven.style.setProperty('--mov-y', oy + 'px');
+    }
+    /* entre los límites de la vista, con el corrimiento ya puesto (también al achicarse la ventana de la app) */
+    function limitar() {
+      if (!ox && !oy) return;
+      var r = ven.getBoundingClientRect(), v = ven.parentNode.getBoundingClientRect();
+      if (!r.width) return;
+      var nl = Math.max(v.left + ASOMA - r.width, Math.min(v.right - ASOMA, r.left));
+      var nt = Math.max(v.top, Math.min(v.bottom - barra.offsetHeight, r.top));
+      if (nl !== r.left || nt !== r.top) poner(ox + nl - r.left, oy + nt - r.top);
+    }
+    window.addEventListener('resize', limitar);
+    barra.addEventListener('dblclick', function (e) { if (!e.target.closest('button, a, input')) poner(0, 0); });
+    barra.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || e.target.closest('button, a, input')) return;
+      e.preventDefault();
+      var x0 = e.clientX, y0 = e.clientY, ox0 = ox, oy0 = oy;
+      var r0 = ven.getBoundingClientRect(), v = ven.parentNode.getBoundingClientRect();
+      barra.setPointerCapture && barra.setPointerCapture(e.pointerId);
+      document.body.classList.add('arrastrando-hoja'); document.body.style.cursor = 'grabbing';
+      function mover(ev) {
+        var nl = Math.max(v.left + ASOMA - r0.width, Math.min(v.right - ASOMA, r0.left + ev.clientX - x0));
+        var nt = Math.max(v.top, Math.min(v.bottom - barra.offsetHeight, r0.top + ev.clientY - y0));
+        poner(ox0 + nl - r0.left, oy0 + nt - r0.top);
+      }
+      function soltar() {
+        barra.removeEventListener('pointermove', mover); barra.removeEventListener('pointerup', soltar); barra.removeEventListener('pointercancel', soltar);
+        document.body.classList.remove('arrastrando-hoja'); document.body.style.cursor = '';
+      }
+      barra.addEventListener('pointermove', mover); barra.addEventListener('pointerup', soltar); barra.addEventListener('pointercancel', soltar);
+    });
   }
   /* La ruta de la barra: la sección y, si hay algo abierto en el panel, su título (el nombre del agente, «Contratar»…) */
   function pintarRuta() {
