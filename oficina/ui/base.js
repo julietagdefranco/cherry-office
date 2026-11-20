@@ -348,6 +348,24 @@ App.E = { estado: null, carpeta: null, oficina: null, ocupados: {}, reunion: nul
     if ((e.key !== 'Enter' && e.key !== ' ') || !e.target.matches || !e.target.matches(CLICABLES) || e.target.tagName === 'BUTTON') return;
     e.preventDefault(); e.target.click();
   });
+  /* Cmd/Ctrl+Enter en un campo de texto largo = apretar el botón principal del formulario (el de la hoja, o el más
+     cercano si el campo está suelto). Los campos que ya manejan la tecla (chats, Creador, notas de revisión) la
+     frenan antes con preventDefault y no llegan acá. */
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || e.defaultPrevented || e.isComposing) return;
+    var t = e.target;
+    if (!t || t.tagName !== 'TEXTAREA' || t.readOnly || t.disabled) return;
+    var activo = function (cont) {
+      var bs = cont.querySelectorAll('.btn.primario');
+      for (var i = bs.length - 1; i >= 0; i--) if (!bs[i].disabled && bs[i].offsetParent !== null) return bs[i];
+      return null;
+    };
+    var boton = null, hoja = t.closest('.hoja');
+    if (hoja) boton = activo(hoja.querySelector('.hoja-pie') || hoja) || activo(hoja);
+    else for (var n = t.parentElement, d = 0; n && n !== document.body && d < 4 && !boton; n = n.parentElement, d++) boton = activo(n);
+    if (!boton) return;
+    e.preventDefault(); boton.click();
+  });
 
   /* Estado vacío con intención: qué es este lugar y qué podés hacer (un botón o varios) */
   App.vacio = function (icono, titulo, texto, botones) {
