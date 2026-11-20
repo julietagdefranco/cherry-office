@@ -554,7 +554,6 @@ App.Flujos = (function () {
         campo('Nombre', null, nombre),
         campo('Descripción', null, desc),
         campo('Estado', 'Un flujo pausado queda guardado pero no se puede correr.', estado),
-        otros.length ? campo('Al terminar, seguir con', 'Cuando una corrida de este flujo termina (con su último paso aprobado), arranca sola una corrida de ese flujo con lo último que se entregó. Si cambiás ese flujo, el cambio vale también por acá.', siguiente) : null,
         h('div.etiqueta-campo', { style: { marginTop: '12px' } }, 'Pasos'),
         h('div.ayuda', 'Tocá un paso para ver o cambiar sus detalles.'));
       var lista = h('div.lista-ed.flu-pasos-ed');
@@ -564,6 +563,14 @@ App.Flujos = (function () {
         if (ed.pasos.length >= 20) { err.textContent = 'Un flujo tiene como máximo 20 pasos.'; return; }
         ed.pasos.push(pasoNuevo()); sucio = true; pintar();
       } }, App.icono('mas'), 'Agregar un paso'));
+      /* seguir con otro flujo va como un último «paso» fijo: no se puede agregar nada después, y se dice */
+      formulario.appendChild(h('div.flu-paso-ed.flu-paso-final',
+        h('div.fila-ed.flu-paso-cab.flu-paso-fijo', h('b.flu-num', '→'),
+          h('div.flu-paso-res', h('div.flu-paso-nom', 'Seguir con otro flujo'),
+            h('div.flu-paso-sub', 'Siempre es lo último: después de esto no se pueden agregar más pasos'))),
+        h('div.flu-paso-form',
+          h('div.ayuda', 'Cuando una corrida de este flujo termina (con su último paso aprobado), arranca sola una corrida del flujo que elijas, con lo último que se entregó. Si cambiás ese flujo, el cambio vale también cuando lo corrés solo.'),
+          otros.length ? siguiente : h('div.ayuda', 'Todavía no hay otros flujos con los que seguir.'))));
 
       var izq = ed.id ? [h('button.btn.peligro-suave', { onclick: borrar }, App.icono('papelera'), 'Borrar el flujo')] : null;
       var guardarBtn = h('button.btn.primario', { onclick: function () { guardar(guardarBtn); } }, 'Guardar');

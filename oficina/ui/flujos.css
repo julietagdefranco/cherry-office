@@ -99,6 +99,10 @@ ol.pasos b { font-weight: inherit; }
 .flu-paso-entrega { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flu-chev { flex: none; width: 14px; text-align: center; color: var(--suave); }
 .flu-paso-ed.abierto { background: var(--panel); }
+.flu-paso-final { margin-top: 12px; border-style: dashed; }
+.flu-paso-fijo { cursor: default; }
+.flu-paso-fijo:hover { background: transparent; }
+.flu-paso-final .flu-paso-sub { white-space: normal; }
 .flu-num { flex: none; width: 22px; text-align: right; color: var(--suave); }
 .flu-paso-form { padding: 8px 6px 6px; display: grid; gap: 10px; }
 .flu-paso-form .fila-campo { margin-bottom: 0; }
