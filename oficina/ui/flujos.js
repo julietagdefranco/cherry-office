@@ -477,13 +477,13 @@ App.Flujos = (function () {
     }
 
     function vacioEd() {
-      return { id: null, nombre: '', descripcion: '', activo: true, siguiente: '', pasos: [pasoNuevo()] };
+      return { id: null, nombre: '', descripcion: '', activo: true, siguiente: '', cierreAbierto: false, pasos: [pasoNuevo()] };
     }
     function pasoNuevo() {
       return { id: null, nombre: '', quien: '', consigna: '', recibe: '', entrega: '', aprobacion: false, plazoDias: '', esperaDias: '', recibeDe: [], recibeNada: false, abierto: true };
     }
     function desdeFlujo(f) {
-      return { id: f.id, nombre: f.nombre || '', descripcion: f.descripcion || '', activo: f.activo !== false, origen: f.origen, siguiente: f.siguiente || '',
+      return { id: f.id, nombre: f.nombre || '', descripcion: f.descripcion || '', activo: f.activo !== false, origen: f.origen, siguiente: f.siguiente || '', cierreAbierto: false,
         pasos: (f.pasos || []).map(function (p) {
           return { id: p.id, nombre: p.nombre || '', quien: p.quien || '', consigna: p.consigna || '', recibe: p.recibe || '', entrega: p.entrega || '',
             aprobacion: !!p.aprobacion, plazoDias: p.plazoDias || '', esperaDias: p.esperaDias || '', recibeDe: (p.recibeDe || []).slice(),
@@ -549,32 +549,61 @@ App.Flujos = (function () {
       var otros = flujos.filter(function (x) { return x.id !== ed.id; });
       var siguiente = App.elegir({ forma: 'chips', etiqueta: 'Al terminar, seguir con', valor: ed.siguiente || '',
         opciones: [{ valor: '', titulo: 'Ninguno' }].concat(otros.map(function (x) { return { valor: x.id, titulo: x.nombre + (x.activo === false ? ' · pausado' : ''), icono: 'flujo' }; })),
-        alCambiar: function (v) { ed.siguiente = v; sucio = true; } });
+        alCambiar: function (v) { ed.siguiente = v; sucio = true; pintar(); } });
       App.add(formulario,
         campo('Nombre', null, nombre),
         campo('Descripción', null, desc),
         campo('Estado', 'Un flujo pausado queda guardado pero no se puede correr.', estado),
         h('div.etiqueta-campo', { style: { marginTop: '12px' } }, 'Pasos'),
         h('div.ayuda', 'Tocá un paso para ver o cambiar sus detalles.'));
+      /* línea de tiempo: los pasos, un «+» para agregar y, al final, el cierre (seguir con otro flujo), que no se mueve */
+      var linea = h('div.flu-linea');
       var lista = h('div.lista-ed.flu-pasos-ed');
-      formulario.appendChild(lista);
       ed.pasos.forEach(function (p, i) { lista.appendChild(filaPaso(p, i)); });
-      formulario.appendChild(h('button.btn', { style: { marginTop: '8px' }, onclick: function () {
+      linea.appendChild(lista);
+      linea.appendChild(h('button.flu-mas', { type: 'button', onclick: function () {
         if (ed.pasos.length >= 20) { err.textContent = 'Un flujo tiene como máximo 20 pasos.'; return; }
         ed.pasos.push(pasoNuevo()); sucio = true; pintar();
-      } }, App.icono('mas'), 'Agregar un paso'));
-      /* seguir con otro flujo va como un último «paso» fijo: no se puede agregar nada después, y se dice */
-      formulario.appendChild(h('div.flu-paso-ed.flu-paso-final',
-        h('div.fila-ed.flu-paso-cab.flu-paso-fijo', h('b.flu-num', '→'),
-          h('div.flu-paso-res', h('div.flu-paso-nom', 'Seguir con otro flujo'),
-            h('div.flu-paso-sub', 'Siempre es lo último: después de esto no se pueden agregar más pasos'))),
-        h('div.flu-paso-form',
-          h('div.ayuda', 'Cuando una corrida de este flujo termina (con su último paso aprobado), arranca sola una corrida del flujo que elijas, con lo último que se entregó. Si cambiás ese flujo, el cambio vale también cuando lo corrés solo.'),
-          otros.length ? siguiente : h('div.ayuda', 'Todavía no hay otros flujos con los que seguir.'))));
+        /* repintar vuelve arriba: llevar la vista al paso nuevo y dejar el cursor en su nombre */
+        var nuevos = formulario.querySelectorAll('.flu-pasos-ed > .flu-paso-ed');
+        var ultimo = nuevos[nuevos.length - 1];
+        if (ultimo) {
+          ultimo.scrollIntoView({ block: 'center' });
+          var campoNombre = ultimo.querySelector('input.campo');
+          if (campoNombre) campoNombre.focus({ preventScroll: true });
+        }
+      } }, h('span.flu-mas-c', '+'), 'Agregar un paso'));
+      linea.appendChild(filaCierre(otros, siguiente));
+      formulario.appendChild(linea);
 
       var izq = ed.id ? [h('button.btn.peligro-suave', { onclick: borrar }, App.icono('papelera'), 'Borrar el flujo')] : null;
       var guardarBtn = h('button.btn.primario', { onclick: function () { guardar(guardarBtn); } }, 'Guardar');
       App.add(pie, App.acciones(izq, [hj.enPanel ? null : h('button.btn', { onclick: hj.cerrar }, 'Cerrar'), guardarBtn]));
+    }
+
+    /* el cierre de la línea: «Seguir con otro flujo». Se ve como un paso más pero va siempre al final (no tiene flechas ni se quita) */
+    function filaCierre(otros, siguiente) {
+      var elegido = ed.siguiente ? otros.filter(function (x) { return x.id === ed.siguiente; })[0] : null;
+      var hay = !!ed.siguiente;
+      var alternar = function () {
+        ed.cierreAbierto = !ed.cierreAbierto; pintar();
+        var nueva = formulario.querySelector('.flu-paso-final');   // repintar vuelve arriba: dejar el cierre a la vista
+        if (nueva) nueva.scrollIntoView({ block: 'nearest' });
+      };
+      var caja = h('div.flu-paso-ed.flu-paso-final' + (hay ? '.elegido' : '.sin-flujo') + (ed.cierreAbierto ? '.abierto' : ''),
+        h('div.fila-ed.flu-paso-cab.tocable', { role: 'button', tabindex: 0, 'aria-expanded': ed.cierreAbierto ? 'true' : 'false', onclick: alternar,
+            onkeydown: function (ev) { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === ev.currentTarget) { ev.preventDefault(); alternar(); } } },
+          h('div.flu-paso-res',
+            h('div.flu-paso-nom', hay ? 'Seguir con: ' + (elegido ? elegido.nombre : ed.siguiente) : 'Seguir con otro flujo'),
+            h('div.flu-paso-sub', hay ? 'Recibe lo que entregó el paso anterior' : 'Opcional · Ninguno por ahora')),
+          h('span.flu-paso-tag', 'siempre al final'),
+          h('span.flu-chev', ed.cierreAbierto ? '▾' : '▸')));
+      if (ed.cierreAbierto) {
+        caja.appendChild(h('div.flu-paso-form',
+          h('div.ayuda', 'Cuando una corrida de este flujo termina (con su último paso aprobado), arranca sola una corrida del flujo que elijas, con lo último que se entregó. Es siempre el último paso: después de esto no se agrega nada. Si cambiás ese flujo, el cambio vale también cuando lo corrés solo.'),
+          otros.length ? siguiente : h('div.ayuda', 'Todavía no hay otros flujos con los que seguir.')));
+      }
+      return caja;
     }
 
     /* «Quién hace»: chips con retrato (Vos y cada agente); si el agente ya no está, un chip que lo dice */

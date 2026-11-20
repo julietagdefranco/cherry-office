@@ -100,10 +100,20 @@ ol.pasos b { font-weight: inherit; }
 .flu-paso-entrega { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flu-chev { flex: none; width: 14px; text-align: center; color: var(--suave); }
 .flu-paso-ed.abierto { background: var(--panel); }
-.flu-paso-final { margin-top: 12px; border-style: dashed; }
-.flu-paso-fijo { cursor: default; }
-.flu-paso-fijo:hover { background: transparent; }
-.flu-paso-final .flu-paso-sub { white-space: normal; }
+/* línea de tiempo del editor: pasos, «+» y el cierre */
+.flu-linea { position: relative; margin: 8px 0 0 10px; padding-left: 22px; border-left: 2px solid var(--linea); }
+.flu-linea .flu-pasos-ed { margin: 0; }
+.flu-linea .flu-paso-ed { position: relative; }
+.flu-linea .flu-paso-ed::before { content: ''; position: absolute; left: -30px; top: 17px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; background: var(--panel); border: 2px solid var(--linea); }
+.flu-mas { position: relative; display: flex; align-items: center; margin: 10px 0; padding: 0; border: 0; background: none; color: var(--suave); font: inherit; font-size: 13px; cursor: pointer; }
+.flu-mas-c { position: absolute; left: -33px; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--linea); background: var(--panel); display: grid; place-items: center; line-height: 1; font-size: 14px; }
+.flu-mas:hover { color: var(--texto); }
+.flu-mas:hover .flu-mas-c { background: var(--acento); border-color: var(--acento); color: var(--sobre-acento); }
+.flu-mas:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--foco); border-radius: 6px; }
+.flu-paso-final.elegido { border-color: var(--acento); }
+.flu-paso-final.elegido::before { background: var(--acento); border-color: var(--acento); }
+.flu-paso-final.sin-flujo { border-style: dashed; background: transparent; }
+.flu-paso-tag { flex: none; font-size: 11px; color: var(--suave); background: var(--panel); border-radius: 8px; padding: 2px 8px; white-space: nowrap; }
 .flu-num { flex: none; width: 22px; text-align: right; color: var(--suave); }
 .flu-paso-form { padding: 8px 6px 6px; display: grid; gap: 10px; }
 .flu-paso-form .fila-campo { margin-bottom: 0; }
