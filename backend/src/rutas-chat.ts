@@ -2,7 +2,7 @@
 import { Adjuntos, type Adjunto } from './adjuntos.js'
 import type { Avisos } from './avisos.js'
 import { TextoAviso, avisoJSON } from './avisos.js'
-import { ClaudeError, type ClaudeRunner } from './claude-runner.js'
+import { Cancelacion, ClaudeError, type ClaudeRunner } from './claude-runner.js'
 import { ErrorAPI } from './errores.js'
 import type { Config } from './config.js'
 import { ArchivosEntrega, TextoEntrega, type Entregas } from './entregas.js'
@@ -100,7 +100,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
   const { config, store, runner, oficinas, avisos, entregas, log } = d
   const invalido: Resp = [400, { error: 'pedido inválido' }]
   /** Chats en curso (oficina + agente): lo que el agente va escribiendo y haciendo, para `GET /api/chat/vivo`. */
-  const vivos = new Map<string, { sid: string; caja: CajaVivo }>()
+  const vivos = new Map<string, { sid: string; caja: CajaVivo; cancelacion: Cancelacion }>()
   const claveVivo = (oficina: string, agente: string) => oficina + '\u001f' + agente
 
   /** `GET /api/chat/vivo?agent=<id>`: la respuesta que se está escribiendo. `{activo:false}` si no hay chat en curso. */
@@ -111,6 +111,20 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const v = vivos.get(claveVivo(act.carpeta, agente))
     if (!v) return [200, { activo: false }]
     return [200, { activo: true, session: v.sid, version: v.caja.version, pasos: v.caja.valor.map((p) => pasoJSON(p, act.carpeta, act.oficina)) }]
+  }
+
+  /** `POST /api/chat/cancelar` `{agent}`: corta lo que el agente está haciendo en su chat (termina el proceso de claude y,
+   *  con él, las herramientas que lanzó). El `POST /api/chat` que estaba esperando responde `{cancelado:true, reply, pasos}`.
+   *  409 si no hay un chat en curso con ese agente (por ejemplo, terminó justo antes). */
+  function cancelar(body?: Buffer): Resp {
+    const act = oficinas.requerirActiva()
+    const b = objeto(body)
+    if (typeof b.agent !== 'string' || !act.oficina.agentes.some((a) => a.id === b.agent)) return invalido
+    const v = vivos.get(claveVivo(act.carpeta, b.agent))
+    if (!v) return [409, { error: 'Ese agente no está respondiendo ahora.' }]
+    v.cancelacion.cancelar()
+    log.info(`chat cancelado agente=${b.agent} sid=${v.sid.slice(0, 8)}`)
+    return [200, { ok: true }]
   }
 
   function historial(q: Record<string, string>): Resp {
@@ -214,6 +228,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     const escritos = new CajaArchivos()
     const enVivo = new CajaVivo()
     const uso = new CajaContexto()
+    const cancelacion = new Cancelacion()
     const ctx = contexto(act, def, { dirsExtra: config.oficinaDirsExtra, catalogo: d.catalogo?.(), config })
     // consultas a colegas: el token vive lo que dura este chat. Si el servidor MCP no arrancó, el chat sale igual.
     const mcp = d.mcp?.()
@@ -226,7 +241,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     let resultado: Resp
     try {
       resultado = await runner.conCarrilDe(carpeta, agente, async (): Promise<Resp> => {
-        vivos.set(claveVivo(carpeta, agente), { sid, caja: enVivo })
+        vivos.set(claveVivo(carpeta, agente), { sid, caja: enVivo, cancelacion })
         const envExtra: Record<string, string> = { ...entorno(ctx) }
         if (mcpUrl !== undefined && mcp) envExtra[variableTokenMCP] = mcp.emitir({ oficina: carpeta, agente, sid, perfil: ctx.perfilMCP, interactivo: true })
         try {
@@ -235,7 +250,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           const activa = store.estaActiva(sid)
           // el cartel: fijo arriba («Respondiéndote») y abajo lo que va haciendo en vivo (sin IA)
           const texto = await runner.actividad.seguir({ oficina: carpeta, agente, origen: 'chat', tarea: 'Respondiéndote', extra: caja.observador(escritos.observador(uso.observador(enVivo.observador()))) },
-            (obs) => runner.ejecutarChat({ agente, mensaje, sid, activa, carpeta, obs, envExtra, armar: (p) => argumentos(config, ctx, p) }))
+            (obs) => runner.ejecutarChat({ agente, mensaje, sid, activa, carpeta, obs, envExtra, cancelacion, armar: (p) => argumentos(config, ctx, p) }))
           store.marcarActiva(sid)
           const guardado = texto === '' ? '(sin respuesta)' : texto
           store.agregar(sid, 'a', guardado)
@@ -264,6 +279,17 @@ export function rutasChat(d: DepsChat): RutaNucleo {
           }
           return [200, r]
         } catch (e) {
+          if (e instanceof ClaudeError && e.tipo === 'cancelado') {
+            // la persona lo cortó: queda dicho en la charla (sin error ni aviso) y lo que alcanzó a hacer, para mostrarlo
+            try { store.agregar(sid, 'a', e.mensaje) } catch {}
+            const todos = enVivo.valor
+            let fin = todos.length
+            while (fin > 0 && todos[fin - 1]!.t === 'texto') fin--
+            const r: Obj = { cancelado: true, reply: e.mensaje }
+            const pasos = todos.slice(0, fin).map((p) => pasoJSON(p, carpeta, act.oficina))
+            if (pasos.length > 0) r.pasos = pasos
+            return [200, r]
+          }
           if (e instanceof ClaudeError) {
             try { store.agregar(sid, 'a', 'No pude responder: ' + e.mensaje, true) } catch {}
             const av = avisos.crear({ oficina: carpeta, tipo: 'error', agente, texto: 'No pudo responder: ' + e.mensaje, ref: sid })
@@ -372,6 +398,7 @@ export function rutasChat(d: DepsChat): RutaNucleo {
     if (seccion === 'sesiones' && n === 2) return method === 'GET' ? sesiones(query) : no405
     if (seccion === 'chat' && n === 2) return method === 'POST' ? chat(body) : no405
     if (seccion === 'chat' && n === 3 && a2 === 'vivo') return method === 'GET' ? vivo(query) : no405
+    if (seccion === 'chat' && n === 3 && a2 === 'cancelar') return method === 'POST' ? cancelar(body) : no405
     if (seccion === 'chat' && n === 3 && a2 === 'contexto') return method === 'POST' ? desgloseContexto(body) : no405
     if (seccion === 'actividad' && n === 2) {
       if (method !== 'GET') return no405

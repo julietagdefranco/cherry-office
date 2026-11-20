@@ -43,8 +43,25 @@ export type TurnoConPermiso = {
 /** Algo que claude no hizo por falta de permiso (un elemento de `permission_denials`). */
 export type Denegacion = { herramienta: string; input: Obj }
 
+/** Pedido de cancelar una corrida desde afuera (el botón «Detener» del chat). Se pasa a `lanzar`, que lo ata al proceso:
+ *  `cancelar()` lo termina (y, si no responde en la gracia, lo mata) y la corrida lanza `ClaudeError('cancelado')`. */
+export class Cancelacion {
+  cancelado = false
+  private accion?: () => void
+  cancelar() {
+    if (this.cancelado) return
+    this.cancelado = true
+    this.accion?.()
+  }
+  /** Lo que hace `cancelar()`. Si ya se canceló, lo hace enseguida (se canceló antes de que arrancara el proceso). */
+  atar(accion: () => void) {
+    this.accion = accion
+    if (this.cancelado) accion()
+  }
+}
+
 /** Parámetros de un mensaje de chat (`ejecutarChat`). */
-export type ParamsChat = { agente: string; mensaje: string; sid: string; activa: boolean; carpeta?: string; armar: ArmarArgumentos; obs?: Observador; envExtra?: Record<string, string> }
+export type ParamsChat = { agente: string; mensaje: string; sid: string; activa: boolean; carpeta?: string; armar: ArmarArgumentos; obs?: Observador; envExtra?: Record<string, string>; cancelacion?: Cancelacion }
 
 /** `permission_denials` de la salida JSON de claude: `[{tool_name, tool_use_id, tool_input}]`. */
 export function denegaciones(json: Obj | undefined): Denegacion[] {
@@ -58,7 +75,7 @@ export function denegaciones(json: Obj | undefined): Denegacion[] {
   return out
 }
 
-export type TipoErrorClaude = 'sin_claude' | 'sin_proyecto' | 'timeout' | 'no_ejecuta' | 'login' | 'claude' | 'cerrando'
+export type TipoErrorClaude = 'sin_claude' | 'sin_proyecto' | 'timeout' | 'no_ejecuta' | 'login' | 'claude' | 'cerrando' | 'cancelado'
 
 export const mensajeLogin = "Claude Code todavía no tiene la sesión iniciada. Usá «Iniciar sesión» en la app o corré 'claude auth login' en la Terminal."
 
@@ -77,6 +94,7 @@ export class ClaudeError extends Error {
       case 'login': return mensajeLogin
       case 'claude': return this.detalle
       case 'cerrando': return 'La app se está cerrando.'
+      case 'cancelado': return 'Cancelaste esta respuesta.'
     }
   }
   get status() { return this.tipo === 'timeout' ? 504 : 500 }
@@ -100,10 +118,12 @@ class Proceso {
   termino = false
 
   matar(forzar: boolean) {
+    // ya salió: no hay nada que cancelar (y una corrida que terminó sola no cuenta como cancelada)
+    if (this.termino) return
     this.cancelado = true
     const h = this.hijo
     // el pid existe apenas vuelve spawn(): no esperar al evento 'spawn' (un shutdown en ese instante lo dejaba suelto)
-    if (!h || this.termino || h.pid === undefined) return
+    if (!h || h.pid === undefined) return
     if (esWindows) {
       // sin /F, taskkill solo le pide cerrar a las ventanas: claude (consola, sin ventana) no se entera. Siempre /F.
       spawnSync(taskkill, ['/PID', String(h.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
@@ -417,7 +437,7 @@ export class ClaudeRunner {
     const flag = p.activa ? '--resume' : '--session-id'
     const correr = async (f: '--resume' | '--session-id') => {
       const res = await this.lanzar(p.armar({ agente: p.agente, mensaje: p.mensaje, sid: p.sid, flag: f }),
-        { timeout: this.config.timeout, cwd: p.carpeta, envExtra: p.envExtra ?? {}, alLinea: lector(p.obs) })
+        { timeout: this.config.timeout, cwd: p.carpeta, envExtra: p.envExtra ?? {}, alLinea: lector(p.obs), cancelacion: p.cancelacion })
       if (res.timedOut) throw new ClaudeError('timeout')
       if (this.cerrado) throw new ClaudeError('cerrando')
       return corrida(res)
@@ -488,7 +508,7 @@ export class ClaudeRunner {
   }
 
   /** Lanza claude con `args` y espera. Un fallo de arranque es `no_ejecuta`. */
-  async lanzar(args: string[], { timeout, cwd: cwdPedido, envExtra = {}, alLinea }: { timeout: number; cwd?: string; envExtra?: Record<string, string>; alLinea?: (l: string) => void }): Promise<ProcResult> {
+  async lanzar(args: string[], { timeout, cwd: cwdPedido, envExtra = {}, alLinea, cancelacion }: { timeout: number; cwd?: string; envExtra?: Record<string, string>; alLinea?: (l: string) => void; cancelacion?: Cancelacion }): Promise<ProcResult> {
     const exe = this.claudePath
     if (exe === undefined) throw new ClaudeError('sin_claude')
     if (this.cerrado) throw new ClaudeError('cerrando')
@@ -502,12 +522,23 @@ export class ClaudeRunner {
     await this.limite.adquirir()
     try {
       if (this.cerrado) throw new ClaudeError('cerrando')
+      if (cancelacion?.cancelado) throw new ClaudeError('cancelado')
       // a la lista antes de lanzarlo (sin await en el medio): shutdown() lo ve aunque todavía no haya llegado 'spawn'
       this.vivos.add(p)
-      return await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea: this.conLimites(alLinea, args.includes('--strict-mcp-config')), stdin: this.mensajePorStdin },
+      // cancelar = terminar y, si no responde en la gracia, matar (como el timeout)
+      cancelacion?.atar(() => {
+        p.matar(false)
+        const t = setTimeout(() => p.matar(true), this.grace * 1000)
+        t.unref()
+      })
+      const res = await p.correr(exe, args, { cwd, env, timeout, grace: this.grace, alLinea: this.conLimites(alLinea, args.includes('--strict-mcp-config')), stdin: this.mensajePorStdin },
         () => {}, () => this.vivos.delete(p))
+      // lo que dejó una corrida cancelada (salida cortada, código de señal) no es un resultado ni un error de claude
+      if (cancelacion?.cancelado && p.cancelado) throw new ClaudeError('cancelado')
+      return res
     } catch (e) {
       if (e instanceof ClaudeError) throw e
+      if (cancelacion?.cancelado) throw new ClaudeError('cancelado')
       throw new ClaudeError('no_ejecuta', e instanceof Error ? e.message : String(e))
     } finally {
       this.vivos.delete(p)

@@ -26,6 +26,10 @@
   var sesiones = {};      // id -> session uuid
   var chats = {};         // id -> [{r, t, e}]  (cache en memoria)
   var enCurso = {};       // id -> true mientras espera respuesta
+  var colas = {};         // id -> [{t, nombres, archivos, eleccion, sesion, guardar}]: mensajes que esperan a que el agente termine
+  var pausadas = {};      // id -> true: la cola no sigue sola (lo anterior se cortó o falló) hasta que la persona diga «Seguir»
+  var cancelando = {};    // id -> true entre «Detener» y que el agente pare
+  var repintarChat = null;    // {id, fn}: repinta la charla abierta (mensajes, cola y botones) sin rearmar el panel
   /* modelo y esfuerzo elegidos en cada charla (por sesión; se recuerdan en este navegador). Sin elegir: los del agente */
   var CLAVE_ELECCION = 'oficina.charla.eleccion';
   function elecciones() { try { return JSON.parse(localStorage.getItem(CLAVE_ELECCION) || '{}') || {}; } catch (e) { return {}; } }
@@ -53,6 +57,82 @@
       }).catch(function () {}).then(function () { if (enCurso[id]) setTimeout(paso, 700); });
     }
     setTimeout(paso, 300);
+  }
+
+  /* ---- enviar, cola y «Detener» ---- */
+  function repintar(id) { if (repintarChat && repintarChat.id === id && actual === id && pestana === 'chat') repintarChat.fn(); }
+
+  /* Manda un mensaje ya leído (con sus archivos) y, al terminar, sigue con el primero de la cola. Vive afuera de la charla
+     pintada: la cola sigue andando aunque la persona cambie de pestaña o de agente. */
+  function enviarMensaje(id, m) {
+    if (!App.agente(id)) return;
+    ocupado(id, true);
+    delete vivos[id]; delete cancelando[id]; delete pausadas[id];
+    seguirVivo(id);
+    (chats[id] = chats[id] || []).push({ r: 'u', t: m.t, adj: m.nombres });
+    repintar(id);
+    if (App.Actividad) setTimeout(App.Actividad.ya, 300);
+    var cuerpo = Object.assign({ agent: id, message: m.t, session: m.sesion }, m.eleccion);
+    if (m.archivos.length) cuerpo.archivos = m.archivos;
+    api.post('/api/chat', cuerpo).then(function (r) {
+      if (App.Actividad) App.Actividad.ya();
+      (chats[id] = chats[id] || []).push({ r: 'a', t: r.reply || '(sin respuesta)', pasos: r.pasos });
+      if (r.cancelado) pausadas[id] = true;   // lo cortó la persona: lo que sigue en la cola espera su OK
+      if (r.contexto && sesiones[id] === m.sesion) App.ChipContexto.fijar(id, r.contexto);
+      if (m.guardar) m.guardar(m.archivos);
+    }).catch(function (e) {
+      pausadas[id] = true;                    // falló: no mandarle más cosas encima sin que la persona lo vea
+      (chats[id] = chats[id] || []).push({ r: 'a', t: 'No pude responder: ' + e.message, e: true });
+    }).then(function () { return cargarConsultas(id); }).then(function () {
+      delete vivos[id]; delete cancelando[id];
+      ocupado(id, false);
+      if (actual === id && pestana === 'chat') pintar();   // si no, el aviso llega por /api/actividad (banner y faro)
+      if (App.Nav) App.Nav.refrescar();                    // la lista de charlas: título, último mensaje y orden
+      seguirCola(id);
+    });
+  }
+
+  /* manda el primero de la cola, si el agente está libre y la cola no está en pausa */
+  function seguirCola(id) {
+    var cola = colas[id];
+    if (!cola || !cola.length || enCurso[id] || pausadas[id]) return;
+    var m = cola.shift();
+    if (!cola.length) delete colas[id];
+    enviarMensaje(id, m);
+  }
+
+  /* la cola es de la charla abierta: al cambiar de charla (nueva o una guardada) se descarta */
+  function soltarCola(id) { delete colas[id]; delete pausadas[id]; }
+
+  /* «Detener»: corta lo que el agente está haciendo; la cola queda en pausa hasta que la persona la reanude */
+  function detener(id) {
+    if (!enCurso[id] || cancelando[id]) return;
+    cancelando[id] = true; pausadas[id] = true;
+    repintar(id);
+    api.post('/api/chat/cancelar', { agent: id }).catch(function (e) {
+      // 409: ya había terminado. Nada se cortó, así que la cola sigue como si nada.
+      delete cancelando[id]; delete pausadas[id];
+      if (e.status !== 409) App.fallo(e);
+      repintar(id);
+      seguirCola(id);
+    });
+  }
+
+  /* los mensajes en cola, como burbujas pendientes debajo de la charla, cada uno con su «Sacar» */
+  function bloqueCola(a) {
+    var cola = colas[a.id] || [];
+    var nota = pausadas[a.id] ? 'En pausa: lo anterior se cortó o falló' : enCurso[a.id] ? 'Salen solos cuando ' + a.nombre + ' termine' : '';
+    return h('div.cola',
+      h('div.cola-cab', h('b', cola.length === 1 ? '1 mensaje en cola' : cola.length + ' mensajes en cola'), h('span.cola-nota', nota),
+        pausadas[a.id] && !enCurso[a.id] ? h('button.btn.chico.primario', { onclick: function () { delete pausadas[a.id]; seguirCola(a.id); } }, 'Seguir') : null),
+      cola.map(function (m, i) {
+        return h('div.cola-item',
+          h('div.cola-txt', m.t || 'Te paso estos archivos.', m.nombres.length ? h('span.cola-adj', App.icono('clip'), m.nombres.length === 1 ? m.nombres[0] : m.nombres.length + ' archivos') : null),
+          h('button.btn.fantasma.chico.icono', { title: 'Sacar de la cola', onclick: function () {
+            cola.splice(i, 1); if (!cola.length) delete colas[a.id];
+            repintar(a.id);
+          } }, App.icono('cerrar')));
+      }));
   }
 
   /* Consultas a colegas (Fase 4): /api/consultas?session= trae lo que el agente consultó en esa conversación; cada una trae
@@ -335,6 +415,7 @@
     App.add(cuerpo, lista, sug);
     var txt = h('textarea.campo', { rows: 1, placeholder: 'Escribile a ' + a.nombre + '…', maxlength: 20000 });
     var enviar = h('button.btn.primario.icono', { title: 'Enviar (Enter)', onclick: mandar }, App.icono('enviar'));
+    var parar = h('button.btn.peligro.icono', { style: { display: 'none' }, onclick: function () { detener(a.id); } }, App.icono('parar'));
     var adj = App.Adjuntos();
     adj.zona(cuerpo); adj.zona(pie, txt);
     txt.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); mandar(); } });
@@ -344,8 +425,8 @@
     var claveEleccion = function () { return sesiones[a.id] || 'nueva:' + a.id; };
     var selector = App.SelectorCharla({ modelo: a.modelo, esfuerzo: a.esfuerzo, valor: eleccionDe(claveEleccion()),
       alCambiar: function (v) { guardarEleccion(claveEleccion(), v); } });
-    App.add(pie, adj.lista, adj.error, adj.input, h('div.redactar', adj.boton, txt, enviar),
-      h('div.pie-charla', selector, h('div.ayuda', 'Enter para enviar · Mayús+Enter para otra línea · arrastrá o pegá archivos')));
+    App.add(pie, adj.lista, adj.error, adj.input, h('div.redactar', adj.boton, txt, parar, enviar),
+      h('div.pie-charla', selector, h('div.ayuda', 'Enter para enviar (con ' + a.nombre + ' trabajando, queda en cola) · Mayús+Enter para otra línea · arrastrá o pegá archivos')));
 
     function render() {
       App.vaciar(lista); App.vaciar(sug);
@@ -387,50 +468,44 @@
           if (abajo) cuerpo.scrollTop = cuerpo.scrollHeight;
         } };
       }
+      if ((colas[a.id] || []).length) lista.appendChild(bloqueCola(a));
       cuerpo.scrollTop = cuerpo.scrollHeight;
-      enviar.disabled = !!enCurso[a.id];
+      /* con el agente trabajando se puede seguir escribiendo (queda en cola) y aparece «Detener» */
+      var ocup = !!enCurso[a.id];
+      enviar.title = ocup ? 'Dejar en cola (Enter): sale cuando ' + a.nombre + ' termine' : 'Enviar (Enter)';
+      txt.placeholder = ocup ? 'Dejalo en cola…' : 'Escribile a ' + a.nombre + '…';
+      parar.style.display = ocup ? '' : 'none';
+      parar.disabled = !!cancelando[a.id];
+      parar.title = cancelando[a.id] ? 'Deteniendo…' : 'Detener lo que está haciendo ' + a.nombre;
       /* «Sacar tareas»: solo con una charla que tenga algo tuyo y sin respuesta en curso */
       var sacar = App.dom.derecho.querySelector('.sacar-tareas');
       if (sacar) sacar.disabled = !!enCurso[a.id] || !sesiones[a.id] || !msgs.some(function (m) { return m.r === 'u'; });
     }
 
+    var leyendo = false;
     function mandar() {
       var t = txt.value.trim();
-      if ((!t && !adj.hay()) || enCurso[a.id]) return;
+      if ((!t && !adj.hay()) || leyendo) return;
       if (!sesiones[a.id]) {
         sesiones[a.id] = App.uuid();
         guardarEleccion(sesiones[a.id], eleccionDe('nueva:' + a.id)); guardarEleccion('nueva:' + a.id, null);
       }
-      var id = a.id, nombres = adj.nombres(), leidos = [], eleccion = selector.valor(), cuerpoSesion = sesiones[a.id];
-      ocupado(id, true);
-      delete vivos[id];
-      seguirVivo(id);
+      var id = a.id, nombres = adj.nombres(), eleccion = selector.valor(), sesion = sesiones[a.id];
+      leyendo = true;
       adj.leer().then(function (archivos) {
-        leidos = archivos;
-        (chats[id] = chats[id] || []).push({ r: 'u', t: t, adj: nombres });
         txt.value = ''; txt.style.height = '';
         delete borradores[id];
         adj.vaciar();
-        if (actual === id && pestana === 'chat') render();
-        if (App.Actividad) setTimeout(App.Actividad.ya, 300);
-        var cuerpo = Object.assign({ agent: id, message: t, session: sesiones[id] }, eleccion);
-        if (archivos.length) cuerpo.archivos = archivos;
-        return api.post('/api/chat', cuerpo);
-      }).then(function (r) {
-        if (App.Actividad) App.Actividad.ya();
-        (chats[id] = chats[id] || []).push({ r: 'a', t: r.reply || '(sin respuesta)', pasos: r.pasos });
-        if (r.contexto && sesiones[id] === cuerpoSesion) App.ChipContexto.fijar(id, r.contexto);
-        adj.guardarEnBiblioteca(leidos);
+        var m = { t: t, nombres: nombres, archivos: archivos, eleccion: eleccion, sesion: sesion, guardar: adj.guardarEnBiblioteca };
+        // el agente está ocupado: queda en la cola y sale solo cuando termine
+        if (enCurso[id]) { (colas[id] = colas[id] || []).push(m); repintar(id); }
+        else enviarMensaje(id, m);
       }).catch(function (e) {
-        (chats[id] = chats[id] || []).push({ r: 'a', t: 'No pude responder: ' + e.message, e: true });
-      }).then(function () { return cargarConsultas(id); }).then(function () {
-        delete vivos[id];
-        ocupado(id, false);
-        if (actual === id && pestana === 'chat') pintar();   // si no, el aviso llega por /api/actividad (banner y faro)
-        if (App.Nav) App.Nav.refrescar();                    // la lista de charlas: título, último mensaje y orden
-      });
+        adj.error.textContent = e.message;
+      }).then(function () { leyendo = false; });
     }
 
+    repintarChat = { id: a.id, fn: function () { if (lista.isConnected) render(); } };
     if (chats[a.id]) render();
     else {
       lista.appendChild(h('div.vacio', h('span.giro')));
@@ -911,7 +986,7 @@
   /* charla nueva con el agente: sesión nueva y vacía (la anterior queda en la lista de charlas) */
   function nueva(id) {
     if (!App.agente(id)) return;
-    sesiones[id] = App.uuid(); chats[id] = []; delete borradores[id];
+    sesiones[id] = App.uuid(); chats[id] = []; delete borradores[id]; soltarCola(id);
     App.ChipContexto.fijar(id, null);
     ladoMovil = false;
     sesionFija = sesiones[id];
@@ -922,7 +997,7 @@
   /* abre la conversación de una ejecución en la pestaña de chat (se puede seguir escribiendo en esa sesión) */
   function abrirSesion(a, sid) {
     api.get('/api/historial', { agent: a.id, session: sid }).then(function (r) {
-      sesiones[a.id] = sid;
+      sesiones[a.id] = sid; soltarCola(a.id);
       chats[a.id] = (r.msgs || []).map(function (m) { return { r: m.r, t: m.t, e: !!m.e }; });
       App.ChipContexto.fijar(a.id, r.contexto);
       pestana = 'chat';

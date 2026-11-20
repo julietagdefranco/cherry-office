@@ -160,6 +160,52 @@ describe('ClaudeRunner', () => {
     expect(r.status).toBe(200)
   })
 
+  test('cancelar un chat en curso: corta el proceso (y su hijo), responde cancelado y la charla sigue usable', async () => {
+    const sb = new Sandbox()
+    const b = await sb.backend()
+    const tarea = chat(b, { message: 'LENTO' })
+    expect(await esperar(() => sb.childPid !== undefined)).toBe(true)
+    const pid = sb.childPid!
+    expect(vivo(pid)).toBe(true)
+    const c = await llamar(b, 'POST', '/api/chat/cancelar', { body: { agent: 'betty' } })
+    expect(c.status).toBe(200)
+    const r = await tarea
+    expect(r.status).toBe(200)
+    expect(r.obj.cancelado).toBe(true)
+    expect(r.obj.reply).toBe('Cancelaste esta respuesta.')
+    expect(await esperar(() => !vivo(pid), 3), 'el hijo del claude falso sigue vivo').toBe(true)
+    // queda dicho en la charla, sin ser un error
+    const h = msgs(await historial(b, { session: U.a }))
+    expect(h.at(-1)).toEqual({ r: 'a', t: 'Cancelaste esta respuesta.' })
+    // el carril quedó libre y no hay nada más para cancelar
+    expect((await llamar(b, 'POST', '/api/chat/cancelar', { body: { agent: 'betty' } })).status).toBe(409)
+    const r2 = await chat(b, { message: 'ok' })
+    expect(r2.status).toBe(200)
+    expect(r2.obj.cancelado).toBeUndefined()
+  })
+
+  test('cancelar sin chat en curso o con un agente que no existe', async () => {
+    const sb = new Sandbox()
+    const b = await sb.backend()
+    expect((await llamar(b, 'POST', '/api/chat/cancelar', { body: { agent: 'betty' } })).status).toBe(409)
+    expect((await llamar(b, 'POST', '/api/chat/cancelar', { body: { agent: 'nadie' } })).status).toBe(400)
+    expect((await llamar(b, 'POST', '/api/chat/cancelar', { body: {} })).status).toBe(400)
+    expect((await llamar(b, 'GET', '/api/chat/cancelar')).status).toBe(405)
+  })
+
+  test('cancelar solo corta al agente pedido: otro que también está respondiendo sigue', async () => {
+    const sb = new Sandbox()
+    const b = await sb.backend()
+    const lento = chat(b, { message: 'LENTO' })
+    expect(await esperar(() => sb.childPid !== undefined)).toBe(true)
+    const otro = llamar(b, 'POST', '/api/chat', { body: { agent: 'marce', message: 'DORMIR', session: U.b } })
+    await llamar(b, 'POST', '/api/chat/cancelar', { body: { agent: 'betty' } })
+    expect((await lento).obj.cancelado).toBe(true)
+    const o = await otro
+    expect(o.status).toBe(200)
+    expect(o.obj.cancelado).toBeUndefined()
+  })
+
   test("shutdown() en pleno chat termina el proceso, el chat devuelve 'cerrando' y no queda huérfano", async () => {
     const sb = new Sandbox()
     const b = await sb.backend()
